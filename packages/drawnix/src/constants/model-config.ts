@@ -99,6 +99,8 @@ export interface ParamConfig {
   modelType: ModelType;
 }
 
+export const SORA_MODE_PARAM_ID = 'sora_mode';
+
 /**
  * 图片模型默认参数
  */
@@ -1155,6 +1157,20 @@ export const VIDEO_PARAMS: ParamConfig[] = [
     ],
     defaultValue: '10',
     compatibleModels: SORA_2_PRO_MODEL_IDS,
+    modelType: 'video',
+  },
+  {
+    id: SORA_MODE_PARAM_ID,
+    label: '调用方式',
+    shortLabel: '方式',
+    description: '切换 Sora 的前端时长方案',
+    valueType: 'enum',
+    options: [
+      { value: 'web', label: '网页' },
+      { value: 'api', label: 'API' },
+    ],
+    defaultValue: 'web',
+    compatibleModels: [...SORA_2_MODEL_IDS, ...SORA_2_PRO_MODEL_IDS],
     modelType: 'video',
   },
   // Veo 标清和 Sora 2 尺寸参数（720p）

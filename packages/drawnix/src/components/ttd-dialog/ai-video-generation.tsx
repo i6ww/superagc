@@ -40,17 +40,18 @@ import type {
 } from '../../types/video.types';
 import { ModelDropdown } from '../ai-input-bar/ModelDropdown';
 import { ParametersDropdown } from '../ai-input-bar/ParametersDropdown';
+import { type ModelConfig } from '../../constants/model-config';
 import {
-  getCompatibleParams,
-  type ModelConfig,
-} from '../../constants/model-config';
-import {
-  getVideoModelConfig,
-  getDefaultModelParams,
   supportsStoryboardMode,
   getStoryboardModeConfig,
   normalizeVideoModel,
 } from '../../constants/video-model-config';
+import {
+  getDefaultVideoExtraParams,
+  getEffectiveVideoCompatibleParams,
+  getEffectiveVideoDefaultParams,
+  getEffectiveVideoModelConfigForSelection,
+} from '../../services/video-binding-utils';
 import {
   formatStoryboardPrompt,
   parseStoryboardPrompt,
@@ -145,13 +146,41 @@ const AIVideoGeneration = ({
   }, [currentModel, currentModelRef, videoModels]);
 
   // Use useMemo to ensure modelConfig and defaultParams update when currentModel changes
+  // 额外参数（如 aspect_ratio）
+  const [videoSelectedParams, setVideoSelectedParams] = useState<
+    Record<string, string>
+  >(() =>
+    getDefaultVideoExtraParams(
+      currentModel,
+      currentModelRef || currentModel
+    )
+  );
+  const compatibleVideoParams = React.useMemo(
+    () =>
+      getEffectiveVideoCompatibleParams(
+        currentModel,
+        currentModelRef || currentModel,
+        videoSelectedParams
+      ),
+    [currentModel, currentModelRef, videoSelectedParams]
+  );
   const modelConfig = React.useMemo(
-    () => getVideoModelConfig(currentModel),
-    [currentModel]
+    () =>
+      getEffectiveVideoModelConfigForSelection(
+        currentModel,
+        currentModelRef || currentModel,
+        videoSelectedParams
+      ),
+    [currentModel, currentModelRef, videoSelectedParams]
   );
   const defaultParams = React.useMemo(
-    () => getDefaultModelParams(currentModel),
-    [currentModel]
+    () =>
+      getEffectiveVideoDefaultParams(
+        currentModel,
+        currentModelRef || currentModel,
+        videoSelectedParams
+      ),
+    [currentModel, currentModelRef, videoSelectedParams]
   );
 
   // Duration and size state
@@ -159,17 +188,12 @@ const AIVideoGeneration = ({
     initialDuration?.toString() || defaultParams.duration
   );
   const [size, setSize] = useState(initialSize || defaultParams.size);
-
-  // 额外参数（如 aspect_ratio）
-  const [videoSelectedParams, setVideoSelectedParams] = useState<
-    Record<string, string>
-  >({});
   const hasCompatibleParams = React.useMemo(() => {
     // 排除 size 和 duration（已有专用 UI），只看是否有额外参数
-    return getCompatibleParams(currentModel).some(
+    return compatibleVideoParams.some(
       (p) => p.id !== 'size' && p.id !== 'duration'
     );
-  }, [currentModel]);
+  }, [compatibleVideoParams]);
   const handleVideoParamChange = useCallback(
     (paramId: string, value: string) => {
       if (!value || value === 'default') {
@@ -284,7 +308,12 @@ const AIVideoGeneration = ({
           currentModelRef
         );
         setCurrentModelRef(getModelRefFromConfig(matchedModel) || null);
-        setVideoSelectedParams({});
+        setVideoSelectedParams(
+          getDefaultVideoExtraParams(
+            newModel,
+            getModelRefFromConfig(matchedModel) || newModel
+          )
+        );
       }
     };
     geminiSettings.addListener(handleSettingsChange);
@@ -482,16 +511,20 @@ const AIVideoGeneration = ({
     setUploadedImages([]);
     setError(null);
     // Reset duration and size to defaults
-    const newDefaults = getDefaultModelParams(currentModel);
-    setDuration(newDefaults.duration);
-    setSize(newDefaults.size);
+    setDuration(defaultParams.duration);
+    setSize(defaultParams.size);
     // Clear manual edit mode
     setIsManualEdit(false);
     // Clear storyboard mode
     setStoryboardEnabled(false);
     setStoryboardScenes([]);
     // Clear extra params
-    setVideoSelectedParams({});
+    setVideoSelectedParams(
+      getDefaultVideoExtraParams(
+        currentModel,
+        currentModelRef || currentModel
+      )
+    );
     window.dispatchEvent(new CustomEvent('ai-video-clear'));
   };
 
@@ -604,6 +637,19 @@ const AIVideoGeneration = ({
       setDuration(durationValue);
     }
 
+    const restoredParams =
+      task.params.params && typeof task.params.params === 'object'
+        ? Object.entries(task.params.params as Record<string, unknown>).reduce<
+            Record<string, string>
+          >((acc, [key, value]) => {
+            if (value !== undefined && value !== null && String(value).trim()) {
+              acc[key] = String(value);
+            }
+            return acc;
+          }, {})
+        : {};
+    setVideoSelectedParams(restoredParams);
+
     if (task.params.size) {
       // console.log('Setting size to:', task.params.size);
       setSize(task.params.size);
@@ -616,7 +662,11 @@ const AIVideoGeneration = ({
       setAllSelectedImages(task.params.uploadedImages);
       // 按当前模型过滤显示（这里使用任务中的模型配置）
       const taskModel = task.params.model || currentModel;
-      const taskModelConfig = getVideoModelConfig(taskModel);
+      const taskModelConfig = getEffectiveVideoModelConfigForSelection(
+        taskModel,
+        (task.params.modelRef as ModelRef | null) || taskModel,
+        restoredParams
+      );
       const maxCount = taskModelConfig.imageUpload.maxCount;
       const labels = taskModelConfig.imageUpload.labels || [];
 
@@ -819,15 +869,26 @@ const AIVideoGeneration = ({
                       currentModelRef
                     )}
                     onSelect={(value) => {
-                      setCurrentModel(value as VideoModel);
+                      const nextModel = value as VideoModel;
+                      setCurrentModel(nextModel);
                       setCurrentModelRef(null);
+                      setVideoSelectedParams(
+                        getDefaultVideoExtraParams(nextModel, nextModel)
+                      );
                       onModelChange(value);
                       onModelRefChange?.(null);
                     }}
                     onSelectModel={(model: ModelConfig) => {
-                      setCurrentModel(model.id as VideoModel);
+                      const nextModel = model.id as VideoModel;
+                      setCurrentModel(nextModel);
                       const nextModelRef = getModelRefFromConfig(model);
                       setCurrentModelRef(nextModelRef);
+                      setVideoSelectedParams(
+                        getDefaultVideoExtraParams(
+                          nextModel,
+                          nextModelRef || nextModel
+                        )
+                      );
                       onModelChange(model.id);
                       onModelRefChange?.(nextModelRef);
                     }}
@@ -850,6 +911,7 @@ const AIVideoGeneration = ({
                 <ParametersDropdown
                   selectedParams={videoSelectedParams}
                   onParamChange={handleVideoParamChange}
+                  compatibleParams={compatibleVideoParams}
                   modelId={currentModel}
                   language={language}
                   disabled={isGenerating}
@@ -861,6 +923,7 @@ const AIVideoGeneration = ({
             {/* Video model options: duration & size */}
             <VideoModelOptions
               model={currentModel}
+              configOverride={modelConfig}
               duration={duration}
               size={size}
               onDurationChange={setDuration}

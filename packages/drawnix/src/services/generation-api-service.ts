@@ -25,7 +25,7 @@ import {
 } from '../constants/model-config';
 import {
   getAdapterContextFromSettings,
-  resolveAdapterForModel,
+  resolveAdapterForInvocation,
 } from './model-adapters';
 import type { ModelRef } from '../utils/settings-manager';
 
@@ -254,9 +254,11 @@ class GenerationAPIService {
         | ModelRef
         | null
         | undefined;
-      const adapter = requestedModel
-        ? resolveAdapterForModel(requestedModel, 'image')
-        : resolveAdapterForModel(DEFAULT_IMAGE_MODEL_ID, 'image');
+      const adapter = resolveAdapterForInvocation(
+        'image',
+        requestedModel || DEFAULT_IMAGE_MODEL_ID,
+        requestedModelRef || null
+      );
 
       if (!adapter || adapter.kind !== 'image') {
         throw new Error(`No image adapter for model: ${requestedModel}`);
@@ -387,9 +389,11 @@ class GenerationAPIService {
         | ModelRef
         | null
         | undefined;
-      const adapter = requestedModel
-        ? resolveAdapterForModel(requestedModel, 'video')
-        : resolveAdapterForModel('veo3', 'video');
+      const adapter = resolveAdapterForInvocation(
+        'video',
+        requestedModel || 'veo3',
+        requestedModelRef || null
+      );
 
       if (!adapter || adapter.kind !== 'video') {
         throw new Error(`No video adapter for model: ${requestedModel}`);

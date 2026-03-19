@@ -31,7 +31,7 @@ export interface GeminiSettings {
 }
 
 export type ProviderType = 'openai-compatible' | 'gemini-compatible' | 'custom';
-export type ProviderAuthType = 'bearer' | 'header';
+export type ProviderAuthType = 'bearer' | 'header' | 'query' | 'custom';
 
 export interface ProviderCapabilities {
   supportsModelsEndpoint: boolean;
@@ -324,6 +324,13 @@ class SettingsManager {
     return 'custom';
   }
 
+  private inferProviderAuthType(
+    baseUrl: string,
+    providerType?: ProviderType | null
+  ): ProviderAuthType {
+    return 'bearer';
+  }
+
   private normalizeCapabilities(value: unknown): ProviderCapabilities {
     const capabilities =
       value && typeof value === 'object'
@@ -355,15 +362,19 @@ class SettingsManager {
   }
 
   private buildLegacyDefaultProfile(gemini: GeminiSettings): ProviderProfile {
+    const providerType = this.inferProviderType(
+      gemini.baseUrl || DEFAULT_SETTINGS.gemini.baseUrl
+    );
     return {
       id: LEGACY_DEFAULT_PROVIDER_PROFILE_ID,
       name: '默认供应商',
-      providerType: this.inferProviderType(
-        gemini.baseUrl || DEFAULT_SETTINGS.gemini.baseUrl
-      ),
+      providerType,
       baseUrl: gemini.baseUrl || DEFAULT_SETTINGS.gemini.baseUrl,
       apiKey: gemini.apiKey || '',
-      authType: 'bearer',
+      authType: this.inferProviderAuthType(
+        gemini.baseUrl || DEFAULT_SETTINGS.gemini.baseUrl,
+        providerType
+      ),
       enabled: true,
       capabilities: { ...DEFAULT_PROVIDER_CAPABILITIES },
     };
@@ -415,6 +426,14 @@ class SettingsManager {
         }
         usedIds.add(id);
 
+        const providerType: ProviderType =
+          profile.providerType === 'gemini-compatible' ||
+          profile.providerType === 'custom'
+            ? profile.providerType
+            : 'openai-compatible';
+        const baseUrl =
+          typeof profile.baseUrl === 'string' ? profile.baseUrl : '';
+
         return {
           id,
           name:
@@ -422,14 +441,16 @@ class SettingsManager {
               ? profile.name.trim()
               : `供应商 ${index + 1}`,
           iconUrl: normalizeNullableString(profile.iconUrl) || undefined,
-          providerType:
-            profile.providerType === 'gemini-compatible' ||
-            profile.providerType === 'custom'
-              ? profile.providerType
-              : 'openai-compatible',
-          baseUrl: typeof profile.baseUrl === 'string' ? profile.baseUrl : '',
+          providerType,
+          baseUrl,
           apiKey: typeof profile.apiKey === 'string' ? profile.apiKey : '',
-          authType: profile.authType === 'header' ? 'header' : 'bearer',
+          authType:
+            profile.authType === 'header' ||
+            profile.authType === 'query' ||
+            profile.authType === 'custom' ||
+            profile.authType === 'bearer'
+              ? profile.authType
+              : this.inferProviderAuthType(baseUrl, providerType),
           extraHeaders: this.normalizeStringRecord(profile.extraHeaders),
           enabled: profile.enabled !== false,
           capabilities: this.normalizeCapabilities(profile.capabilities),

@@ -99,6 +99,16 @@ export const geminiImageAdapter: ImageModelAdapter = {
   label: 'Gemini Image',
   kind: 'image',
   docsUrl: 'https://tuzi-api.apifox.cn',
+  matchProtocols: [
+    'openai.images.generations',
+    'openai.async.media',
+    'google.generateContent',
+  ],
+  matchRequestSchemas: [
+    'openai.image.basic-json',
+    'openai.async.image.form',
+    'google.generate-content.image-inline',
+  ],
   matchVendors: [ModelVendor.GEMINI],
   supportedModels: imageModelIds,
   defaultModel: DEFAULT_IMAGE_MODEL_ID,
@@ -138,6 +148,10 @@ export const geminiImageAdapter: ImageModelAdapter = {
       image: request.referenceImages,
       response_format: responseFormat || 'url',
       quality,
+      count:
+        typeof request.params?.n === 'number'
+          ? request.params.n
+          : undefined,
       model,
       modelRef: request.modelRef || null,
     });
@@ -151,6 +165,8 @@ export const geminiVideoAdapter: VideoModelAdapter = {
   label: 'Gemini Video',
   kind: 'video',
   docsUrl: 'https://tuzi-api.apifox.cn',
+  matchProtocols: ['openai.async.video'],
+  matchRequestSchemas: ['openai.video.form-input-reference'],
   matchPredicate(modelConfig) {
     if (modelConfig.type !== 'video') {
       return false;
@@ -164,12 +180,19 @@ export const geminiVideoAdapter: VideoModelAdapter = {
     const model = (request.model || DEFAULT_VIDEO_MODEL_ID) as any;
     const durationEncoded =
       model && model.startsWith('sora-2-') && /\d+s$/.test(model);
+    const adapterParams = request.params
+      ? Object.fromEntries(
+          Object.entries(request.params).filter(
+            ([key]) => key !== 'onProgress' && key !== 'onSubmitted'
+          )
+        )
+      : undefined;
     const seconds = durationEncoded
       ? undefined
       : request.duration
       ? String(request.duration)
       : model?.toString().startsWith('sora')
-      ? '10'
+      ? undefined
       : '8';
     const size = request.size || '1280x720';
     const inputReferences = toUploadedVideoImages(request.referenceImages);
@@ -182,6 +205,7 @@ export const geminiVideoAdapter: VideoModelAdapter = {
         seconds,
         size,
         inputReferences,
+        params: adapterParams,
       },
       {
         interval: 5000,

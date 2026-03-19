@@ -81,6 +81,7 @@ export async function executeImageViaAdapter(
       {
         prompt: params.prompt,
         model: params.model,
+        modelRef: params.modelRef || null,
         size: params.size,
         referenceImages: processedImages,
         params: { quality: params.quality, n: params.count, ...params.params },
@@ -197,6 +198,7 @@ export async function executeVideoViaAdapter(
       {
         prompt: params.prompt,
         model: params.model,
+        modelRef: params.modelRef || null,
         size: params.size,
         duration: durationNum,
         referenceImages: processedImages,

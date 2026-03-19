@@ -79,6 +79,7 @@ export async function generateVideo(
       model: options.model || 'veo3',
       modelRef: options.modelRef || null,
       size: options.size,
+      params: options.params,
     },
     createdAt: now,
     updatedAt: now,

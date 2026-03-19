@@ -68,7 +68,12 @@ const PROVIDER_TYPE_OPTIONS: ProviderProfile['providerType'][] = [
   'custom',
 ];
 
-const AUTH_TYPE_OPTIONS: ProviderProfile['authType'][] = ['bearer', 'header'];
+const AUTH_TYPE_OPTIONS: ProviderProfile['authType'][] = [
+  'bearer',
+  'header',
+  'query',
+  'custom',
+];
 
 const ROUTE_LABELS: Record<ModelType, string> = {
   image: '图片',
@@ -105,6 +110,12 @@ const AUTH_TYPE_META: Record<ProviderProfile['authType'], { label: string }> = {
   },
   header: {
     label: '自定义 Header',
+  },
+  query: {
+    label: 'Query 参数',
+  },
+  custom: {
+    label: '手动拼装',
   },
 };
 
@@ -224,14 +235,15 @@ function createId(prefix: string): string {
 }
 
 function createProfile(index: number): ProviderProfile {
+  const providerType: ProviderProfile['providerType'] = 'openai-compatible';
   return {
     id: createId('profile'),
     name: `供应商 ${index}`,
     iconUrl: '',
-    providerType: 'openai-compatible',
+    providerType,
     baseUrl: '',
     apiKey: '',
-    authType: 'bearer',
+    authType: inferAuthTypeForProviderType(providerType),
     enabled: true,
     capabilities: {
       supportsModelsEndpoint: true,
@@ -241,6 +253,12 @@ function createProfile(index: number): ProviderProfile {
       supportsTools: true,
     },
   };
+}
+
+function inferAuthTypeForProviderType(
+  providerType: ProviderProfile['providerType']
+): ProviderProfile['authType'] {
+  return 'bearer';
 }
 
 const ProviderAvatar = ({
@@ -1240,11 +1258,24 @@ export const SettingsDialog = ({
                 className="settings-dialog__select"
                 value={selectedProfile.providerType}
                 onChange={(event) =>
-                  updateProfile(selectedProfile.id, (profile) => ({
-                    ...profile,
-                    providerType: event.target
-                      .value as ProviderProfile['providerType'],
-                  }))
+                  updateProfile(selectedProfile.id, (profile) => {
+                    const providerType = event.target
+                      .value as ProviderProfile['providerType'];
+                    const previousDefaultAuth = inferAuthTypeForProviderType(
+                      profile.providerType
+                    );
+                    const nextDefaultAuth =
+                      inferAuthTypeForProviderType(providerType);
+
+                    return {
+                      ...profile,
+                      providerType,
+                      authType:
+                        profile.authType === previousDefaultAuth
+                          ? nextDefaultAuth
+                          : profile.authType,
+                    };
+                  })
                 }
               >
                 {PROVIDER_TYPE_OPTIONS.map((providerType) => (

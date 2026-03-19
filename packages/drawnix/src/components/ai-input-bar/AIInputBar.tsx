@@ -69,6 +69,7 @@ import {
   getCompatibleParams,
   type ModelConfig,
 } from '../../constants/model-config';
+import { getEffectiveVideoCompatibleParams } from '../../services/video-binding-utils';
 import { BUILT_IN_TOOLS } from '../../constants/built-in-tools';
 import { initializeMCP, mcpRegistry } from '../../mcp';
 import { setCanvasBoard } from '../../services/canvas-operations/canvas-insertion';
@@ -750,8 +751,15 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
     // 预计算当前模型的可用参数，避免子组件内部 stale 计算
     const compatibleParams = useMemo(() => {
       if (generationType === 'text') return [];
+      if (generationType === 'video') {
+        return getEffectiveVideoCompatibleParams(
+          selectedModel,
+          selectedModelRef || selectedModel,
+          selectedParams
+        );
+      }
       return getCompatibleParams(selectedModel);
-    }, [generationType, selectedModel]);
+    }, [generationType, selectedModel, selectedModelRef, selectedParams]);
 
     // 点击外部关闭输入框的展开状态
     useEffect(() => {
@@ -1460,22 +1468,43 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
         // 更新状态（反显到下方下拉框）
         setGenerationType(model.type as GenerationType);
         setSelectedModel(model.id);
-        setSelectedModelRef(getModelRefFromConfig(model));
+        const nextModelRef = getModelRefFromConfig(model);
+        setSelectedModelRef(nextModelRef);
         // 仅保留新模型兼容的参数，并设置默认值
-        const compatibleParams = getCompatibleParams(model.id);
+        const compatibleParams =
+          model.type === 'video'
+            ? getEffectiveVideoCompatibleParams(
+                model.id,
+                nextModelRef || model.id,
+                selectedParamsRef.current
+              )
+            : getCompatibleParams(model.id);
         const nextParams: Record<string, string> = {};
 
         // 默认 size
         const sizeParam = compatibleParams.find((p) => p.id === 'size');
+        const prevSize = selectedParamsRef.current?.size;
+        const prevSizeIsValid =
+          !prevSize ||
+          !sizeParam?.options ||
+          sizeParam.options.some((option) => option.value === prevSize);
         if (!model.id.startsWith('mj') && sizeParam) {
-          nextParams.size = getDefaultSizeForModel(model.id);
+          nextParams.size =
+            prevSize && prevSizeIsValid
+              ? prevSize
+              : getDefaultSizeForModel(model.id);
         }
 
         // 其他参数：沿用同 id 已选值，否则用默认值
         compatibleParams.forEach((p) => {
           if (p.id === 'size') return;
           const prevVal = selectedParamsRef.current?.[p.id];
-          if (prevVal) {
+          const prevValIsValid =
+            !prevVal ||
+            p.valueType !== 'enum' ||
+            !p.options ||
+            p.options.some((option) => option.value === prevVal);
+          if (prevVal && prevValIsValid) {
             nextParams[p.id] = prevVal;
           } else if (p.defaultValue) {
             nextParams[p.id] = p.defaultValue;
@@ -1533,14 +1562,26 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
 
       const sizeParam = compatibleParams.find((p) => p.id === 'size');
       const prevSize = selectedParamsRef.current?.size;
+      const prevSizeIsValid =
+        !prevSize ||
+        !sizeParam?.options ||
+        sizeParam.options.some((option) => option.value === prevSize);
       if (!selectedModel.startsWith('mj') && sizeParam) {
-        nextParams.size = prevSize || getDefaultSizeForModel(selectedModel);
+        nextParams.size =
+          prevSize && prevSizeIsValid
+            ? prevSize
+            : getDefaultSizeForModel(selectedModel);
       }
 
       compatibleParams.forEach((p) => {
         if (p.id === 'size') return;
         const prevVal = selectedParamsRef.current?.[p.id];
-        if (prevVal) {
+        const prevValIsValid =
+          !prevVal ||
+          p.valueType !== 'enum' ||
+          !p.options ||
+          p.options.some((option) => option.value === prevVal);
+        if (prevVal && prevValIsValid) {
           nextParams[p.id] = prevVal;
         } else if (p.defaultValue) {
           nextParams[p.id] = p.defaultValue;

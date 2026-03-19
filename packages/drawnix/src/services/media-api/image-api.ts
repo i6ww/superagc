@@ -19,7 +19,9 @@ import {
   aspectRatioToSize,
   parseErrorMessage,
   sleep,
+  buildProviderContextFromApiConfig,
 } from './utils';
+import { providerTransport } from '../provider-routing/provider-transport';
 
 // 重新导出工具函数，方便外部使用
 export { isAsyncImageModel, aspectRatioToSize };
@@ -116,15 +118,19 @@ export async function generateImageSync(
     model,
   });
 
-  const response = await fetchFn(`${config.baseUrl}/images/generations`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.apiKey}`,
-    },
-    body: JSON.stringify(requestBody),
-    signal,
-  });
+  const response = await providerTransport.send(
+    buildProviderContextFromApiConfig(config),
+    {
+      path: '/images/generations',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+      signal,
+      fetcher: fetchFn,
+    }
+  );
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -152,6 +158,7 @@ export async function generateImageAsync(
   const { onProgress, onSubmitted, signal, interval = 5000, maxAttempts = 1080 } = options;
   const fetchFn = config.fetchImpl || fetch;
   const baseUrl = normalizeApiBase(config.baseUrl);
+  const providerContext = buildProviderContextFromApiConfig(config, baseUrl);
   const model = params.model || config.defaultModel || 'gemini-3-pro-image-preview-async';
 
   console.log(
@@ -191,13 +198,12 @@ export async function generateImageAsync(
   console.log(`[ImageAPI] 📤 提交异步图片任务到: ${baseUrl}/v1/videos`);
 
   // 提交异步任务
-  const submitResponse = await fetchFn(`${baseUrl}/v1/videos`, {
+  const submitResponse = await providerTransport.send(providerContext, {
+    path: '/v1/videos',
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${config.apiKey}`,
-    },
     body: formData,
     signal,
+    fetcher: fetchFn,
   });
 
   console.log(`[ImageAPI] 📥 提交响应状态: ${submitResponse.status}`);
@@ -241,12 +247,11 @@ export async function generateImageAsync(
 
     await sleep(interval, signal);
 
-    const queryResponse = await fetchFn(`${baseUrl}/v1/videos/${taskRemoteId}`, {
+    const queryResponse = await providerTransport.send(providerContext, {
+      path: `/v1/videos/${taskRemoteId}`,
       method: 'GET',
-      headers: {
-        Authorization: `Bearer ${config.apiKey}`,
-      },
       signal,
+      fetcher: fetchFn,
     });
 
     if (!queryResponse.ok) {
@@ -307,18 +312,18 @@ export async function resumeAsyncImagePolling(
   const { onProgress, signal, interval = 5000, maxAttempts = 1080 } = options;
   const fetchFn = config.fetchImpl || fetch;
   const baseUrl = normalizeApiBase(config.baseUrl);
+  const providerContext = buildProviderContextFromApiConfig(config, baseUrl);
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (signal?.aborted) {
       throw new Error('Async image generation cancelled');
     }
 
-    const queryResponse = await fetchFn(`${baseUrl}/v1/videos/${remoteId}`, {
+    const queryResponse = await providerTransport.send(providerContext, {
+      path: `/v1/videos/${remoteId}`,
       method: 'GET',
-      headers: {
-        Authorization: `Bearer ${config.apiKey}`,
-      },
       signal,
+      fetcher: fetchFn,
     });
 
     if (!queryResponse.ok) {

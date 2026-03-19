@@ -9,6 +9,12 @@ import {
   resolveInvocationRoute,
   type ModelRef,
 } from '../utils/settings-manager';
+import {
+  providerTransport,
+  resolveInvocationPlanFromRoute,
+  type ProviderAuthStrategy,
+  type ResolvedProviderContext,
+} from './provider-routing';
 
 function getFileExtension(url: string): string | null {
   const pathname = url.split('?')[0] || '';
@@ -54,18 +60,36 @@ interface PollingOptions {
   routeModel?: string | ModelRef | null;
 }
 
+function inferAuthType(route: ReturnType<typeof resolveInvocationRoute>): ProviderAuthStrategy {
+  return 'bearer';
+}
+
+function resolveProviderContext(
+  routeModel?: string | ModelRef | null
+): ResolvedProviderContext {
+  const plan = resolveInvocationPlanFromRoute('image', routeModel);
+  if (plan) {
+    return plan.provider;
+  }
+
+  const route = resolveInvocationRoute('image', routeModel);
+  return {
+    profileId: route.profileId || 'runtime',
+    profileName: route.profileName || 'Runtime',
+    providerType: route.providerType || 'custom',
+    baseUrl: route.baseUrl,
+    apiKey: route.apiKey,
+    authType: inferAuthType(route),
+  };
+}
+
 class AsyncImageAPIService {
   private async submit(
     params: AsyncImageGenerationParams
   ): Promise<AsyncImageSubmitResponse> {
-    const route = resolveInvocationRoute(
-      'image',
-      params.modelRef || params.model
-    );
-    const apiKey = route.apiKey;
-    const baseUrl = route.baseUrl.replace(/\/v1\/?$/, '');
+    const providerContext = resolveProviderContext(params.modelRef || params.model);
 
-    if (!apiKey) {
+    if (!providerContext.apiKey) {
       throw new Error('API Key 未配置');
     }
 
@@ -76,11 +100,9 @@ class AsyncImageAPIService {
       formData.append('size', params.size);
     }
 
-    const response = await fetch(`${baseUrl}/v1/videos`, {
+    const response = await providerTransport.send(providerContext, {
+      path: '/videos',
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
       body: formData,
     });
 
@@ -101,19 +123,15 @@ class AsyncImageAPIService {
     id: string,
     routeModel?: string | ModelRef | null
   ): Promise<AsyncImageQueryResponse> {
-    const route = resolveInvocationRoute('image', routeModel);
-    const apiKey = route.apiKey;
-    const baseUrl = route.baseUrl.replace(/\/v1\/?$/, '');
+    const providerContext = resolveProviderContext(routeModel);
 
-    if (!apiKey) {
+    if (!providerContext.apiKey) {
       throw new Error('API Key 未配置');
     }
 
-    const response = await fetch(`${baseUrl}/v1/videos/${id}`, {
+    const response = await providerTransport.send(providerContext, {
+      path: `/videos/${id}`,
       method: 'GET',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
     });
 
     if (!response.ok) {

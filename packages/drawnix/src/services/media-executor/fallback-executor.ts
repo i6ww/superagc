@@ -23,12 +23,20 @@ import {
   type ModelRef,
 } from '../../utils/settings-manager';
 import {
+  providerTransport,
+  resolveInvocationPlanFromRoute,
+  type ProviderAuthStrategy,
+  type ResolvedProviderContext,
+} from '../provider-routing';
+import {
   startLLMApiLog,
   completeLLMApiLog,
   failLLMApiLog,
   updateLLMApiLogMetadata,
   LLMReferenceImage,
 } from './llm-api-logger';
+import { callApiWithRetry } from '../../utils/gemini-api/apiCalls';
+import type { GeminiMessage as UnifiedGeminiMessage } from '../../utils/gemini-api/types';
 import {
   isAuthError,
   dispatchApiAuthError,
@@ -47,11 +55,38 @@ import {
   cacheRemoteUrl,
   cacheRemoteUrls,
 } from './fallback-utils';
-import { resolveAdapterForModel } from '../model-adapters';
+import { resolveAdapterForInvocation } from '../model-adapters';
 import {
   executeImageViaAdapter,
   executeVideoViaAdapter,
 } from './fallback-adapter-routes';
+
+function inferAuthTypeFromRoute(
+  route: ReturnType<typeof resolveInvocationRoute>
+): ProviderAuthStrategy {
+  return 'bearer';
+}
+
+function buildProviderContext(config: {
+  apiKey: string;
+  baseUrl: string;
+  authType?: ProviderAuthStrategy;
+  providerType?: string;
+  extraHeaders?: Record<string, string>;
+  provider?: ResolvedProviderContext | null;
+}): ResolvedProviderContext {
+  return (
+    config.provider || {
+      profileId: 'runtime',
+      profileName: 'Runtime',
+      providerType: config.providerType || 'custom',
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      authType: config.authType || 'bearer',
+      extraHeaders: config.extraHeaders,
+    }
+  );
+}
 
 /** 从 uploadedImages 提取 URL 列表，与 SW ImageHandler 逻辑一致 */
 function extractUrlsFromUploadedImages(
@@ -120,12 +155,12 @@ export class FallbackMediaExecutor implements IMediaExecutor {
     const modelName = model || config.imageConfig.modelName;
 
     // 专用 adapter 路由（mj-imagine 等非 gemini 模型）
-    const imageAdapter = resolveAdapterForModel(modelName, 'image');
-    if (
-      imageAdapter &&
-      imageAdapter.kind === 'image' &&
-      imageAdapter.id !== 'gemini-image-adapter'
-    ) {
+    const imageAdapter = resolveAdapterForInvocation(
+      'image',
+      modelName,
+      modelRef || null
+    );
+    if (imageAdapter && imageAdapter.kind === 'image') {
       return executeImageViaAdapter(
         taskId,
         imageAdapter,
@@ -203,17 +238,18 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       options?.onProgress?.({ progress: 10, phase: 'submitting' });
 
       // 直接调用 API
-      const url = `${config.imageConfig.baseUrl}/images/generations`;
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${config.imageConfig.apiKey}`,
-        },
-        body: JSON.stringify(requestBody),
-        signal: options?.signal,
-      });
+      const response = await providerTransport.send(
+        buildProviderContext(config.imageConfig),
+        {
+          path: '/images/generations',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
+          signal: options?.signal,
+        }
+      );
 
       if (!response.ok) {
         const duration = Date.now() - startTime;
@@ -459,12 +495,12 @@ export class FallbackMediaExecutor implements IMediaExecutor {
     options?.onProgress?.({ progress: 0, phase: 'submitting' });
 
     // 专用 adapter 路由（kling 等非 gemini 模型）
-    const videoAdapter = resolveAdapterForModel(model, 'video');
-    if (
-      videoAdapter &&
-      videoAdapter.kind === 'video' &&
-      videoAdapter.id !== 'gemini-video-adapter'
-    ) {
+    const videoAdapter = resolveAdapterForInvocation(
+      'video',
+      model,
+      modelRef || null
+    );
+    if (videoAdapter && videoAdapter.kind === 'video') {
       return executeVideoViaAdapter(
         taskId,
         videoAdapter,
@@ -545,6 +581,7 @@ export class FallbackMediaExecutor implements IMediaExecutor {
           size,
           duration: secondsToSend,
           referenceImages,
+          params: params.params,
         },
         videoApiConfig,
         options?.signal
@@ -722,52 +759,29 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       taskId,
     });
 
-    const requestBody = {
-      model: modelName,
-      messages: chatMessages,
-    };
-
     try {
       options?.onProgress?.({ progress: 30, phase: 'submitting' });
 
-      const response = await fetch(
-        `${config.textConfig.baseUrl}/chat/completions`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${config.textConfig.apiKey}`,
-          },
-          body: JSON.stringify(requestBody),
-          signal: options?.signal,
-        }
+      const unifiedMessages: UnifiedGeminiMessage[] = chatMessages.map(
+        (message) => ({
+          role: message.role as 'system' | 'user' | 'assistant',
+          content:
+            typeof message.content === 'string'
+              ? [{ type: 'text', text: message.content }]
+              : (message.content as UnifiedGeminiMessage['content']),
+        })
       );
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        const elapsedTime = Date.now() - startTime;
-        failLLMApiLog(logId, {
-          httpStatus: response.status,
-          duration: elapsedTime,
-          errorMessage: errorText.substring(0, 500),
-        });
-        throw new Error(
-          `AI analyze failed: ${response.status} - ${errorText.substring(
-            0,
-            200
-          )}`
-        );
-      }
+      const data = await callApiWithRetry(config.textConfig, unifiedMessages);
 
       options?.onProgress?.({ progress: 80 });
 
-      const data = await response.json();
       const fullResponse = data.choices?.[0]?.message?.content || '';
       const elapsedTime = Date.now() - startTime;
 
       // 记录成功
       completeLLMApiLog(logId, {
-        httpStatus: response.status,
+        httpStatus: 200,
         duration: elapsedTime,
         resultType: 'text',
         resultCount: 1,
@@ -1051,16 +1065,33 @@ export class FallbackMediaExecutor implements IMediaExecutor {
     const imageRoute = resolveInvocationRoute('image', models?.imageModel);
     const textRoute = resolveInvocationRoute('text', models?.textModel);
     const videoRoute = resolveInvocationRoute('video', models?.videoModel);
+    const imagePlan = resolveInvocationPlanFromRoute('image', models?.imageModel);
+    const textPlan = resolveInvocationPlanFromRoute('text', models?.textModel);
+    const videoPlan = resolveInvocationPlanFromRoute('video', models?.videoModel);
     return {
       imageConfig: {
         apiKey: imageRoute.apiKey,
         baseUrl: imageRoute.baseUrl || 'https://api.tu-zi.com/v1',
         modelName: imageRoute.modelId,
+        authType: imagePlan?.provider.authType || inferAuthTypeFromRoute(imageRoute),
+        providerType:
+          imagePlan?.provider.providerType || imageRoute.providerType || 'custom',
+        extraHeaders: imagePlan?.provider.extraHeaders,
+        protocol: imagePlan?.binding.protocol || null,
+        binding: imagePlan?.binding || null,
+        provider: imagePlan?.provider || null,
       },
       textConfig: {
         apiKey: textRoute.apiKey,
         baseUrl: textRoute.baseUrl || 'https://api.tu-zi.com/v1',
         modelName: textRoute.modelId,
+        authType: textPlan?.provider.authType || inferAuthTypeFromRoute(textRoute),
+        providerType:
+          textPlan?.provider.providerType || textRoute.providerType || 'custom',
+        extraHeaders: textPlan?.provider.extraHeaders,
+        protocol: textPlan?.binding.protocol || null,
+        binding: textPlan?.binding || null,
+        provider: textPlan?.provider || null,
       },
       videoConfig: {
         apiKey: videoRoute.apiKey,
@@ -1068,6 +1099,12 @@ export class FallbackMediaExecutor implements IMediaExecutor {
         baseUrl: this.normalizeApiBase(
           videoRoute.baseUrl || 'https://api.tu-zi.com'
         ),
+        authType: videoPlan?.provider.authType || inferAuthTypeFromRoute(videoRoute),
+        providerType:
+          videoPlan?.provider.providerType || videoRoute.providerType || 'custom',
+        extraHeaders: videoPlan?.provider.extraHeaders,
+        binding: videoPlan?.binding || null,
+        provider: videoPlan?.provider || null,
       },
     };
   }

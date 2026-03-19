@@ -6,6 +6,12 @@
  */
 
 import {
+  providerTransport,
+  resolveInvocationPlanFromRoute,
+  type ProviderAuthStrategy,
+  type ResolvedProviderContext,
+} from './provider-routing';
+import {
   resolveInvocationRoute,
   type ModelRef,
 } from '../utils/settings-manager';
@@ -17,6 +23,13 @@ import {
   failLLMApiLog,
   updateLLMApiLogMetadata,
 } from './media-executor/llm-api-logger';
+import {
+  downloadVideoContentToLocalUrl,
+  extractInlineVideoUrl,
+  resolveVideoSubmission,
+  shouldDownloadVideoContent,
+} from './video-binding-utils';
+import { prepareVideoReferenceImageBlob } from './video-reference-image-utils';
 
 // Re-export VideoModel for backward compatibility
 export type { VideoModel };
@@ -28,6 +41,7 @@ export interface VideoGenerationParams {
   prompt: string;
   seconds?: string;
   size?: string;
+  params?: Record<string, unknown>;
   // Multiple images support for different models
   inputReferences?: UploadedVideoImage[];
   // Legacy single image support (for backward compatibility)
@@ -71,6 +85,40 @@ interface PollingOptions {
   routeModel?: string | ModelRef | null;
 }
 
+function inferAuthType(route: ReturnType<typeof resolveInvocationRoute>): ProviderAuthStrategy {
+  return 'bearer';
+}
+
+function resolveProviderContext(
+  routeModel?: string | ModelRef | null
+): ResolvedProviderContext {
+  const plan = resolveInvocationPlanFromRoute('video', routeModel);
+  if (plan) {
+    return plan.provider;
+  }
+
+  const route = resolveInvocationRoute('video', routeModel);
+  return {
+    profileId: route.profileId || 'runtime',
+    profileName: route.profileName || 'Runtime',
+    providerType: route.providerType || 'custom',
+    baseUrl: route.baseUrl,
+    apiKey: route.apiKey,
+    authType: inferAuthType(route),
+  };
+}
+
+function resolveVideoPlanContext(routeModel?: string | ModelRef | null): {
+  providerContext: ResolvedProviderContext;
+  binding: ReturnType<typeof resolveInvocationPlanFromRoute>['binding'] | null;
+} {
+  const plan = resolveInvocationPlanFromRoute('video', routeModel);
+  return {
+    providerContext: plan?.provider || resolveProviderContext(routeModel),
+    binding: plan?.binding || null,
+  };
+}
+
 /**
  * Video API Service
  * Manages video generation with async polling
@@ -82,15 +130,12 @@ class VideoAPIService {
   async submitVideoGeneration(
     params: VideoGenerationParams
   ): Promise<VideoSubmitResponse> {
-    const route = resolveInvocationRoute(
-      'video',
+    const { providerContext, binding } = resolveVideoPlanContext(
       params.modelRef || params.model
     );
-    const apiKey = route.apiKey;
-    const baseUrl = route.baseUrl.replace(/\/v1\/?$/, '');
     const startTime = Date.now();
 
-    if (!apiKey) {
+    if (!providerContext.apiKey) {
       throw new Error('API Key 未配置，请先配置 API Key');
     }
 
@@ -106,12 +151,19 @@ class VideoAPIService {
       referenceImageCount: referenceCount,
     });
 
+    const submission = resolveVideoSubmission(
+      params.model,
+      params.seconds,
+      binding,
+      params.params as Record<string, string> | undefined
+    );
+
     const formData = new FormData();
-    formData.append('model', params.model);
+    formData.append('model', submission.model);
     formData.append('prompt', params.prompt);
 
-    if (params.seconds) {
-      formData.append('seconds', params.seconds);
+    if (submission.duration) {
+      formData.append(submission.durationField, submission.duration);
     }
 
     if (params.size) {
@@ -148,13 +200,19 @@ class VideoAPIService {
         if (processedUrl.startsWith('data:')) {
           // console.log('[VideoAPI] Converting data URL to blob...');
           const response = await fetch(processedUrl);
-          const blob = await response.blob();
+          const blob = await prepareVideoReferenceImageBlob(
+            await response.blob(),
+            params.size
+          );
           // console.log('[VideoAPI] Appending blob:', { fieldName, blobSize: blob.size, fileName: imageRef.name || 'image.png' });
           formData.append(fieldName, blob, imageRef.name || 'image.png');
         } else if (processedUrl.startsWith('http')) {
           // console.log('[VideoAPI] Fetching remote URL...');
           const response = await fetch(processedUrl);
-          const blob = await response.blob();
+          const blob = await prepareVideoReferenceImageBlob(
+            await response.blob(),
+            params.size
+          );
           // console.log('[VideoAPI] Appending blob:', { fieldName, blobSize: blob.size, fileName: imageRef.name || 'image.png' });
           formData.append(fieldName, blob, imageRef.name || 'image.png');
         } else {
@@ -177,11 +235,17 @@ class VideoAPIService {
 
       if (processedUrl.startsWith('data:')) {
         const response = await fetch(processedUrl);
-        const blob = await response.blob();
+        const blob = await prepareVideoReferenceImageBlob(
+          await response.blob(),
+          params.size
+        );
         formData.append('input_reference', blob, 'reference.png');
       } else if (processedUrl.startsWith('http')) {
         const response = await fetch(processedUrl);
-        const blob = await response.blob();
+        const blob = await prepareVideoReferenceImageBlob(
+          await response.blob(),
+          params.size
+        );
         formData.append('input_reference', blob, 'reference.png');
       } else {
         console.warn(
@@ -206,11 +270,10 @@ class VideoAPIService {
     // console.log('[VideoAPI] FormData entries:', formDataEntries);
     // console.log('[VideoAPI] Sending request to:', `${this.baseUrl}/v1/videos`);
 
-    const response = await fetch(`${baseUrl}/v1/videos`, {
+    const response = await providerTransport.send(providerContext, {
+      path: '/videos',
+      baseUrlStrategy: binding?.baseUrlStrategy,
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
       body: formData,
     });
 
@@ -273,19 +336,16 @@ class VideoAPIService {
     videoId: string,
     routeModel?: string | ModelRef | null
   ): Promise<VideoQueryResponse> {
-    const route = resolveInvocationRoute('video', routeModel);
-    const apiKey = route.apiKey;
-    const baseUrl = route.baseUrl.replace(/\/v1\/?$/, '');
+    const { providerContext, binding } = resolveVideoPlanContext(routeModel);
 
-    if (!apiKey) {
+    if (!providerContext.apiKey) {
       throw new Error('API Key 未配置');
     }
 
-    const response = await fetch(`${baseUrl}/v1/videos/${videoId}`, {
+    const response = await providerTransport.send(providerContext, {
+      path: `/videos/${videoId}`,
+      baseUrlStrategy: binding?.baseUrlStrategy,
       method: 'GET',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
     });
 
     if (!response.ok) {
@@ -391,9 +451,15 @@ class VideoAPIService {
     }
 
     // If already completed, return immediately
-    if (immediateStatus.status === 'completed') {
-      // console.log('[VideoAPI] Video already completed:', immediateStatus.video_url || immediateStatus.url);
-      return immediateStatus;
+    if (
+      immediateStatus.status === 'completed' ||
+      immediateStatus.status === 'succeeded'
+    ) {
+      return this.resolveCompletedVideoStatus(
+        videoId,
+        immediateStatus,
+        options.routeModel
+      );
     }
 
     // If already failed, throw error immediately
@@ -456,9 +522,12 @@ class VideoAPIService {
           onProgress(progress, status.status);
         }
 
-        if (status.status === 'completed') {
-          // console.log('[VideoAPI] Video generation completed:', status.video_url || status.url);
-          return status;
+        if (status.status === 'completed' || status.status === 'succeeded') {
+          return this.resolveCompletedVideoStatus(
+            videoId,
+            status,
+            options.routeModel
+          );
         }
 
         if (status.status === 'failed') {
@@ -511,6 +580,35 @@ class VideoAPIService {
    */
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private async resolveCompletedVideoStatus(
+    videoId: string,
+    status: VideoQueryResponse,
+    routeModel?: string | ModelRef | null
+  ): Promise<VideoQueryResponse> {
+    const { providerContext, binding } = resolveVideoPlanContext(
+      routeModel || status.model
+    );
+    const inlineUrl = extractInlineVideoUrl(status as Record<string, any>);
+
+    if (!shouldDownloadVideoContent(status.model, binding, status as Record<string, any>)) {
+      return inlineUrl ? { ...status, url: inlineUrl } : status;
+    }
+
+    const localUrl = await downloadVideoContentToLocalUrl({
+      videoId,
+      provider: providerContext,
+      binding,
+      modelId: status.model,
+      cacheKey: videoId,
+    });
+
+    return {
+      ...status,
+      url: localUrl,
+      video_url: localUrl,
+    };
   }
 }
 

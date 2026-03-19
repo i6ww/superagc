@@ -1,4 +1,9 @@
 import type { ModelRef } from '../../utils/settings-manager';
+import type {
+  ProviderAuthStrategy,
+  ProviderModelBinding,
+  ResolvedProviderContext,
+} from '../provider-routing';
 
 /**
  * Media Executor Types
@@ -212,12 +217,23 @@ export interface GeminiConfig {
   baseUrl: string;
   modelName: string;
   textModelName?: string;
+  authType?: ProviderAuthStrategy;
+  providerType?: string;
+  extraHeaders?: Record<string, string>;
+  protocol?: string | null;
+  binding?: ProviderModelBinding | null;
+  provider?: ResolvedProviderContext | null;
 }
 
 export interface VideoAPIConfig {
   apiKey: string;
   baseUrl: string;
   model?: string;
+  authType?: ProviderAuthStrategy;
+  providerType?: string;
+  extraHeaders?: Record<string, string>;
+  binding?: ProviderModelBinding | null;
+  provider?: ResolvedProviderContext | null;
 }
 
 export interface ExecutorConfig {

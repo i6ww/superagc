@@ -12,10 +12,10 @@ import { geminiSettings, type ModelRef } from './settings-manager';
 import {
   getModelConfig,
   getImageModelDefaults,
-  getVideoModelDefaults,
   getDefaultImageModel as getSystemDefaultImageModel,
   getDefaultVideoModel as getSystemDefaultVideoModel,
 } from '../constants/model-config';
+import { getEffectiveVideoDefaultParams } from '../services/video-binding-utils';
 import { buildMJPromptSuffix } from './mj-params';
 import type { ImageDimensions } from '../mcp/types';
 
@@ -376,16 +376,25 @@ export function parseAIInput(
       // 图片模型使用默认尺寸
       size = '1x1'; // 默认正方形
     } else if (modelConfig?.type === 'video' && modelConfig.videoDefaults) {
-      size = normalizeSize(modelConfig.videoDefaults.size);
+      const defaults = getEffectiveVideoDefaultParams(
+        modelId,
+        options?.modelRef || modelId,
+        options?.params
+      );
+      size = normalizeSize(defaults.size || modelConfig.videoDefaults.size);
       if (!duration) {
-        duration = modelConfig.videoDefaults.duration;
+        duration = defaults.duration || modelConfig.videoDefaults.duration;
       }
     } else {
       // 使用通用默认值
       if (generationType === 'image') {
         size = '1x1';
       } else if (generationType === 'video') {
-        const defaults = getVideoModelDefaults(modelId);
+        const defaults = getEffectiveVideoDefaultParams(
+          modelId,
+          options?.modelRef || modelId,
+          options?.params
+        );
         size = normalizeSize(defaults.size);
         if (!duration) {
           duration = defaults.duration;
@@ -396,7 +405,11 @@ export function parseAIInput(
 
   // 视频模型：如果没有指定时长，使用默认值
   if (!duration && generationType === 'video') {
-    const defaults = getVideoModelDefaults(modelId);
+    const defaults = getEffectiveVideoDefaultParams(
+      modelId,
+      options?.modelRef || modelId,
+      options?.params
+    );
     duration = defaults.duration;
   }
 

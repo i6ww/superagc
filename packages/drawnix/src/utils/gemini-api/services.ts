@@ -17,6 +17,7 @@ import {
 import { prepareImageData, processMixedContent } from './utils';
 import {
   callApiWithRetry,
+  callGoogleGenerateContentRaw,
   callApiStreamRaw,
   callVideoApiStreamRaw,
 } from './apiCalls';
@@ -25,12 +26,129 @@ import {
   settingsManager,
   type ModelRef,
 } from '../settings-manager';
+import {
+  providerTransport,
+  resolveInvocationPlanFromRoute,
+  type ResolvedProviderContext,
+  type ProviderAuthStrategy,
+} from '../../services/provider-routing';
 import { validateAndEnsureConfig } from './auth';
 import {
   startLLMApiLog,
   completeLLMApiLog,
   failLLMApiLog,
 } from '../../services/media-executor/llm-api-logger';
+
+function inferAuthTypeFromRoute(
+  route: ReturnType<typeof resolveInvocationRoute>
+): ProviderAuthStrategy {
+  return 'bearer';
+}
+
+function buildProviderContextFromConfig(config: {
+  apiKey: string;
+  baseUrl: string;
+  authType?: ProviderAuthStrategy;
+  providerType?: string;
+  extraHeaders?: Record<string, string>;
+  provider?: ResolvedProviderContext | null;
+}): ResolvedProviderContext {
+  return (
+    config.provider || {
+      profileId: 'runtime',
+      profileName: 'Runtime',
+      providerType: config.providerType || 'custom',
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      authType: config.authType || 'bearer',
+      extraHeaders: config.extraHeaders,
+    }
+  );
+}
+
+function buildRuntimeConfig(
+  routeType: 'text' | 'image' | 'video',
+  routeModel: string | ModelRef | null | undefined,
+  fallbackModelName: string,
+  defaults: Partial<typeof DEFAULT_CONFIG> | Partial<typeof VIDEO_DEFAULT_CONFIG>
+) {
+  const route = resolveInvocationRoute(routeType, routeModel);
+  const plan = resolveInvocationPlanFromRoute(routeType, routeModel);
+
+  return {
+    route,
+    plan,
+    config: {
+      ...defaults,
+      apiKey: route.apiKey,
+      baseUrl: route.baseUrl,
+      modelName: route.modelId || fallbackModelName,
+      authType: plan?.provider.authType || inferAuthTypeFromRoute(route),
+      providerType: plan?.provider.providerType || route.providerType || 'custom',
+      extraHeaders: plan?.provider.extraHeaders,
+      protocol: plan?.binding.protocol || null,
+      binding: plan?.binding || null,
+      provider: plan?.provider || null,
+    },
+  };
+}
+
+function normalizeAspectRatio(size?: string): string | undefined {
+  if (!size || size === 'auto') {
+    return undefined;
+  }
+
+  if (size.includes(':')) {
+    return size;
+  }
+
+  if (!size.includes('x')) {
+    return undefined;
+  }
+
+  const [wRaw, hRaw] = size.split('x');
+  const width = Number(wRaw);
+  const height = Number(hRaw);
+  if (!width || !height) {
+    return undefined;
+  }
+
+  const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+  const divisor = gcd(width, height);
+  return `${width / divisor}:${height / divisor}`;
+}
+
+function normalizeGoogleImageSize(
+  quality?: '1k' | '2k' | '4k'
+): '1K' | '2K' | '4K' | undefined {
+  if (!quality) {
+    return undefined;
+  }
+
+  return quality.toUpperCase() as '1K' | '2K' | '4K';
+}
+
+function normalizeGoogleImageResult(content: string): {
+  data: Array<{ b64_json?: string; url?: string }>;
+} {
+  const base64Matches = Array.from(
+    content.matchAll(/data:([^;]+);base64,([A-Za-z0-9+/=]+)/g)
+  );
+  const urlMatches = Array.from(
+    content.matchAll(/https?:\/\/[^\s<>"')]+/g)
+  );
+
+  return {
+    data: [
+      ...base64Matches.map((match) => ({
+        b64_json: match[2],
+      })),
+      ...urlMatches.map((match) => ({
+        url: match[0],
+      })),
+    ],
+  };
+}
 
 /**
  * 调用 Gemini API 进行图像生成
@@ -44,6 +162,7 @@ export async function generateImageWithGemini(
     image?: string | string[]; // 支持单图或多图
     response_format?: 'url' | 'b64_json';
     quality?: '1k' | '2k' | '4k';
+    count?: number;
     model?: string; // 支持指定模型
     modelRef?: ModelRef | null;
   } = {}
@@ -73,13 +192,19 @@ async function generateImageDirect(
     image?: string | string[];
     response_format?: 'url' | 'b64_json';
     quality?: '1k' | '2k' | '4k';
+    count?: number;
     model?: string;
     modelRef?: ModelRef | null;
   },
   modelName: string,
   routeModel?: string | ModelRef | null
 ): Promise<any> {
-  const route = resolveInvocationRoute('image', routeModel || modelName);
+  const { config: runtimeConfig } = buildRuntimeConfig(
+    'image',
+    routeModel || modelName,
+    modelName,
+    DEFAULT_CONFIG
+  );
   const startTime = Date.now();
 
   // 开始记录 LLM API 调用（降级模式）
@@ -97,17 +222,68 @@ async function generateImageDirect(
     referenceImageCount: referenceImages?.length,
   });
 
-  const config = {
-    ...DEFAULT_CONFIG,
-    apiKey: route.apiKey,
-    baseUrl: route.baseUrl,
-    modelName,
-  };
-
   try {
-    const validatedConfig = await validateAndEnsureConfig(config);
+    const validatedConfig = await validateAndEnsureConfig(runtimeConfig);
+
+    if (validatedConfig.protocol === 'google.generateContent') {
+      const content = [
+        {
+          type: 'text' as const,
+          text: prompt,
+        },
+        ...((options.image
+          ? Array.isArray(options.image)
+            ? options.image
+            : [options.image]
+          : []
+        ).map((url) => ({
+          type: 'image_url' as const,
+          image_url: {
+            url,
+          },
+        }))),
+      ];
+
+      const response = await callGoogleGenerateContentRaw(
+        validatedConfig,
+        [
+          {
+            role: 'user',
+            content,
+          },
+        ],
+        {
+          stream: false,
+          generationConfig: {
+            responseModalities: ['IMAGE'],
+            imageConfig: {
+              ...(normalizeAspectRatio(options.size)
+                ? { aspectRatio: normalizeAspectRatio(options.size) }
+                : {}),
+              ...(normalizeGoogleImageSize(options.quality)
+                ? { imageSize: normalizeGoogleImageSize(options.quality) }
+                : {}),
+            },
+          },
+        }
+      );
+
+      const duration = Date.now() - startTime;
+      const normalizedResult = normalizeGoogleImageResult(
+        response.choices[0]?.message?.content || ''
+      );
+
+      completeLLMApiLog(logId, {
+        httpStatus: 200,
+        duration,
+        resultType: 'image',
+        resultCount: normalizedResult.data.length || 1,
+      });
+
+      return normalizedResult;
+    }
+
     const headers = {
-      Authorization: `Bearer ${validatedConfig.apiKey}`,
       'Content-Type': 'application/json',
     };
 
@@ -134,16 +310,26 @@ async function generateImageDirect(
       data.quality = options.quality;
     }
 
-    const url = `${validatedConfig.baseUrl}/images/generations`;
+    if (
+      typeof options.count === 'number' &&
+      Number.isFinite(options.count) &&
+      options.count > 1
+    ) {
+      data.n = Math.min(Math.max(Math.round(options.count), 1), 10);
+    }
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(data),
-      signal: AbortSignal.timeout(
-        validatedConfig.timeout || DEFAULT_CONFIG.timeout!
-      ),
-    });
+    const response = await providerTransport.send(
+      buildProviderContextFromConfig(validatedConfig),
+      {
+        path: '/images/generations',
+        method: 'POST',
+        headers,
+        body: JSON.stringify(data),
+        signal: AbortSignal.timeout(
+          validatedConfig.timeout || DEFAULT_CONFIG.timeout!
+        ),
+      }
+    );
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -203,13 +389,12 @@ export async function generateVideoWithGemini(
 }> {
   // 等待设置管理器初始化完成
   await settingsManager.waitForInitialization();
-  const route = resolveInvocationRoute('video');
-  const config = {
-    ...VIDEO_DEFAULT_CONFIG,
-    apiKey: route.apiKey,
-    baseUrl: route.baseUrl,
-    modelName: route.modelId || VIDEO_DEFAULT_CONFIG.modelName,
-  };
+  const { config } = buildRuntimeConfig(
+    'video',
+    null,
+    VIDEO_DEFAULT_CONFIG.modelName || 'veo3',
+    VIDEO_DEFAULT_CONFIG
+  );
   const validatedConfig = await validateAndEnsureConfig(config);
 
   // 准备图片数据（现在是可选的）
@@ -283,13 +468,12 @@ export async function chatWithGemini(
 }> {
   // 等待设置管理器初始化完成
   await settingsManager.waitForInitialization();
-  const route = resolveInvocationRoute(images.length > 0 ? 'image' : 'text');
-  const config = {
-    ...DEFAULT_CONFIG,
-    apiKey: route.apiKey,
-    baseUrl: route.baseUrl,
-    modelName: route.modelId || DEFAULT_CONFIG.modelName,
-  };
+  const { config } = buildRuntimeConfig(
+    images.length > 0 ? 'image' : 'text',
+    null,
+    DEFAULT_CONFIG.modelName || 'gemini-2.0-flash',
+    DEFAULT_CONFIG
+  );
   const validatedConfig = await validateAndEnsureConfig(config);
 
   // 准备图片数据
@@ -379,13 +563,12 @@ export async function sendChatWithGemini(
     Date.now() - t0,
     'ms'
   );
-  const route = resolveInvocationRoute('text', temporaryModel);
-  const config = {
-    ...DEFAULT_CONFIG,
-    apiKey: route.apiKey,
-    baseUrl: route.baseUrl,
-    modelName: route.modelId || 'gpt-4o-mini',
-  };
+  const { config } = buildRuntimeConfig(
+    'text',
+    temporaryModel || null,
+    'gpt-4o-mini',
+    DEFAULT_CONFIG
+  );
   console.log('[sendChatWithGemini] 配置:', {
     modelName: config.modelName,
     hasApiKey: !!config.apiKey,
