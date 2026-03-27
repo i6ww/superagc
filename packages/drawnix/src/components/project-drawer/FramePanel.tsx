@@ -521,8 +521,8 @@ export const FramePanel: React.FC = () => {
     let failCount = 0;
 
     try {
-      // 并行生成所有图片
-      const promises = framesToGenerate.map(async (frameInfo) => {
+      // 必须串行：并行 insertMediaIntoFrame 会用 childrenCountBefore 定位新节点，竞态会导致 frameId 绑错页、导出时配图挤在同一页
+      for (const frameInfo of framesToGenerate) {
         const frameId = frameInfo.frame.id;
         setGeneratingImageIds((prev) => new Set(prev).add(frameId));
 
@@ -572,9 +572,7 @@ export const FramePanel: React.FC = () => {
             return next;
           });
         }
-      });
-
-      await Promise.all(promises);
+      }
 
       if (successCount > 0 && failCount === 0) {
         MessagePlugin.success(`已为 ${successCount} 个页面生成配图`);

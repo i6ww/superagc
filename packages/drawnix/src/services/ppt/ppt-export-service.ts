@@ -1,7 +1,15 @@
 import PptxGenJS from 'pptxgenjs';
 import type { PlaitBoard, PlaitElement } from '@plait/core';
-import { RectangleClient, getRectangleByElements } from '@plait/core';
-import { PlaitDrawElement, isClosedPoints } from '@plait/draw';
+import {
+  RectangleClient,
+  getRectangleByElements,
+  PlaitGroupElement,
+} from '@plait/core';
+import {
+  PlaitDrawElement,
+  getStrokeWidthByElement,
+  isClosedPoints,
+} from '@plait/draw';
 import { MindElement } from '@plait/mind';
 import { Freehand } from '../../plugins/freehand/type';
 import { getFreehandRectangle } from '../../plugins/freehand/utils';
@@ -23,8 +31,20 @@ interface ExportPPTOptions {
 
 const SLIDE_WIDTH = 10;
 const SLIDE_HEIGHT = 5.625;
+/** 幻灯片宽度（磅），与 fontScale 计算一致：SLIDE_WIDTH 英寸 × 72pt/英寸 */
+const SLIDE_WIDTH_PT = SLIDE_WIDTH * 72;
 // 画布默认使用的中文系统字体（与前端一致）
 const DEFAULT_FONT_FACE = 'PingFang SC';
+
+/**
+ * 画布坐标系下的描边宽度（与 element.points 同单位）→ PptxGenJS line.width（磅）。
+ * 原先把 1～2 的像素级线宽直接当「磅」传入，在宽 Frame 上会粗得夸张。
+ */
+function canvasStrokeWidthToPptPt(strokeWidthPx: number, frameWidthPx: number): number {
+  const fw = Math.max(frameWidthPx, 1);
+  const pt = strokeWidthPx * (SLIDE_WIDTH_PT / fw);
+  return Math.max(0.1, pt);
+}
 
 // ─── Color conversion ───
 
@@ -215,7 +235,10 @@ function mapShapeType(pptx: PptxGenJS, shape: string): any {
   switch (shape) {
     case 'rectangle': case 'process': return st.rect;
     case 'ellipse': case 'circle': return st.ellipse;
-    case 'roundedRectangle': case 'round_rectangle': return st.roundRect;
+    case 'roundRectangle':
+    case 'roundedRectangle':
+    case 'round_rectangle':
+      return st.roundRect;
     case 'diamond': case 'decision': return st.diamond;
     case 'triangle': return st.triangle;
     case 'parallelogram': return st.parallelogram;
@@ -265,11 +288,14 @@ function getElementFillOpts(
 
 function getElementLineOpts(
   board: PlaitBoard,
-  element: PlaitElement
-): { line?: { color: string; width: number } } {
+  element: PlaitElement,
+  frameWidthPx: number
+): { line: { color: string; width: number } } {
   const strokeColor = toPptColor(getCurrentStrokeColor(board, element));
-  if (!strokeColor) return {};
-  return { line: { color: strokeColor, width: (element as any).strokeWidth || 1 } };
+  const px = getStrokeWidthByElement(element as any);
+  const widthPt = canvasStrokeWidthToPptPt(px, frameWidthPx);
+  // pptxgenjs：未传 line 时会默认 { type: 'none' }，无填充的几何图形在 PPT 中会完全不可见
+  return { line: { color: strokeColor || '333333', width: widthPt } };
 }
 
 type CustGeomPoint =
@@ -304,14 +330,121 @@ function sortFramesForPPT(frames: PlaitFrame[]): PlaitFrame[] {
   return [...frames].sort((a, b) => {
     const metaA = (a as PlaitFrame & { pptMeta?: { pageIndex?: number } }).pptMeta;
     const metaB = (b as PlaitFrame & { pptMeta?: { pageIndex?: number } }).pptMeta;
-    const pageA = metaA?.pageIndex ?? 0;
-    const pageB = metaB?.pageIndex ?? 0;
-    if (pageA && pageB && pageA !== pageB) return pageA - pageB;
+    const indexA = metaA?.pageIndex;
+    const indexB = metaB?.pageIndex;
+    const hasA = typeof indexA === 'number' && !Number.isNaN(indexA);
+    const hasB = typeof indexB === 'number' && !Number.isNaN(indexB);
+    // 原先用 pageA && pageB：pageIndex 为 0 或与「无 meta」混排时会失效，导致顺序退化成仅按 x，幻灯片与配图页错乱
+    if (hasA && hasB && indexA !== indexB) {
+      return indexA - indexB;
+    }
+    if (hasA !== hasB) {
+      return hasA ? -1 : 1;
+    }
 
     const rectA = RectangleClient.getRectangleByPoints(a.points);
     const rectB = RectangleClient.getRectangleByPoints(b.points);
+    const dy = rectA.y - rectB.y;
+    if (Math.abs(dy) > 1) return dy;
     return rectA.x - rectB.x;
   });
+}
+
+function rectangleIntersectionArea(
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number }
+): number {
+  const x1 = Math.max(a.x, b.x);
+  const y1 = Math.max(a.y, b.y);
+  const x2 = Math.min(a.x + a.width, b.x + b.width);
+  const y2 = Math.min(a.y + a.height, b.y + b.height);
+  const w = x2 - x1;
+  const h = y2 - y1;
+  return w > 0 && h > 0 ? w * h : 0;
+}
+
+/**
+ * 将画布元素划分到各 Frame（导出页）。有 frameId 的跟绑定走；无绑定的按与 Frame 相交面积最大的一页归属，避免重复进多页。
+ */
+function partitionElementsByExportFrames(
+  board: PlaitBoard,
+  frames: PlaitFrame[]
+): Map<string, PlaitElement[]> {
+  const byFrame = new Map<string, PlaitElement[]>();
+  const frameRectMap = new Map(
+    frames.map((f) => [f.id, RectangleClient.getRectangleByPoints(f.points)] as const)
+  );
+  for (const f of frames) {
+    byFrame.set(f.id, []);
+  }
+  const unbound: PlaitElement[] = [];
+
+  for (const el of board.children as PlaitElement[]) {
+    if (isFrameElement(el)) continue;
+    if (PlaitGroupElement.isGroup(el)) continue;
+
+    const boundId = (el as PlaitElement & { frameId?: string }).frameId;
+    if (boundId && byFrame.has(boundId)) {
+      byFrame.get(boundId)!.push(el);
+      continue;
+    }
+    if (boundId) {
+      continue;
+    }
+    unbound.push(el);
+  }
+
+  for (const el of unbound) {
+    let rect: RectangleClient;
+    try {
+      rect = getRectangleByElements(board, [el], false);
+    } catch {
+      continue;
+    }
+    if (rect.width <= 0 || rect.height <= 0) continue;
+
+    let bestId: string | null = null;
+    let bestArea = 0;
+    for (const f of frames) {
+      const fr = frameRectMap.get(f.id)!;
+      if (!RectangleClient.isHit(rect, fr)) continue;
+      const center = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+      if (!isPointInRect(center, fr, 2)) continue;
+      const area = rectangleIntersectionArea(rect, fr);
+      if (area > bestArea) {
+        bestArea = area;
+        bestId = f.id;
+      }
+    }
+    if (bestId && bestArea > 0) {
+      byFrame.get(bestId)!.push(el);
+    }
+  }
+
+  return byFrame;
+}
+
+/** 与 FramePanel 一致：递归收集所有 Frame（含嵌套） */
+function collectAllFramesFromBoard(board: PlaitBoard): PlaitFrame[] {
+  const seen = new Set<string>();
+  const out: PlaitFrame[] = [];
+  const walk = (elements: PlaitElement[]) => {
+    for (const el of elements) {
+      if (isFrameElement(el)) {
+        const f = el as PlaitFrame;
+        if (!seen.has(f.id)) {
+          seen.add(f.id);
+          out.push(f);
+        }
+      }
+      const ch = (el as PlaitElement & { children?: PlaitElement[] }).children;
+      if (ch && ch.length > 0) {
+        walk(ch);
+      }
+    }
+  };
+  walk(board.children as PlaitElement[]);
+  return out;
 }
 
 function isRectContained(
@@ -340,21 +473,13 @@ function isPointInRect(
   );
 }
 
-function getElementsInFrame(board: PlaitBoard, frame: PlaitFrame): PlaitElement[] {
-  const frameRect = RectangleClient.getRectangleByPoints(frame.points);
-  return (board.children as PlaitElement[]).filter((el) => {
-    if (el.id === frame.id) return false;
-    if (isFrameElement(el)) return false;
-    try {
-      const rect = getRectangleByElements(board, [el], false);
-      // 导出时更宽松：只要元素与 Frame 相交且中心点在 Frame 内，就认为属于该页
-      // （避免描边/阴影导致的边界框轻微越界而被误过滤）
-      const center = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
-      return RectangleClient.isHit(rect, frameRect) && isPointInRect(center, frameRect, 2);
-    } catch {
-      return false;
-    }
-  });
+function shouldSkipMediaAsRasterImage(element: PlaitElement): boolean {
+  const anyEl = element as any;
+  if (anyEl.isVideo) return true;
+  const url = anyEl.url || anyEl.image?.url;
+  if (typeof url !== 'string') return false;
+  if (url.includes('#video') || url.includes('#merged-video')) return true;
+  return /\.(mp4|webm|mov|mkv|avi)(\?|#|$)/i.test(url);
 }
 
 // ─── Core: convert one Frame into a PPT slide ───
@@ -362,9 +487,9 @@ function getElementsInFrame(board: PlaitBoard, frame: PlaitFrame): PlaitElement[
 async function addFrameSlide(
   pptx: PptxGenJS,
   board: PlaitBoard,
-  frame: PlaitFrame
+  frame: PlaitFrame,
+  children: PlaitElement[]
 ): Promise<boolean> {
-  const children = getElementsInFrame(board, frame);
   if (!children.length) return false;
 
   const frameRect = RectangleClient.getRectangleByPoints(frame.points);
@@ -393,44 +518,18 @@ async function addFrameSlide(
 
   for (const element of ordered) {
     try {
-      const rect = getRectangleByElements(board, [element], false);
-      const pos = computeSlidePosition(rect, frameRect);
-
-      // --- PlaitText (standalone text box) ---
-      if (isTextElement(board, element)) {
-        const rawText = extractTextFromElement(element, board);
-        const isSingle = isShortSingleLine(rawText);
-        // 文本框加 40% 宽度缓冲，补偿 PPT 与 CSS 字体度量差异
-        const textPos = computeSlidePosition(rect, frameRect, 1.4);
-        const rich = extractElementRichText(element, fontScale);
-        if (rich) {
-          slide.addText(rich.rows, {
-            x: textPos.x,
-            y: textPos.y,
-            w: textPos.w,
-            h: textPos.h,
-            valign: 'top',
-            wrap: !isSingle,
-            align: rich.align || 'center',
-            fontFace: DEFAULT_FONT_FACE,
-          });
-        } else if (rawText) {
-          slide.addText(buildPlainTextRows(rawText, defaultTitlePt), {
-            x: textPos.x,
-            y: textPos.y,
-            w: textPos.w,
-            h: textPos.h,
-            valign: 'top',
-            wrap: !isSingle,
-            align: 'center',
-            fontFace: DEFAULT_FONT_FACE,
-          });
-        }
+      if (PlaitGroupElement.isGroup(element)) {
         continue;
       }
 
+      const rect = getRectangleByElements(board, [element], false);
+      const pos = computeSlidePosition(rect, frameRect);
+
       // --- Image element ---
       if (isImageElement(board, element)) {
+        if (shouldSkipMediaAsRasterImage(element)) {
+          continue;
+        }
         const url = (element as any).url || (element as any).image?.url;
         if (!url) continue;
         try {
@@ -442,7 +541,7 @@ async function addFrameSlide(
         continue;
       }
 
-      // --- Geometry shape (not PlaitText) ---
+      // --- Geometry shape（须先于 isTextElement：形状工具创建的图形也带 Slate 的 element.text，空文案时走文本分支会既不 addText 也不 addShape）---
       if (
         PlaitDrawElement.isGeometry?.(element) &&
         !PlaitDrawElement.isText?.(element)
@@ -450,14 +549,23 @@ async function addFrameSlide(
         const shape = (element as any).shape || 'rectangle';
         const shapeType = mapShapeType(pptx, shape);
         const fillOpts = getElementFillOpts(board, element);
-        const lineOpts = getElementLineOpts(board, element);
+        const lineOpts = getElementLineOpts(board, element, frameRect.width);
 
         const baseOpts: Record<string, any> = {
           x: pos.x, y: pos.y, w: pos.w, h: pos.h,
           ...fillOpts, ...lineOpts,
         };
 
-        if (shape === 'roundedRectangle' || shape === 'round_rectangle') {
+        const angle = (element as any).angle;
+        if (typeof angle === 'number' && !Number.isNaN(angle) && angle !== 0) {
+          baseOpts.rotate = angle;
+        }
+
+        if (
+          shape === 'roundRectangle' ||
+          shape === 'roundedRectangle' ||
+          shape === 'round_rectangle'
+        ) {
           baseOpts.rectRadius = 0.2;
         }
 
@@ -488,6 +596,38 @@ async function addFrameSlide(
         continue;
       }
 
+      // --- PlaitText / 纯文本（排除已处理的几何形状）---
+      if (isTextElement(board, element)) {
+        const rawText = extractTextFromElement(element, board);
+        const isSingle = isShortSingleLine(rawText);
+        const textPos = computeSlidePosition(rect, frameRect, 1.4);
+        const rich = extractElementRichText(element, fontScale);
+        if (rich) {
+          slide.addText(rich.rows, {
+            x: textPos.x,
+            y: textPos.y,
+            w: textPos.w,
+            h: textPos.h,
+            valign: 'top',
+            wrap: !isSingle,
+            align: rich.align || 'center',
+            fontFace: DEFAULT_FONT_FACE,
+          });
+        } else if (rawText) {
+          slide.addText(buildPlainTextRows(rawText, defaultTitlePt), {
+            x: textPos.x,
+            y: textPos.y,
+            w: textPos.w,
+            h: textPos.h,
+            valign: 'top',
+            wrap: !isSingle,
+            align: 'center',
+            fontFace: DEFAULT_FONT_FACE,
+          });
+        }
+        continue;
+      }
+
       // --- Arrow line / Vector line ---
       if (
         PlaitDrawElement.isArrowLine?.(element) ||
@@ -507,7 +647,10 @@ async function addFrameSlide(
         const strokeColor = toPptColor(getCurrentStrokeColor(board, element));
         const lineProps: Record<string, any> = {
           color: strokeColor || '333333',
-          width: (element as any).strokeWidth || 1,
+          width: canvasStrokeWidthToPptPt(
+            getStrokeWidthByElement(element as any),
+            frameRect.width
+          ),
         };
 
         if (PlaitDrawElement.isArrowLine?.(element)) {
@@ -542,10 +685,12 @@ async function addFrameSlide(
         const freehandRect = getFreehandRectangle(freehand);
         const fhPos = computeSlidePosition(freehandRect, frameRect);
         const strokeColor = toPptColor(getCurrentStrokeColor(board, element));
-        const strokeWidth = (freehand.strokeWidth ?? 2) * (SLIDE_WIDTH / frameRect.width);
         const lineOpts = {
           color: strokeColor || '333333',
-          width: Math.max(0.01, strokeWidth),
+          width: canvasStrokeWidthToPptPt(
+            getStrokeWidthByElement(freehand as any),
+            frameRect.width
+          ),
         };
 
         // 将画布坐标转为形状局部坐标（与 ppt 形状 w×h 同单位）
@@ -585,10 +730,13 @@ async function addFrameSlide(
         const penPos = computeSlidePosition(penRect, frameRect);
 
         const strokeColor = toPptColor(getCurrentStrokeColor(board, element));
-        const strokeWidth = (pen.strokeWidth ?? 2) * (SLIDE_WIDTH / frameRect.width);
-        const line = strokeColor
-          ? { color: strokeColor, width: Math.max(0.01, strokeWidth) }
-          : undefined;
+        const line = {
+          color: strokeColor || '333333',
+          width: canvasStrokeWidthToPptPt(
+            getStrokeWidthByElement(pen as any),
+            frameRect.width
+          ),
+        };
 
         const fillColor = toPptColor(pen.fill);
         const fill = pen.closed && fillColor
@@ -618,7 +766,7 @@ async function addFrameSlide(
           y: penPos.y,
           w: penPos.w,
           h: penPos.h,
-          ...(line ? { line } : {}),
+          line,
           fill,
           points: pathPoints,
         });
@@ -698,11 +846,13 @@ export async function exportFramesToPPT(
   if (!frames.length) throw new Error('没有可导出的 Frame');
 
   const sortedFrames = sortFramesForPPT(frames);
+  const partition = partitionElementsByExportFrames(board, sortedFrames);
   const pptx = new PptxGenJS();
 
   let addedCount = 0;
   for (const frame of sortedFrames) {
-    const ok = await addFrameSlide(pptx, board, frame);
+    const slideChildren = partition.get(frame.id) ?? [];
+    const ok = await addFrameSlide(pptx, board, frame, slideChildren);
     if (ok) addedCount += 1;
   }
 
@@ -723,12 +873,7 @@ export async function exportAllPPTFrames(
   board: PlaitBoard,
   options: ExportPPTOptions = {}
 ): Promise<void> {
-  const allFrames: PlaitFrame[] = [];
-  for (const el of board.children as PlaitElement[]) {
-    if (isFrameElement(el)) {
-      allFrames.push(el as PlaitFrame);
-    }
-  }
+  const allFrames = collectAllFramesFromBoard(board);
   if (!allFrames.length) throw new Error('当前画布没有可导出的 Frame');
   await exportFramesToPPT(board, allFrames, options);
 }
