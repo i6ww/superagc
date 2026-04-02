@@ -635,6 +635,21 @@ function buildFallbackConfig(model: RemoteModelListItem): ModelConfig {
       item.toLowerCase().includes('openai-chat')
     );
 
+  if (model.id.toLowerCase() === 'kling_video') {
+    return {
+      id: model.id,
+      label: 'Kling',
+      shortLabel: 'Kling',
+      shortCode: buildShortCode(model.id, 'video'),
+      description: 'Kling 标准视频能力，版本通过 model_name 选择',
+      type: 'video',
+      vendor: ModelVendor.KLING,
+      supportsTools: false,
+      tags: ['runtime', 'kling'],
+      videoDefaults: { duration: '5', size: '1280x720', aspectRatio: '16:9' },
+    };
+  }
+
   return {
     id: model.id,
     label: model.id,

@@ -92,10 +92,48 @@ function isFluxModel(model: ModelConfig): boolean {
   );
 }
 
-function isKlingModel(model: ModelConfig): boolean {
+const KLING_TEXT2VIDEO_VERSION_OPTIONS = [
+  'kling-v3',
+  'kling-v2-6',
+  'kling-v2-1',
+  'kling-v1-6',
+  'kling-v1-5',
+];
+
+const KLING_IMAGE2VIDEO_VERSION_OPTIONS = [
+  'kling-v3',
+  'kling-v2-6',
+  'kling-v2-1',
+  'kling-v1-6',
+  'kling-v1-5',
+];
+
+const KLING_STANDARD_VERSION_OPTIONS = Array.from(
+  new Set([
+    ...KLING_TEXT2VIDEO_VERSION_OPTIONS,
+    ...KLING_IMAGE2VIDEO_VERSION_OPTIONS,
+  ])
+);
+
+function isKlingO1Model(model: ModelConfig): boolean {
+  const lowerId = model.id.toLowerCase();
   return (
-    model.vendor === ModelVendor.KLING ||
-    model.id.toLowerCase().includes('kling')
+    lowerId === 'kling-video-o1' ||
+    lowerId === 'kling-video-o1-edit' ||
+    lowerId.startsWith('kling-video-o1-')
+  );
+}
+
+function isStandardKlingVideoModel(model: ModelConfig): boolean {
+  if (model.type !== 'video' || isKlingO1Model(model)) {
+    return false;
+  }
+
+  const lowerId = model.id.toLowerCase();
+  return (
+    lowerId === 'kling_video' ||
+    /^kling-v\d(?:[-.]\d+)?$/.test(lowerId) ||
+    (model.vendor === ModelVendor.KLING && lowerId.includes('kling'))
   );
 }
 
@@ -361,7 +399,7 @@ function inferVideoBindings(
 ): ProviderModelBinding[] {
   const bindings: ProviderModelBinding[] = [];
 
-  if (isKlingModel(model)) {
+  if (isStandardKlingVideoModel(model)) {
     bindings.push(
       buildBinding(profile, model, {
         protocol: 'kling.video',
@@ -369,6 +407,22 @@ function inferVideoBindings(
         responseSchema: 'kling.video.task',
         submitPath: '/kling/v1/videos/{action}',
         pollPathTemplate: '/kling/v1/videos/{action}/{taskId}',
+        metadata: {
+          video: {
+            allowedDurations: ['5', '10'],
+            defaultDuration: '5',
+            durationMode: 'request-param',
+            durationField: 'duration',
+            strictDurationValidation: true,
+            versionField: 'model_name',
+            versionOptions: KLING_STANDARD_VERSION_OPTIONS,
+            defaultVersion: 'kling-v1-6',
+            versionOptionsByAction: {
+              text2video: KLING_TEXT2VIDEO_VERSION_OPTIONS,
+              image2video: KLING_IMAGE2VIDEO_VERSION_OPTIONS,
+            },
+          },
+        },
         priority: 620,
         confidence: 'high',
         source: 'template',

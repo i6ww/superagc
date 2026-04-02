@@ -537,10 +537,10 @@ const SEEDANCE_DEFAULT_PARAMS: VideoModelDefaults = {
  */
 export const VIDEO_MODELS: ModelConfig[] = [
   {
-    id: 'kling-v1-6',
-    label: 'Kling V1.6',
-    shortCode: 'k16',
-    description: '5s/10s 视频，支持文生视频和图生视频',
+    id: 'kling_video',
+    label: 'Kling',
+    shortCode: 'kling',
+    description: 'Kling 标准视频能力，版本通过 model_name 选择',
     type: 'video',
     vendor: ModelVendor.KLING,
     supportsTools: true,

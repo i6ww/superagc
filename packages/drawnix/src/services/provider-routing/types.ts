@@ -36,6 +36,10 @@ export interface ProviderVideoBindingMetadata {
   strictDurationValidation?: boolean;
   resultMode?: ProviderVideoResultMode;
   downloadPathTemplate?: string;
+  versionField?: string;
+  versionOptions?: string[];
+  defaultVersion?: string;
+  versionOptionsByAction?: Record<string, string[]>;
 }
 
 export interface ProviderTextBindingMetadata {
