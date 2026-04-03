@@ -58,9 +58,10 @@ function shouldBypassThumbnailForUrl(originalUrl: string): boolean {
  * @returns 预览图 URL（带 ?thumbnail={size} 参数）
  */
 function getThumbnailUrl(originalUrl: string, size: 'small' | 'large' = 'small'): string {
+  const normalizedUrl = normalizeImageDataUrl(originalUrl);
   // 外部 URL / data URL / blob URL 不追加参数，避免破坏资源
-  if (shouldBypassThumbnailForUrl(originalUrl)) {
-    return originalUrl;
+  if (shouldBypassThumbnailForUrl(normalizedUrl)) {
+    return normalizedUrl;
   }
   try {
     const url = new URL(normalizedUrl, window.location.origin);
@@ -121,7 +122,9 @@ async function ensureThumbnailImpl(
   originalUrl: string,
   type: 'image' | 'video'
 ): Promise<void> {
-  if (shouldBypassThumbnailForUrl(originalUrl)) {
+  const normalizedUrl = normalizeImageDataUrl(originalUrl);
+
+  if (shouldBypassThumbnailForUrl(normalizedUrl)) {
     return;
   }
 
@@ -172,7 +175,9 @@ async function ensureThumbnailImpl(
  * @param type 媒体类型
  */
 function ensureThumbnail(originalUrl: string, type: 'image' | 'video'): void {
-  if (shouldBypassThumbnailForUrl(originalUrl)) {
+  const normalizedUrl = normalizeImageDataUrl(originalUrl);
+
+  if (shouldBypassThumbnailForUrl(normalizedUrl)) {
     return;
   }
 

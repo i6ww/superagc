@@ -38,6 +38,7 @@ import {
   completeLLMApiLog,
   failLLMApiLog,
 } from '../../services/media-executor/llm-api-logger';
+import { normalizeImageDataUrl } from '@aitu/utils';
 
 function inferAuthTypeFromRoute(
   route: ReturnType<typeof resolveInvocationRoute>
@@ -373,6 +374,8 @@ async function generateImageDirect(
 
     // 提取结果 URL
     const resultUrl = result.data?.[0]?.url || result.data?.[0]?.b64_json;
+    const normalizedResultUrl =
+      typeof resultUrl === 'string' ? normalizeImageDataUrl(resultUrl) : undefined;
 
     completeLLMApiLog(logId, {
       httpStatus: response.status,

@@ -21,7 +21,7 @@ import {
   insertAudioFromUrl,
 } from '../../data/audio';
 import { executeCanvasInsertion } from '../../services/canvas-operations';
-import { sanitizeFilename, downloadFromBlob } from '@aitu/utils';
+import { sanitizeFilename, downloadFromBlob, normalizeImageDataUrl } from '@aitu/utils';
 import { downloadMediaFile } from '../../utils/download-utils';
 import { BaseDrawer } from '../side-drawer';
 import { CharacterCreateDialog } from '../character/CharacterCreateDialog';

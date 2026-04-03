@@ -8,6 +8,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Button, Tag, Tooltip, Checkbox, MessagePlugin } from 'tdesign-react';
 import { ImageIcon, VideoIcon, DeleteIcon, DownloadIcon, EditIcon, UserIcon, PlayCircleIcon, CloseCircleIcon } from 'tdesign-icons-react';
+import { normalizeImageDataUrl } from '@aitu/utils';
 import { Task, TaskStatus, TaskType } from '../../types/task.types';
 import { formatDateTime, formatTaskDuration } from '../../utils/task-utils';
 import { useUnifiedCache } from '../../hooks/useUnifiedCache';
@@ -216,12 +217,17 @@ export const TaskItem: React.FC<TaskItemProps> = React.memo(({
   const klingCfgScale = normalizeNestedString(extraParams?.cfg_scale);
 
   // Unified cache hook (skip for character tasks)
+  const rawMediaUrl = task.result?.urls?.[0] || task.result?.url;
+  const mediaUrl =
+    task.type === TaskType.IMAGE && rawMediaUrl
+      ? normalizeImageDataUrl(rawMediaUrl)
+      : rawMediaUrl;
+
   const { isCached } = useUnifiedCache(
-    isCharacterTask || isAudioTask ? undefined : task.result?.url
+    isCharacterTask || isAudioTask ? undefined : mediaUrl
   );
 
   // Use original URL or cached URL (Service Worker handles caching automatically)
-  const mediaUrl = task.result?.urls?.[0] || task.result?.url;
   const mediaCount = task.result?.urls?.length || (task.result?.url ? 1 : 0);
   const previewMediaUrl = isAudioTask
     ? task.result?.previewImageUrl

@@ -40,6 +40,7 @@ import {
 } from '../../constants/image-aspect-ratios';
 import { DialogTaskList } from '../task-queue/DialogTaskList';
 import { LS_KEYS } from '../../constants/storage-keys';
+import { saveAIImageToolPreferences } from '../../services/ai-generation-preferences-service';
 import {
   geminiSettings,
   hasInvocationRouteCredentials,

@@ -3,6 +3,7 @@ import type {
   ImageGenerationRequest,
   ImageModelAdapter,
 } from './types';
+import { getFileExtension, normalizeImageDataUrl } from '@aitu/utils';
 import { registerModelAdapter } from './registry';
 import { sendAdapterRequest } from './context';
 
