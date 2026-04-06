@@ -35,6 +35,8 @@ const SLIDE_HEIGHT = 5.625;
 const SLIDE_WIDTH_PT = SLIDE_WIDTH * 72;
 // 画布默认使用的中文系统字体（与前端一致）
 const DEFAULT_FONT_FACE = 'PingFang SC';
+// 画布文本默认字号（见 with-text-resize / inline text 输入）
+const DEFAULT_CANVAS_TEXT_FONT_SIZE_PX = 14;
 
 /**
  * 画布坐标系下的描边宽度（与 element.points 同单位）→ PptxGenJS line.width（磅）。
@@ -90,6 +92,11 @@ interface SlateLeaf {
   [key: string]: any;
 }
 
+interface TextFallbackStyle {
+  fontSizePt?: number;
+  align?: 'left' | 'center' | 'right';
+}
+
 function isSlateLeaf(node: any): node is SlateLeaf {
   return node && typeof node === 'object' && typeof node.text === 'string';
 }
@@ -106,17 +113,32 @@ function collectLeaves(node: any): SlateLeaf[] {
   return leaves;
 }
 
+function parseNumericFontSize(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
 function leafToTextProps(
   leaf: SlateLeaf,
   addBreakLine: boolean,
-  fontScale: number
+  fontScale: number,
+  defaultFontSizePt: number
 ): PptxGenJS.TextProps {
   const opts: Record<string, any> = {};
 
-  const fontSize = leaf['font-size'];
-  if (fontSize && typeof fontSize === 'number') {
-    opts.fontSize = Math.max(6, Math.round(fontSize * fontScale));
-  }
+  const fontSize = parseNumericFontSize(leaf['font-size']);
+  const targetPt = fontSize
+    ? Math.max(6, Math.round(fontSize * fontScale))
+    : defaultFontSizePt;
+  opts.fontSize = targetPt;
 
   const fontWeight = leaf['font-weight'];
   const fontWeightNum = fontWeight ? Number(fontWeight) : NaN;
@@ -143,6 +165,10 @@ function leafToTextProps(
  */
 function walkParagraphs(paragraphs: any[], fontScale: number): PptxGenJS.TextProps[] | null {
   const result: PptxGenJS.TextProps[] = [];
+  const defaultFontSizePt = Math.max(
+    6,
+    Math.round(DEFAULT_CANVAS_TEXT_FONT_SIZE_PX * fontScale)
+  );
 
   for (let pi = 0; pi < paragraphs.length; pi++) {
     const isLastPara = pi === paragraphs.length - 1;
@@ -154,7 +180,7 @@ function walkParagraphs(paragraphs: any[], fontScale: number): PptxGenJS.TextPro
     for (let li = 0; li < leaves.length; li++) {
       const isLastLeaf = li === leaves.length - 1;
       const needBreak = isLastLeaf && !isLastPara;
-      result.push(leafToTextProps(leaves[li], needBreak, fontScale));
+      result.push(leafToTextProps(leaves[li], needBreak, fontScale, defaultFontSizePt));
     }
   }
 
@@ -205,6 +231,88 @@ function extractAlign(para: any): 'left' | 'center' | 'right' | undefined {
   return undefined;
 }
 
+function extractFallbackTextStyle(
+  element: PlaitElement,
+  fontScale: number,
+  defaultFontPt: number,
+  defaultAlign: 'left' | 'center' | 'right'
+): TextFallbackStyle {
+  const textObj = (element as any).text;
+  const data = (element as any).data;
+
+  let align = defaultAlign;
+  let fontSizePt = defaultFontPt;
+
+  const paragraphs: any[] = [];
+  if (Array.isArray(data)) {
+    paragraphs.push(...data);
+  }
+  if (textObj && typeof textObj === 'object') {
+    paragraphs.push(textObj);
+  }
+
+  for (const para of paragraphs) {
+    const paraAlign = extractAlign(para);
+    if (paraAlign) {
+      align = paraAlign;
+      break;
+    }
+  }
+
+  for (const para of paragraphs) {
+    const leaves = collectLeaves(para);
+    for (const leaf of leaves) {
+      const sizePx = parseNumericFontSize((leaf as any)['font-size']);
+      if (sizePx && sizePx > 0) {
+        fontSizePt = Math.max(6, Math.round(sizePx * fontScale));
+        return { align, fontSizePt };
+      }
+    }
+  }
+
+  return { align, fontSizePt };
+}
+
+function extractPlainTextWithLineBreaks(element: PlaitElement, board: PlaitBoard): string {
+  const data = (element as any).data;
+  if (Array.isArray(data) && data.length > 0) {
+    const rows = data
+      .map((node: any) => {
+        const leaves = collectLeaves(node);
+        return leaves.map((leaf) => leaf.text || '').join('');
+      })
+      .filter((line: string) => line.length > 0);
+    if (rows.length > 0) return rows.join('\n');
+  }
+
+  const textObj = (element as any).text;
+  if (textObj && typeof textObj === 'object' && 'children' in textObj) {
+    const children = (textObj as any).children;
+    if (Array.isArray(children)) {
+      const lines: string[] = [];
+      const hasParagraphChildren = children.some(
+        (child: any) =>
+          child &&
+          typeof child === 'object' &&
+          Array.isArray(child.children)
+      );
+      if (hasParagraphChildren) {
+        for (const child of children) {
+          const leaves = collectLeaves(child);
+          const line = leaves.map((leaf) => leaf.text || '').join('');
+          if (line.length > 0) lines.push(line);
+        }
+      } else {
+        const line = collectLeaves(textObj).map((leaf) => leaf.text || '').join('');
+        if (line.length > 0) lines.push(line);
+      }
+      if (lines.length > 0) return lines.join('\n');
+    }
+  }
+
+  return extractTextFromElement(element, board);
+}
+
 /**
  * 纯文本兜底（无样式数据时使用）
  */
@@ -226,6 +334,12 @@ function isShortSingleLine(text: string): boolean {
   if (!t) return false;
   // 没有显式换行且字符数不多（如「感谢聆听」「Q&A」）
   return !text.includes('\n') && t.length <= 12;
+}
+
+function shouldEnableAutoWrap(text: string, isSingle: boolean): boolean {
+  // 用户输入了显式换行时，优先保留原换行，避免 PPT/WPS 二次自动断行
+  if (text.includes('\n')) return false;
+  return !isSingle;
 }
 
 // ─── Shape type mapping ───
@@ -513,7 +627,6 @@ async function addFrameSlide(
   const fontScale = (SLIDE_WIDTH * 72) / frameRect.width;
 
   // 兜底字号（按缩放后）
-  const defaultTitlePt = Math.max(8, Math.round(44 * fontScale));
   const defaultBodyPt = Math.max(6, Math.round(18 * fontScale));
 
   for (const element of ordered) {
@@ -598,9 +711,11 @@ async function addFrameSlide(
 
       // --- PlaitText / 纯文本（排除已处理的几何形状）---
       if (isTextElement(board, element)) {
-        const rawText = extractTextFromElement(element, board);
+        const rawText = extractPlainTextWithLineBreaks(element, board);
         const isSingle = isShortSingleLine(rawText);
-        const textPos = computeSlidePosition(rect, frameRect, 1.4);
+        const autoWrap = shouldEnableAutoWrap(rawText, isSingle);
+        // 仅在允许自动换行时做轻微宽度冗余；手动换行时保持与画布等宽
+        const textPos = computeSlidePosition(rect, frameRect, autoWrap ? 1.12 : 1);
         const rich = extractElementRichText(element, fontScale);
         if (rich) {
           slide.addText(rich.rows, {
@@ -609,20 +724,30 @@ async function addFrameSlide(
             w: textPos.w,
             h: textPos.h,
             valign: 'top',
-            wrap: !isSingle,
-            align: rich.align || 'center',
+            wrap: autoWrap,
+            align: rich.align || 'left',
             fontFace: DEFAULT_FONT_FACE,
+            margin: 0,
+            fit: 'none',
           });
         } else if (rawText) {
-          slide.addText(buildPlainTextRows(rawText, defaultTitlePt), {
+          const fallback = extractFallbackTextStyle(
+            element,
+            fontScale,
+            defaultBodyPt,
+            'left'
+          );
+          slide.addText(buildPlainTextRows(rawText, fallback.fontSizePt || defaultBodyPt), {
             x: textPos.x,
             y: textPos.y,
             w: textPos.w,
             h: textPos.h,
             valign: 'top',
-            wrap: !isSingle,
-            align: 'center',
+            wrap: autoWrap,
+            align: fallback.align || 'left',
             fontFace: DEFAULT_FONT_FACE,
+            margin: 0,
+            fit: 'none',
           });
         }
         continue;
@@ -806,6 +931,7 @@ async function addFrameSlide(
       const richFallback = extractElementRichText(element, fontScale);
       const fallbackText = extractTextFromElement(element, board);
       const isSingle = isShortSingleLine(fallbackText);
+      const autoWrap = shouldEnableAutoWrap(fallbackText, isSingle);
       if (richFallback) {
         slide.addText(richFallback.rows, {
           x: pos.x,
@@ -813,9 +939,11 @@ async function addFrameSlide(
           w: pos.w,
           h: pos.h,
           valign: 'top',
-          wrap: !isSingle,
+          wrap: autoWrap,
           align: richFallback.align,
           fontFace: DEFAULT_FONT_FACE,
+          margin: 0,
+          fit: 'none',
         });
       } else if (fallbackText) {
         slide.addText(buildPlainTextRows(fallbackText, defaultBodyPt), {
@@ -824,8 +952,10 @@ async function addFrameSlide(
           w: pos.w,
           h: pos.h,
           valign: 'top',
-          wrap: !isSingle,
+          wrap: autoWrap,
           fontFace: DEFAULT_FONT_FACE,
+          margin: 0,
+          fit: 'none',
         });
       }
     } catch (err) {
