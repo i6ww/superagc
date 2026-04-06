@@ -1119,11 +1119,7 @@ const SEEDREAM_IMAGE_MODEL_IDS = [
 /** GPT 图片模型 ID（仅支持有限尺寸） */
 const GPT_IMAGE_MODEL_IDS = ['gpt-image-1.5'];
 const MJ_IMAGE_MODEL_IDS = ['mj-imagine'];
-const GEMINI_31_FLASH_IMAGE_MODEL_IDS = [
-  'gemini-3.1-flash-image-preview',
-  'gemini-3.1-flash-image-preview-2k',
-  'gemini-3.1-flash-image-preview-4k',
-];
+const GEMINI_31_FLASH_IMAGE_MODEL_IDS = ['gemini-3.1-flash-image-preview'];
 
 /** Gemini 图片模型 ID（支持完整尺寸） */
 const GEMINI_IMAGE_MODEL_IDS = IMAGE_MODELS.filter(
