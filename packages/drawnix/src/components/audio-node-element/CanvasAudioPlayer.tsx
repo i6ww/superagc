@@ -28,11 +28,17 @@ export const CanvasAudioPlayer: React.FC = () => {
   const playback = useCanvasAudioPlayback();
   const volumeRef = useRef<HTMLDivElement>(null);
   const collapseTimeoutRef = useRef<number | null>(null);
+  const volumeTogglePointerDownRef = useRef(false);
   const volumeHoveredRef = useRef(false);
   const volumeDraggingRef = useRef(false);
   const [volumeExpanded, setVolumeExpanded] = useState(false);
   const [volumeHovered, setVolumeHovered] = useState(false);
   const [volumeDragging, setVolumeDragging] = useState(false);
+  const [mobileAnchorRect, setMobileAnchorRect] = useState<{
+    left: number;
+    width: number;
+    bottom: number;
+  } | null>(null);
 
   const progress = useMemo(() => {
     if (!playback.duration || playback.duration <= 0) {
@@ -47,14 +53,26 @@ export const CanvasAudioPlayer: React.FC = () => {
 
   const currentTime = Number.isFinite(playback.currentTime) ? playback.currentTime : 0;
   const duration = Number.isFinite(playback.duration) ? playback.duration : 0;
+  const currentTimeLabel = formatDuration(currentTime);
+  const durationLabel = formatDuration(duration);
   const canPlayPrevious = playback.activeQueueIndex > 0;
   const canPlayNext =
     playback.activeQueueIndex >= 0 &&
     playback.activeQueueIndex < playback.queue.length - 1;
-  const subtitle =
+  const hasQueueInfo =
     playback.queue.length > 1 && playback.activeQueueIndex >= 0
-      ? `画布音频 ${playback.activeQueueIndex + 1} / ${playback.queue.length}`
-      : '画布音频';
+      ? true
+      : false;
+  const queueInfoLabel = hasQueueInfo
+    ? `${playback.activeQueueIndex + 1}/${playback.queue.length}`
+    : null;
+  const subtitle = hasQueueInfo
+    ? `画布音频 ${playback.activeQueueIndex + 1} / ${playback.queue.length}`
+    : '画布音频';
+  const mobileSubtitle = queueInfoLabel
+    ? `${queueInfoLabel} · ${currentTimeLabel} / ${durationLabel}`
+    : `${currentTimeLabel} / ${durationLabel}`;
+  const volumePercentage = Math.round(playback.volume * 100);
 
   const scrubberStyle = {
     '--canvas-audio-progress': `${progress}%`,
@@ -73,6 +91,11 @@ export const CanvasAudioPlayer: React.FC = () => {
   const expandVolume = () => {
     clearCollapseTimer();
     setVolumeExpanded(true);
+  };
+
+  const toggleVolumeExpanded = () => {
+    clearCollapseTimer();
+    setVolumeExpanded((expanded) => !expanded);
   };
 
   const scheduleCollapse = () => {
@@ -140,6 +163,7 @@ export const CanvasAudioPlayer: React.FC = () => {
       setVolumeExpanded(false);
       setVolumeDragging(false);
       setVolumeHovered(false);
+      volumeTogglePointerDownRef.current = false;
     };
 
     document.addEventListener('pointerdown', handlePointerDown, true);
@@ -147,6 +171,79 @@ export const CanvasAudioPlayer: React.FC = () => {
       document.removeEventListener('pointerdown', handlePointerDown, true);
     };
   }, [volumeExpanded]);
+
+  useEffect(() => {
+    if (!playback.activeAudioUrl) {
+      setMobileAnchorRect(null);
+      return;
+    }
+
+    let frameId = 0;
+    const updateMobileAnchorRect = () => {
+      const inputContainer = document.querySelector('.ai-input-bar__container');
+      if (!(inputContainer instanceof HTMLElement)) {
+        setMobileAnchorRect(null);
+        return;
+      }
+
+      const rect = inputContainer.getBoundingClientRect();
+      const nextRect = {
+        left: Math.round(rect.left),
+        width: Math.round(rect.width),
+        bottom: Math.max(0, Math.round(window.innerHeight - rect.top)),
+      };
+
+      setMobileAnchorRect((previousRect) => {
+        if (
+          previousRect &&
+          previousRect.left === nextRect.left &&
+          previousRect.width === nextRect.width &&
+          previousRect.bottom === nextRect.bottom
+        ) {
+          return previousRect;
+        }
+
+        return nextRect;
+      });
+    };
+
+    const scheduleUpdate = () => {
+      window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(updateMobileAnchorRect);
+    };
+
+    const inputContainer = document.querySelector('.ai-input-bar__container');
+    const inputBar = document.querySelector('.ai-input-bar');
+    const resizeObserver =
+      typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(() => {
+            scheduleUpdate();
+          })
+        : null;
+
+    if (resizeObserver && inputContainer instanceof HTMLElement) {
+      resizeObserver.observe(inputContainer);
+    }
+
+    if (
+      resizeObserver &&
+      inputBar instanceof HTMLElement &&
+      inputBar !== inputContainer
+    ) {
+      resizeObserver.observe(inputBar);
+    }
+
+    scheduleUpdate();
+    window.addEventListener('resize', scheduleUpdate);
+    window.addEventListener('orientationchange', scheduleUpdate);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener('resize', scheduleUpdate);
+      window.removeEventListener('orientationchange', scheduleUpdate);
+      resizeObserver?.disconnect();
+    };
+  }, [playback.activeAudioUrl]);
 
   useEffect(() => {
     if (!volumeDragging) {
@@ -171,8 +268,16 @@ export const CanvasAudioPlayer: React.FC = () => {
     return null;
   }
 
+  const playerStyle = mobileAnchorRect
+    ? ({
+        '--canvas-audio-mobile-left': `${mobileAnchorRect.left}px`,
+        '--canvas-audio-mobile-width': `${mobileAnchorRect.width}px`,
+        '--canvas-audio-mobile-offset': `${mobileAnchorRect.bottom}px`,
+      } as React.CSSProperties)
+    : undefined;
+
   return (
-    <div className="canvas-audio-player">
+    <div className="canvas-audio-player" style={playerStyle}>
       <div className="canvas-audio-player__cover">
         {playback.activePreviewImageUrl ? (
           <img
@@ -191,13 +296,20 @@ export const CanvasAudioPlayer: React.FC = () => {
         <div className="canvas-audio-player__title">
           {playback.activeTitle || '未命名音频'}
         </div>
-        <div className="canvas-audio-player__subtitle">{subtitle}</div>
+        <div className="canvas-audio-player__subtitle">
+          <span className="canvas-audio-player__subtitle-text canvas-audio-player__subtitle-text--desktop">
+            {subtitle}
+          </span>
+          <span className="canvas-audio-player__subtitle-text canvas-audio-player__subtitle-text--mobile">
+            {mobileSubtitle}
+          </span>
+        </div>
       </div>
 
       <div className="canvas-audio-player__controls">
         <button
           type="button"
-          className="canvas-audio-player__action"
+          className="canvas-audio-player__action canvas-audio-player__action--previous"
           onClick={() => {
             void playback.playPrevious();
           }}
@@ -218,7 +330,7 @@ export const CanvasAudioPlayer: React.FC = () => {
         </button>
         <button
           type="button"
-          className="canvas-audio-player__action"
+          className="canvas-audio-player__action canvas-audio-player__action--next"
           onClick={() => {
             void playback.playNext();
           }}
@@ -231,7 +343,7 @@ export const CanvasAudioPlayer: React.FC = () => {
 
       <div className="canvas-audio-player__progress">
         <span className="canvas-audio-player__time">
-          {formatDuration(currentTime)}
+          {currentTimeLabel}
         </span>
         <input
           type="range"
@@ -245,7 +357,7 @@ export const CanvasAudioPlayer: React.FC = () => {
           aria-label="Audio progress"
         />
         <span className="canvas-audio-player__time">
-          {formatDuration(duration)}
+          {durationLabel}
         </span>
       </div>
 
@@ -254,6 +366,7 @@ export const CanvasAudioPlayer: React.FC = () => {
         className={classNames('canvas-audio-player__volume', {
           'canvas-audio-player__volume--expanded': volumeExpanded,
         })}
+        onPointerDown={(event) => event.stopPropagation()}
         onMouseEnter={() => {
           volumeHoveredRef.current = true;
           setVolumeHovered(true);
@@ -281,7 +394,8 @@ export const CanvasAudioPlayer: React.FC = () => {
               step={0.01}
               value={playback.volume}
               onFocus={expandVolume}
-              onPointerDown={() => {
+              onPointerDown={(event) => {
+                event.stopPropagation();
                 volumeDraggingRef.current = true;
                 setVolumeDragging(true);
                 expandVolume();
@@ -290,20 +404,32 @@ export const CanvasAudioPlayer: React.FC = () => {
               className="canvas-audio-player__slider canvas-audio-player__slider--volume"
               style={volumeStyle}
               aria-label="Playback volume"
+              aria-valuetext={`${volumePercentage}%`}
             />
           </div>
+          <span className="canvas-audio-player__volume-value">
+            {volumePercentage}%
+          </span>
           <button
             type="button"
             className="canvas-audio-player__volume-toggle"
-            onClick={() => {
-              if (volumeExpanded) {
-                clearCollapseTimer();
-                setVolumeExpanded(false);
-              } else {
-                expandVolume();
-              }
+            onPointerDown={(event) => {
+              event.stopPropagation();
+              volumeTogglePointerDownRef.current = true;
             }}
-            onFocus={expandVolume}
+            onClick={() => {
+              volumeTogglePointerDownRef.current = false;
+              toggleVolumeExpanded();
+            }}
+            onFocus={() => {
+              if (volumeTogglePointerDownRef.current) {
+                return;
+              }
+              expandVolume();
+            }}
+            onBlur={() => {
+              volumeTogglePointerDownRef.current = false;
+            }}
             aria-label="Volume controls"
             aria-expanded={volumeExpanded}
           >
