@@ -35,12 +35,16 @@ interface SWTask {
     thumbnailUrls?: string[];
     format: string;
     size: number;
+    resultKind?: 'image' | 'video' | 'audio' | 'lyrics' | 'character' | 'chat';
     width?: number;
     height?: number;
     duration?: number;
     thumbnailUrl?: string;
     previewImageUrl?: string;
     title?: string;
+    lyricsText?: string;
+    lyricsTitle?: string;
+    lyricsTags?: string[];
     providerTaskId?: string;
     primaryClipId?: string;
     clipIds?: string[];

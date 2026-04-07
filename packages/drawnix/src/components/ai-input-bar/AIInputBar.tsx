@@ -129,6 +129,7 @@ import {
   loadAIInputPreferences,
   saveAIInputPreferences,
 } from '../../services/ai-generation-preferences-service';
+import { applyForcedSunoParams } from '../../utils/suno-model-aliases';
 
 /**
  * 将 WorkflowDefinition 转换为 WorkflowMessageData
@@ -798,7 +799,20 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
           selectedParams
         );
       }
-      return getCompatibleParams(selectedModel);
+      const params = getCompatibleParams(selectedModel);
+      if (generationType !== 'audio') {
+        return params;
+      }
+
+      const sunoAction =
+        selectedParams.sunoAction ||
+        params.find((param) => param.id === 'sunoAction')?.defaultValue ||
+        'music';
+      if (sunoAction !== 'lyrics') {
+        return params;
+      }
+
+      return params.filter((param) => param.id === 'sunoAction');
     }, [generationType, selectedModel, selectedModelRef, selectedParams]);
 
     // 点击外部关闭输入框的展开状态
@@ -1556,7 +1570,7 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
           }
         });
 
-        setSelectedParams(nextParams);
+        setSelectedParams(applyForcedSunoParams(model.id, nextParams));
 
         // 关闭下拉菜单并保持焦点
         setModelDropdownOpen(false);
@@ -1633,9 +1647,10 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
         }
       });
 
-      if (!isSameParams(selectedParamsRef.current || {}, nextParams)) {
-        setSelectedParams(nextParams);
-        selectedParamsRef.current = nextParams;
+      const normalizedParams = applyForcedSunoParams(selectedModel, nextParams);
+      if (!isSameParams(selectedParamsRef.current || {}, normalizedParams)) {
+        setSelectedParams(normalizedParams);
+        selectedParamsRef.current = normalizedParams;
       }
       // 仅在模型或兼容参数变动时运行，避免用户选择被覆盖
       // eslint-disable-next-line react-hooks/exhaustive-deps

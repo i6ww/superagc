@@ -5,9 +5,9 @@
  * Shows input parameters (prompt) and output results when completed.
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Button, Tag, Tooltip, Checkbox, MessagePlugin } from 'tdesign-react';
-import { ImageIcon, VideoIcon, DeleteIcon, DownloadIcon, EditIcon, UserIcon, PlayCircleIcon, CloseCircleIcon } from 'tdesign-icons-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Button, Tag, Tooltip, Checkbox } from 'tdesign-react';
+import { ImageIcon, VideoIcon, DeleteIcon, DownloadIcon, EditIcon, UserIcon, PlayCircleIcon, CloseCircleIcon, CopyIcon } from 'tdesign-icons-react';
 import { normalizeImageDataUrl } from '@aitu/utils';
 import { Task, TaskStatus, TaskType } from '../../types/task.types';
 import { formatDateTime, formatTaskDuration } from '../../utils/task-utils';
@@ -16,6 +16,7 @@ import { supportsCharacterExtraction, isSora2VideoId } from '../../types/charact
 import { RetryImage } from '../retry-image';
 import { TaskProgressOverlay } from './TaskProgressOverlay';
 import { useThumbnailUrl } from '../../hooks/useThumbnailUrl';
+import { getLyricsPreview, getLyricsTags, getLyricsText, getLyricsTitle, isLyricsResult } from '../../utils/lyrics-task-utils';
 import './task-queue.scss';
 import './task-progress-overlay.scss';
 
@@ -86,6 +87,8 @@ export interface TaskItemProps {
   onDownload?: (taskId: string) => void;
   /** Callback when insert to board button is clicked */
   onInsert?: (taskId: string) => void;
+  /** Callback when lyrics copy button is clicked */
+  onCopy?: (taskId: string) => void;
   /** Callback when preview is opened */
   onPreviewOpen?: () => void;
   /** Callback when edit button is clicked */
@@ -147,6 +150,7 @@ export const TaskItem: React.FC<TaskItemProps> = React.memo(({
   onDelete,
   onDownload,
   onInsert,
+  onCopy,
   onPreviewOpen,
   onEdit,
   onExtractCharacter,
@@ -193,12 +197,22 @@ export const TaskItem: React.FC<TaskItemProps> = React.memo(({
   // Check if this is a character task
   const isCharacterTask = task.type === TaskType.CHARACTER;
   const isAudioTask = task.type === TaskType.AUDIO;
+  const isLyricsTask = isAudioTask && isLyricsResult(task.result);
   const isPreviewableTask =
     task.type === TaskType.IMAGE || task.type === TaskType.VIDEO;
+  const lyricsText = getLyricsText(task.result);
+  const lyricsTitle = getLyricsTitle(
+    task.result,
+    task.params.title || task.params.prompt
+  );
+  const lyricsPreview = getLyricsPreview(lyricsText);
+  const lyricsTags = getLyricsTags(task.result);
   const displayPrompt = isCharacterTask
     ? isCompleted && task.result?.characterUsername
       ? `@${task.result.characterUsername}`
       : '角色创建中...'
+    : isLyricsTask
+    ? lyricsTitle || lyricsPreview || task.params.prompt
     : task.result?.title || task.params.title || task.params.prompt;
   const extraParams =
     task.params.params && typeof task.params.params === 'object'
@@ -217,7 +231,9 @@ export const TaskItem: React.FC<TaskItemProps> = React.memo(({
   const klingCfgScale = normalizeNestedString(extraParams?.cfg_scale);
 
   // Unified cache hook (skip for character tasks)
-  const rawMediaUrl = task.result?.urls?.[0] || task.result?.url;
+  const rawMediaUrl = isLyricsTask
+    ? undefined
+    : task.result?.urls?.[0] || task.result?.url;
   const mediaUrl =
     task.type === TaskType.IMAGE && rawMediaUrl
       ? normalizeImageDataUrl(rawMediaUrl)
@@ -228,9 +244,13 @@ export const TaskItem: React.FC<TaskItemProps> = React.memo(({
   );
 
   // Use original URL or cached URL (Service Worker handles caching automatically)
-  const mediaCount = task.result?.urls?.length || (task.result?.url ? 1 : 0);
+  const mediaCount = isLyricsTask
+    ? 0
+    : task.result?.urls?.length || (task.result?.url ? 1 : 0);
   const previewMediaUrl = isAudioTask
-    ? task.result?.previewImageUrl
+    ? isLyricsTask
+      ? undefined
+      : task.result?.previewImageUrl
     : mediaUrl;
   
   // 获取预览图URL（任务列表使用小尺寸）
@@ -404,6 +424,11 @@ export const TaskItem: React.FC<TaskItemProps> = React.memo(({
                       <span className="task-item__multi-badge">{mediaCount}首</span>
                     )}
                   </>
+                ) : isLyricsTask ? (
+                  <div className="task-item__preview-placeholder">
+                    <CopyIcon size="24px" />
+                    <span>歌词</span>
+                  </div>
                 ) : isCharacterTask && task.result?.characterProfileUrl ? (
                   <div className="task-item__character-preview">
                     <RetryImage
@@ -487,18 +512,24 @@ export const TaskItem: React.FC<TaskItemProps> = React.memo(({
                 {task.type === TaskType.VIDEO && task.params.size && (
                   <Tag variant="outline">{task.params.size}</Tag>
                 )}
-                {task.type === TaskType.AUDIO && task.result?.duration && (
+                {task.type === TaskType.AUDIO && task.result?.duration && !isLyricsTask && (
                   <Tag variant="outline">
                     {formatAudioDuration(task.result.duration)}
                   </Tag>
                 )}
-                {task.type === TaskType.AUDIO && task.params.mv && (
+                {task.type === TaskType.AUDIO && task.params.mv && !isLyricsTask && (
                   <Tag variant="outline">{task.params.mv}</Tag>
                 )}
-                {task.type === TaskType.AUDIO && task.params.tags && (
+                {task.type === TaskType.AUDIO && task.params.tags && !isLyricsTask && (
                   <Tag variant="outline">
                     {String(task.params.tags).split(',')[0]?.trim() || '音频'}
                   </Tag>
+                )}
+                {isLyricsTask && (
+                  <Tag variant="outline">歌词</Tag>
+                )}
+                {isLyricsTask && lyricsTags[0] && (
+                  <Tag variant="outline">{lyricsTags[0]}</Tag>
                 )}
                 {task.params.batchId && task.params.batchIndex && (
                   <Tag variant="outline">批量 {task.params.batchIndex}/{task.params.batchTotal}</Tag>
@@ -520,13 +551,13 @@ export const TaskItem: React.FC<TaskItemProps> = React.memo(({
                   }
                   return null;
                 })()}
-                {task.type === TaskType.AUDIO && task.result?.duration && (
+                {task.type === TaskType.AUDIO && task.result?.duration && !isLyricsTask && (
                   <span className="task-item__size">
                     {' · '}
                     {formatAudioDuration(task.result.duration)}
                   </span>
                 )}
-                {isCompleted && task.result?.url && (
+                {isCompleted && task.result?.url && !isLyricsTask && (
                   <a
                     href={task.result.url}
                     target="_blank"
@@ -568,6 +599,17 @@ export const TaskItem: React.FC<TaskItemProps> = React.memo(({
                   </Tooltip>
                 )}
 
+                {isCompleted && isLyricsTask && lyricsText && (
+                  <Tooltip content="复制歌词" theme="light">
+                    <Button
+                      size="small"
+                      variant="text"
+                      icon={<CopyIcon />}
+                      onClick={(e) => { e.stopPropagation(); onCopy?.(task.id); }}
+                    />
+                  </Tooltip>
+                )}
+
                 {!isCharacterTask && !isAudioTask && (
                   <Tooltip content="编辑" theme="light">
                     <Button
@@ -603,8 +645,7 @@ export const TaskItem: React.FC<TaskItemProps> = React.memo(({
 
               {/* Primary Action Button (Insert/Retry) - Moved to far right */}
               {isCompleted &&
-                task.result?.url &&
-                !isCharacterTask && (
+                ((task.result?.url && !isCharacterTask) || isLyricsTask) && (
                 <Button
                   size="small"
                   theme="primary"

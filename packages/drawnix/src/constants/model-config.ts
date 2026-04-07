@@ -19,6 +19,7 @@ export enum ModelVendor {
   GEMINI = 'GEMINI',
   FLUX = 'FLUX',
   MIDJOURNEY = 'MIDJOURNEY',
+  SUNO = 'SUNO',
   GPT = 'GPT',
   GROK = 'GROK',
   QWEN = 'QWEN',
@@ -47,6 +48,7 @@ export const VENDOR_NAMES: Record<ModelVendor, string> = {
   [ModelVendor.GEMINI]: 'Gemini',
   [ModelVendor.FLUX]: 'Flux',
   [ModelVendor.MIDJOURNEY]: 'Midjourney',
+  [ModelVendor.SUNO]: 'Suno',
   [ModelVendor.GPT]: 'GPT',
   [ModelVendor.GROK]: 'Grok',
   [ModelVendor.QWEN]: 'Qwen',
@@ -813,7 +815,7 @@ export const AUDIO_MODELS: ModelConfig[] = [
     shortCode: 'suno',
     description: 'Suno 音乐生成入口（通过 mv 决定实际版本）',
     type: 'audio',
-    vendor: ModelVendor.OTHER,
+    vendor: ModelVendor.SUNO,
     tags: ['audio', 'music', 'suno'],
   },
 ];
@@ -1511,6 +1513,21 @@ export const VIDEO_PARAMS: ParamConfig[] = [
  * 音频参数配置
  */
 export const AUDIO_PARAMS: ParamConfig[] = [
+  {
+    id: 'sunoAction',
+    label: 'Suno 动作',
+    shortLabel: '动作',
+    description: '选择生成音乐还是歌词',
+    valueType: 'enum',
+    options: [
+      { value: 'music', label: '生成音乐' },
+      { value: 'lyrics', label: '生成歌词' },
+    ],
+    defaultValue: 'music',
+    compatibleModels: ['suno_music'],
+    compatibleTags: ['suno', 'audio', 'music'],
+    modelType: 'audio',
+  },
   {
     id: 'mv',
     label: 'Suno 版本',

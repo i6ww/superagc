@@ -260,10 +260,16 @@ export function convertDirectGenerationToWorkflow(
         status: 'pending',
       });
     } else {
+      const sunoAction =
+        typeof extraParams?.sunoAction === 'string'
+          ? extraParams.sunoAction
+          : 'music';
+      const isLyricsAction = sunoAction === 'lyrics';
       const audioArgs: Record<string, unknown> = {
         prompt,
         model: modelId,
         modelRef,
+        sunoAction,
         batchId,
         batchIndex: i + 1,
         batchTotal: count,
@@ -272,19 +278,23 @@ export function convertDirectGenerationToWorkflow(
 
       if (extraParams) {
         audioArgs.params = extraParams;
-        if (extraParams.mv) {
+        if (extraParams.notifyHook) {
+          audioArgs.notifyHook = extraParams.notifyHook;
+        }
+        if (!isLyricsAction && extraParams.mv) {
           audioArgs.mv = extraParams.mv;
         }
-        if (extraParams.title) {
+        if (!isLyricsAction && extraParams.title) {
           audioArgs.title = extraParams.title;
         }
-        if (extraParams.tags) {
+        if (!isLyricsAction && extraParams.tags) {
           audioArgs.tags = extraParams.tags;
         }
-        if (extraParams.continueClipId) {
+        if (!isLyricsAction && extraParams.continueClipId) {
           audioArgs.continueClipId = extraParams.continueClipId;
         }
         if (
+          !isLyricsAction &&
           extraParams.continueAt !== undefined &&
           extraParams.continueAt !== null &&
           extraParams.continueAt !== ''
@@ -298,11 +308,20 @@ export function convertDirectGenerationToWorkflow(
         mcp: 'generate_audio',
         args: audioArgs,
         options,
-        description: count > 1 ? `生成音频 (${i + 1}/${count})` : '生成音频',
+        description:
+          count > 1
+            ? `${isLyricsAction ? '生成歌词' : '生成音频'} (${i + 1}/${count})`
+            : isLyricsAction
+            ? '生成歌词'
+            : '生成音频',
         status: 'pending',
       });
     }
   }
+
+  const isLyricsWorkflow =
+    generationType === 'audio' &&
+    steps.every((step) => step.args.sunoAction === 'lyrics');
 
   return {
     id: workflowId,
@@ -311,6 +330,8 @@ export function convertDirectGenerationToWorkflow(
         ? '图片生成'
         : generationType === 'video'
         ? '视频生成'
+        : isLyricsWorkflow
+        ? '歌词生成'
         : '音频生成',
     description: `使用 ${modelId} 模型${
       count > 1 ? `生成 ${count} 个` : '生成'
@@ -319,6 +340,8 @@ export function convertDirectGenerationToWorkflow(
         ? '图片'
         : generationType === 'video'
         ? '视频'
+        : isLyricsWorkflow
+        ? '歌词'
         : '音频'
     }`,
     scenarioType: 'direct_generation',

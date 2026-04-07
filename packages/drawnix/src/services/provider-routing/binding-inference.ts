@@ -519,6 +519,11 @@ function inferAudioBindings(
         metadata: {
           audio: {
             action: 'music',
+            defaultAction: 'music',
+            submitPathByAction: {
+              music: '/suno/submit/music',
+              lyrics: '/suno/submit/lyrics',
+            },
             versionField: 'mv',
             versionOptions: [
               'chirp-v5-5',

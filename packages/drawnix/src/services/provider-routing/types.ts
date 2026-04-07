@@ -60,6 +60,8 @@ export interface ProviderBindingMetadata {
 
 export interface ProviderAudioBindingMetadata {
   action?: string;
+  defaultAction?: string;
+  submitPathByAction?: Record<string, string>;
   versionField?: string;
   versionOptions?: string[];
   defaultVersion?: string;

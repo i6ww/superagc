@@ -112,6 +112,9 @@ function inferVendorFromModelId(modelId: string): ModelVendor {
   if (lowerId.startsWith('mj') || lowerId.includes('midjourney')) {
     return ModelVendor.MIDJOURNEY;
   }
+  if (lowerId.includes('suno') || lowerId.includes('chirp')) {
+    return ModelVendor.SUNO;
+  }
   if (lowerId.includes('kling')) return ModelVendor.KLING;
   if (lowerId.includes('seedance') || lowerId.includes('seedream')) {
     return ModelVendor.DOUBAO;

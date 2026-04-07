@@ -38,6 +38,7 @@ import {
   type TaskParams,
 } from '../services/media-result-handler';
 import { insertMediaIntoFrame } from '../utils/frame-insertion-utils';
+import { formatLyricsForCanvas, isLyricsTask } from '../utils/lyrics-task-utils';
 
 /**
  * 配置项
@@ -265,15 +266,18 @@ export function useAutoInsertToCanvas(config: Partial<AutoInsertConfig> = {}): v
           if (inserts.length === 1) {
             // 单个任务，直接插入
             const { task } = inserts[0];
+            const isLyricsAudioTask = isLyricsTask(task);
             const url = task.result?.url;
-            if (!url) {
+            if (!url && !isLyricsAudioTask) {
               // console.log(`[AutoInsert] Task ${task.id} has no result URL, skipping`);
               workflowCompletionService.failPostProcessing(task.id, 'No result URL');
               continue;
             }
 
             const type =
-              task.type === TaskType.VIDEO
+              isLyricsAudioTask
+                ? 'text'
+                : task.type === TaskType.VIDEO
                 ? 'video'
                 : task.type === TaskType.AUDIO
                 ? 'audio'
@@ -284,6 +288,8 @@ export function useAutoInsertToCanvas(config: Partial<AutoInsertConfig> = {}): v
                     width: AUDIO_CARD_DEFAULT_WIDTH,
                     height: AUDIO_CARD_DEFAULT_HEIGHT,
                   }
+                : type === 'text'
+                ? undefined
                 : parseSizeToPixels(task.params.size);
             const metadata =
               type === 'audio'
@@ -308,16 +314,21 @@ export function useAutoInsertToCanvas(config: Partial<AutoInsertConfig> = {}): v
                   }
                 : undefined;
             // 展开多图：优先使用 urls 数组
-            const allUrls = task.result?.urls?.length ? task.result.urls : [url];
+            const allUrls =
+              type === 'text'
+                ? [formatLyricsForCanvas(task)]
+                : task.result?.urls?.length
+                ? task.result.urls
+                : [url as string];
 
             // 检查是否需要插入到 Frame 内部
             const taskFrameId = targetFrameId || (task.params.targetFrameId as string | undefined);
             const taskFrameDims = targetFrameDimensions || (task.params.targetFrameDimensions as { width: number; height: number } | undefined);
 
-            if (taskFrameId && taskFrameDims && board && type !== 'audio') {
+            if (taskFrameId && taskFrameDims && board && type !== 'audio' && type !== 'text') {
               // 插入到 Frame 内部，contain 模式等比缩放
               await insertMediaIntoFrame(board, allUrls[0], type, taskFrameId, taskFrameDims, dimensions);
-            } else if (mergedConfig.insertPrompt) {
+            } else if (mergedConfig.insertPrompt && type !== 'text') {
               await insertAIFlow(
                 task.params.prompt,
                 allUrls.map((u, index) => ({
@@ -344,6 +355,8 @@ export function useAutoInsertToCanvas(config: Partial<AutoInsertConfig> = {}): v
               );
             } else if (type === 'image' && allUrls.length > 1) {
               await insertImageGroup(allUrls, insertionPoint, dimensions);
+            } else if (type === 'text') {
+              await quickInsert('text', allUrls[0], insertionPoint);
             } else if (type === 'audio' && allUrls.length > 1) {
               const groupId = `audio-group-${task.id}`;
               await executeCanvasInsertion({
@@ -374,11 +387,15 @@ export function useAutoInsertToCanvas(config: Partial<AutoInsertConfig> = {}): v
             workflowCompletionService.completePostProcessing(task.id, allUrls.length, insertionPoint);
           } else {
             // 多个同 Prompt 任务，水平排列（展开每个任务的多图）
-            const urls = inserts
-              .flatMap(({ task }) =>
-                task.result?.urls?.length ? task.result.urls : [task.result?.url]
-              )
-              .filter((url): url is string => !!url);
+            const firstInsertTask = inserts[0].task;
+            const isLyricsAudioTask = isLyricsTask(firstInsertTask);
+            const urls = isLyricsAudioTask
+              ? inserts.map(({ task }) => formatLyricsForCanvas(task))
+              : inserts
+                  .flatMap(({ task }) =>
+                    task.result?.urls?.length ? task.result.urls : [task.result?.url]
+                  )
+                  .filter((url): url is string => !!url);
 
             if (urls.length === 0) {
               // console.log(`[AutoInsert] No valid URLs in group, skipping`);
@@ -388,9 +405,10 @@ export function useAutoInsertToCanvas(config: Partial<AutoInsertConfig> = {}): v
               continue;
             }
 
-            const firstInsertTask = inserts[0].task;
             const type =
-              firstInsertTask.type === TaskType.VIDEO
+              isLyricsAudioTask
+                ? 'text'
+                : firstInsertTask.type === TaskType.VIDEO
                 ? 'video'
                 : firstInsertTask.type === TaskType.AUDIO
                 ? 'audio'
@@ -401,6 +419,8 @@ export function useAutoInsertToCanvas(config: Partial<AutoInsertConfig> = {}): v
                     width: AUDIO_CARD_DEFAULT_WIDTH,
                     height: AUDIO_CARD_DEFAULT_HEIGHT,
                   }
+                : type === 'text'
+                ? undefined
                 : parseSizeToPixels(firstInsertTask.params.size);
             const baseMetadata =
               type === 'audio'
@@ -427,7 +447,7 @@ export function useAutoInsertToCanvas(config: Partial<AutoInsertConfig> = {}): v
 
             // console.log(`[AutoInsert] Inserting group of ${urls.length} ${type}s`);
 
-            if (mergedConfig.insertPrompt) {
+            if (mergedConfig.insertPrompt && type !== 'text') {
               await insertAIFlow(
                 firstInsertTask.params.prompt,
                 urls.map((resultUrl, index) => ({
@@ -454,6 +474,15 @@ export function useAutoInsertToCanvas(config: Partial<AutoInsertConfig> = {}): v
             } else {
               if (type === 'image') {
                 await insertImageGroup(urls, insertionPoint, dimensions);
+              } else if (type === 'text') {
+                await executeCanvasInsertion({
+                  items: inserts.map(({ task }) => ({
+                    type: 'text',
+                    content: formatLyricsForCanvas(task),
+                    groupId: `lyrics-group-${firstInsertTask.id}`,
+                  })),
+                  startPoint: insertionPoint,
+                });
               } else if (type === 'audio') {
                 const groupId = `audio-group-${firstInsertTask.id}`;
                 await executeCanvasInsertion({
@@ -568,7 +597,7 @@ export function useAutoInsertToCanvas(config: Partial<AutoInsertConfig> = {}): v
       }
 
       // 检查是否有结果 URL
-      if (!task.result?.url) {
+      if (!task.result?.url && !isLyricsTask(task)) {
         return;
       }
 

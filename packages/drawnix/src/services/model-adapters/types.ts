@@ -83,6 +83,8 @@ export interface AudioGenerationRequest {
   title?: string;
   tags?: string;
   mv?: string;
+  sunoAction?: string;
+  notifyHook?: string;
   continueClipId?: string;
   continueAt?: number;
   params?: Record<string, unknown>;
@@ -103,7 +105,11 @@ export interface AudioGenerationClipResult {
 
 export interface AudioGenerationResult {
   url: string;
+  resultKind?: 'audio' | 'lyrics';
   title?: string;
+  lyricsText?: string;
+  lyricsTitle?: string;
+  lyricsTags?: string[];
   format?: string;
   duration?: number | null;
   imageUrl?: string;

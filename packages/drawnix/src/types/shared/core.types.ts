@@ -110,6 +110,10 @@ export interface GenerationParams {
   tags?: string;
   /** Audio model version */
   mv?: string;
+  /** Suno action type (e.g. music or lyrics) */
+  sunoAction?: string;
+  /** Provider webhook for async completion notifications */
+  notifyHook?: string;
   /** Continue from clip ID */
   continueClipId?: string;
   /** Continue from timestamp */
@@ -165,6 +169,8 @@ export interface TaskResult {
   format: string;
   /** File size in bytes */
   size: number;
+  /** Semantic result kind for mixed-capability providers */
+  resultKind?: TaskResultKind;
   /** Content width in pixels */
   width?: number;
   /** Content height in pixels */
@@ -177,6 +183,12 @@ export interface TaskResult {
   previewImageUrl?: string;
   /** Result title (audio only) */
   title?: string;
+  /** Generated lyrics text (lyrics only) */
+  lyricsText?: string;
+  /** Generated lyrics title (lyrics only) */
+  lyricsTitle?: string;
+  /** Generated lyrics style tags (lyrics only) */
+  lyricsTags?: string[];
   /** Provider task ID used to fetch audio results */
   providerTaskId?: string;
   /** Primary provider clip identifier for audio follow-up actions */
@@ -196,6 +208,14 @@ export interface TaskResult {
   /** Tool calls made during chat (chat only) */
   toolCalls?: ChatToolCall[];
 }
+
+export type TaskResultKind =
+  | 'image'
+  | 'video'
+  | 'audio'
+  | 'lyrics'
+  | 'character'
+  | 'chat';
 
 export interface AudioClipResult {
   /** Provider entity id */

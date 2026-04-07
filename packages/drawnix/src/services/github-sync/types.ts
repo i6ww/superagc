@@ -349,6 +349,8 @@ export interface CompactTaskResult {
   format?: string;
   /** 大小 */
   size?: number;
+  /** 结果类型 */
+  resultKind?: 'image' | 'video' | 'audio' | 'lyrics' | 'character' | 'chat';
   /** 宽度 */
   width?: number;
   /** 高度 */
@@ -361,6 +363,12 @@ export interface CompactTaskResult {
   previewImageUrl?: string;
   /** 音频标题 */
   title?: string;
+  /** 歌词正文 */
+  lyricsText?: string;
+  /** 歌词标题 */
+  lyricsTitle?: string;
+  /** 歌词标签 */
+  lyricsTags?: string[];
   /** Provider task ID */
   providerTaskId?: string;
   /** 主音频 clip ID */

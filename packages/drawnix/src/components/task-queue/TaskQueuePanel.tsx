@@ -8,6 +8,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Button, Tabs, Dialog, MessagePlugin, Input, Radio, Tooltip, Checkbox, Badge } from 'tdesign-react';
 import { DeleteIcon, SearchIcon, UserIcon, RefreshIcon, PauseCircleIcon, CheckDoubleIcon, ImageIcon, VideoIcon, FilterIcon } from 'tdesign-icons-react';
+import { Music4 } from 'lucide-react';
 import { VirtualTaskList } from './VirtualTaskList';
 import { useTaskQueue } from '../../hooks/useTaskQueue';
 import { Task, TaskType, TaskStatus } from '../../types/task.types';
@@ -32,6 +33,7 @@ import { ImageEditor } from '../image-editor';
 import { useGitHubSync } from '../../contexts/GitHubSyncContext';
 import { mediaSyncService } from '../../services/github-sync/media-sync-service';
 import { CloudUploadIcon } from 'tdesign-icons-react';
+import { formatLyricsForCanvas, getLyricsTags, getLyricsTitle, isLyricsTask } from '../../utils/lyrics-task-utils';
 import './task-queue.scss';
 
 const { TabPanel } = Tabs;
@@ -158,7 +160,12 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
       const searchLower = searchText.toLowerCase().trim();
       tasksToFilter = tasksToFilter.filter(task =>
         task.params.prompt.toLowerCase().includes(searchLower) ||
-        String(task.result?.title || '').toLowerCase().includes(searchLower)
+        String(task.result?.title || '').toLowerCase().includes(searchLower) ||
+        String(task.result?.lyricsTitle || '').toLowerCase().includes(searchLower) ||
+        String(task.result?.lyricsText || '').toLowerCase().includes(searchLower) ||
+        (task.result?.lyricsTags || []).some((tag) =>
+          String(tag).toLowerCase().includes(searchLower)
+        )
       );
     }
 
@@ -357,6 +364,10 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
 
   const handleDownload = async (taskId: string) => {
     const task = tasks.find(t => t.id === taskId);
+    if (task && isLyricsTask(task)) {
+      MessagePlugin.info('歌词任务支持复制或插入画布');
+      return;
+    }
     if (!task?.result?.url && !task?.result?.urls?.length) return;
 
     const urls = task.result.urls?.length ? task.result.urls : [task.result.url];
@@ -398,11 +409,44 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
     }
   };
 
+  const handleCopy = async (taskId: string) => {
+    const task = tasks.find(t => t.id === taskId);
+    if (!task || !isLyricsTask(task)) {
+      MessagePlugin.warning('暂无可复制的歌词');
+      return;
+    }
+
+    const text = formatLyricsForCanvas(task);
+    if (!text.trim()) {
+      MessagePlugin.warning('暂无可复制的歌词');
+      return;
+    }
+
+    if (!navigator.clipboard?.writeText) {
+      MessagePlugin.warning('当前环境不支持复制');
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+      MessagePlugin.success('歌词已复制');
+      onTaskAction?.('copy', taskId);
+    } catch (error) {
+      console.error('Failed to copy lyrics:', error);
+      MessagePlugin.error('复制失败，请稍后重试');
+    }
+  };
+
   const handleInsert = async (taskId: string) => {
     const task = tasks.find(t => t.id === taskId);
-    if ((!task?.result?.url && !task?.result?.urls?.length) || !board) {
+    if (!task || !board) {
       console.warn('Cannot insert: task result or board not available');
       MessagePlugin.warning('无法插入：白板未就绪');
+      return;
+    }
+    if (!task.result?.url && !task.result?.urls?.length && !isLyricsTask(task)) {
+      console.warn('Cannot insert: task result is empty');
+      MessagePlugin.warning('无法插入：任务结果为空');
       return;
     }
 
@@ -420,6 +464,27 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
         // console.log('Video inserted to board:', taskId);
         MessagePlugin.success('视频已插入到白板');
       } else if (task.type === TaskType.AUDIO) {
+        if (isLyricsTask(task)) {
+          await executeCanvasInsertion({
+            items: [
+              {
+                type: 'text',
+                content: formatLyricsForCanvas(task),
+                metadata: {
+                  title: getLyricsTitle(
+                    taskResult,
+                    task.params.title || task.params.prompt
+                  ),
+                  tags: getLyricsTags(taskResult),
+                },
+              },
+            ],
+          });
+          MessagePlugin.success('歌词已插入到白板');
+          onTaskAction?.('insert', taskId);
+          return;
+        }
+
         const urls = taskResult.urls?.length ? taskResult.urls : [taskResult.url];
         const baseMetadata = {
           title: taskResult.title || task.params.title || task.params.prompt,
@@ -648,7 +713,7 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
           <Tooltip content={`全部 (${typeCounts.all})`} theme="light">
             <Button
               size="small"
-              variant={typeFilter === 'all' ? 'base' : 'text'}
+              variant="text"
               shape="square"
               onClick={() => setTypeFilter('all')}
               className={typeFilter === 'all' ? 'task-queue-panel__filter-btn--active' : ''}
@@ -659,7 +724,7 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
           <Tooltip content={`图片 (${typeCounts.image})`} theme="light">
             <Button
               size="small"
-              variant={typeFilter === 'image' ? 'base' : 'text'}
+              variant="text"
               shape="square"
               onClick={() => setTypeFilter('image')}
               className={typeFilter === 'image' ? 'task-queue-panel__filter-btn--active' : ''}
@@ -670,7 +735,7 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
           <Tooltip content={`视频 (${typeCounts.video})`} theme="light">
             <Button
               size="small"
-              variant={typeFilter === 'video' ? 'base' : 'text'}
+              variant="text"
               shape="square"
               onClick={() => setTypeFilter('video')}
               className={typeFilter === 'video' ? 'task-queue-panel__filter-btn--active' : ''}
@@ -681,18 +746,18 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
           <Tooltip content={`音频 (${typeCounts.audio})`} theme="light">
             <Button
               size="small"
-              variant={typeFilter === 'audio' ? 'base' : 'text'}
+              variant="text"
               shape="square"
               onClick={() => setTypeFilter('audio')}
               className={typeFilter === 'audio' ? 'task-queue-panel__filter-btn--active' : ''}
             >
-              <span>音</span>
+              <Music4 size={16} strokeWidth={1.9} />
             </Button>
           </Tooltip>
           <Tooltip content={`角色 (${typeCounts.character})`} theme="light">
             <Button
               size="small"
-              variant={typeFilter === 'character' ? 'base' : 'text'}
+              variant="text"
               shape="square"
               onClick={() => setTypeFilter('character')}
               className={typeFilter === 'character' ? 'task-queue-panel__filter-btn--active' : ''}
@@ -852,6 +917,7 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
             onDelete={handleDelete}
             onDownload={handleDownload}
             onInsert={handleInsert}
+            onCopy={handleCopy}
             onEdit={handleEdit}
             onPreviewOpen={handlePreviewOpen}
             onExtractCharacter={handleExtractCharacter}

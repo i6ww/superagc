@@ -340,7 +340,7 @@ describe('provider routing', () => {
         id: 'suno_music',
         label: 'Suno Music',
         type: 'audio',
-        vendor: ModelVendor.OTHER,
+        vendor: ModelVendor.SUNO,
         tags: ['suno', 'audio', 'music'],
       }
     );
@@ -349,6 +349,11 @@ describe('provider routing', () => {
     expect(binding?.submitPath).toBe('/suno/submit/music');
     expect(binding?.pollPathTemplate).toBe('/suno/fetch/{taskId}');
     expect(binding?.baseUrlStrategy).toBe('trim-v1');
+    expect(binding?.metadata?.audio?.defaultAction).toBe('music');
+    expect(binding?.metadata?.audio?.submitPathByAction).toEqual({
+      music: '/suno/submit/music',
+      lyrics: '/suno/submit/lyrics',
+    });
     expect(binding?.metadata?.audio?.versionOptions).toEqual([
       'chirp-v5-5',
       'chirp-v5',

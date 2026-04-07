@@ -215,4 +215,272 @@ describe('audio-api-service', () => {
     expect(extracted.clipIds).toEqual(['clip-1', 'clip-2']);
     expect(extracted.clips).toHaveLength(2);
   });
+
+  it('submits Suno lyrics generation and extracts text results from fetch payloads', async () => {
+    const taskId = 'fc415768-51b9-4fb0-89f9-31b6863a736e';
+    const sendMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 'success', data: taskId }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            code: 'success',
+            data: {
+              task_id: taskId,
+              action: 'LYRICS',
+              status: 'SUCCESS',
+              progress: '100%',
+              data: {
+                tags: ['EDM, 激烈的'],
+                text: '[Chorus]\\n我想象他们看我微笑着',
+                title: '战斗进行时',
+                status: 'complete',
+                error_message: '',
+              },
+            },
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        )
+      );
+
+    vi.doMock('../provider-routing', async () => {
+      const actual = await vi.importActual<object>('../provider-routing');
+      return {
+        ...actual,
+        resolveInvocationPlanFromRoute: () => null,
+        providerTransport: {
+          ...(actual as { providerTransport: object }).providerTransport,
+          send: sendMock,
+        },
+      };
+    });
+
+    vi.doMock('../../utils/settings-manager', () => ({
+      resolveInvocationRoute: () => ({
+        profileId: 'runtime',
+        profileName: 'Runtime',
+        providerType: 'custom',
+        baseUrl: 'https://api.tu-zi.com/v1',
+        apiKey: 'test-key',
+        authType: 'bearer',
+      }),
+    }));
+
+    const { audioAPIService, extractAudioGenerationResult } = await import('../audio-api-service');
+
+    const result = await audioAPIService.generateAudioWithPolling(
+      {
+        model: 'suno_music',
+        prompt: '编写一首儿歌',
+        sunoAction: 'lyrics',
+      },
+      {
+        interval: 1,
+        maxAttempts: 2,
+      }
+    );
+
+    expect(sendMock).toHaveBeenCalledTimes(2);
+    expect(sendMock.mock.calls[0]?.[1]).toMatchObject({
+      path: '/suno/submit/lyrics',
+      baseUrlStrategy: 'trim-v1',
+      method: 'POST',
+    });
+    expect(result.taskId).toBe(taskId);
+    expect(result.action).toBe('LYRICS');
+    expect(result.status).toBe('completed');
+    expect(result.lyrics?.title).toBe('战斗进行时');
+    expect(result.lyrics?.tags).toEqual(['EDM, 激烈的']);
+
+    const extracted = extractAudioGenerationResult(result);
+    expect(extracted.resultKind).toBe('lyrics');
+    expect(extracted.url).toBe('');
+    expect(extracted.format).toBe('lyrics');
+    expect(extracted.title).toBe('战斗进行时');
+    expect(extracted.lyricsTitle).toBe('战斗进行时');
+    expect(extracted.lyricsText).toContain('我想象他们看我微笑着');
+    expect(extracted.lyricsTags).toEqual(['EDM, 激烈的']);
+    expect(extracted.providerTaskId).toBe(taskId);
+  });
+
+  it('extracts lyrics text from nested data wrappers without losing compatibility', async () => {
+    const taskId = '9c02be46-2393-4867-b993-4c6722868481';
+    const sendMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 'success', data: taskId }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            code: 'success',
+            message: '',
+            data: {
+              task_id: taskId,
+              action: 'LYRICS',
+              status: 'IN_PROGRESS',
+              progress: '100%',
+              data: {
+                data: {
+                  tags: ['traditional Chinese instrumentation, epic, rock'],
+                  text: '[Verse]\\n太陽從西方升起',
+                  title: '战斗神曲',
+                  status: 'complete',
+                  error_message: '',
+                },
+                action: 'LYRICS',
+                status: 'SUCCESS',
+                task_id: taskId,
+              },
+            },
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        )
+      );
+
+    vi.doMock('../provider-routing', async () => {
+      const actual = await vi.importActual<object>('../provider-routing');
+      return {
+        ...actual,
+        resolveInvocationPlanFromRoute: () => null,
+        providerTransport: {
+          ...(actual as { providerTransport: object }).providerTransport,
+          send: sendMock,
+        },
+      };
+    });
+
+    vi.doMock('../../utils/settings-manager', () => ({
+      resolveInvocationRoute: () => ({
+        profileId: 'runtime',
+        profileName: 'Runtime',
+        providerType: 'custom',
+        baseUrl: 'https://api.tu-zi.com/v1',
+        apiKey: 'test-key',
+        authType: 'bearer',
+      }),
+    }));
+
+    const { audioAPIService, extractAudioGenerationResult } = await import('../audio-api-service');
+
+    const result = await audioAPIService.generateAudioWithPolling(
+      {
+        model: 'suno_lyrics',
+        prompt: '写一首战斗神曲',
+      },
+      {
+        interval: 1,
+        maxAttempts: 2,
+      }
+    );
+
+    expect(result.status).toBe('completed');
+    expect(result.lyrics?.title).toBe('战斗神曲');
+    expect(result.lyrics?.text).toContain('太陽從西方升起');
+    expect(result.lyrics?.tags).toEqual([
+      'traditional Chinese instrumentation, epic, rock',
+    ]);
+
+    const extracted = extractAudioGenerationResult(result);
+    expect(extracted.resultKind).toBe('lyrics');
+    expect(extracted.lyricsTitle).toBe('战斗神曲');
+    expect(extracted.lyricsText).toContain('太陽從西方升起');
+    expect(extracted.lyricsTags).toEqual([
+      'traditional Chinese instrumentation, epic, rock',
+    ]);
+  });
+
+  it('treats the suno_lyrics model alias as a lyrics action even without explicit params', async () => {
+    const taskId = '91f6eb95-6ce5-4e35-b4ae-67dca3a5dc27';
+    const sendMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 'success', data: taskId }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            code: 'success',
+            data: {
+              task_id: taskId,
+              action: 'LYRICS',
+              status: 'SUCCESS',
+              data: {
+                text: '[Verse]\\n测试歌词',
+                title: '别名歌词',
+                tags: ['pop'],
+              },
+            },
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        )
+      );
+
+    vi.doMock('../provider-routing', async () => {
+      const actual = await vi.importActual<object>('../provider-routing');
+      return {
+        ...actual,
+        resolveInvocationPlanFromRoute: () => null,
+        providerTransport: {
+          ...(actual as { providerTransport: object }).providerTransport,
+          send: sendMock,
+        },
+      };
+    });
+
+    vi.doMock('../../utils/settings-manager', () => ({
+      resolveInvocationRoute: () => ({
+        profileId: 'runtime',
+        profileName: 'Runtime',
+        providerType: 'custom',
+        baseUrl: 'https://api.tu-zi.com/v1',
+        apiKey: 'test-key',
+        authType: 'bearer',
+      }),
+    }));
+
+    const { audioAPIService, extractAudioGenerationResult } = await import('../audio-api-service');
+
+    const result = await audioAPIService.generateAudioWithPolling(
+      {
+        model: 'suno_lyrics',
+        prompt: '写一首流行歌歌词',
+      },
+      {
+        interval: 1,
+        maxAttempts: 2,
+      }
+    );
+
+    expect(sendMock.mock.calls[0]?.[1]).toMatchObject({
+      path: '/suno/submit/lyrics',
+      method: 'POST',
+    });
+    expect(result.action).toBe('LYRICS');
+
+    const extracted = extractAudioGenerationResult(result);
+    expect(extracted.resultKind).toBe('lyrics');
+    expect(extracted.lyricsTitle).toBe('别名歌词');
+    expect(extracted.lyricsText).toContain('测试歌词');
+  });
 });

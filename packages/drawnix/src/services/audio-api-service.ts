@@ -21,6 +21,7 @@ import type {
   AudioGenerationClipResult,
   AudioGenerationResult,
 } from './model-adapters';
+import { getForcedSunoParams } from '../utils/suno-model-aliases';
 
 export interface AudioGenerationParams {
   model: string;
@@ -29,10 +30,14 @@ export interface AudioGenerationParams {
   title?: string;
   tags?: string;
   mv?: string;
+  sunoAction?: string;
+  notifyHook?: string;
   continueClipId?: string;
   continueAt?: number;
   params?: Record<string, unknown>;
 }
+
+export type SunoAction = 'music' | 'lyrics';
 
 export interface AudioClipRecord {
   id?: string;
@@ -64,7 +69,16 @@ export interface AudioTaskResponse {
   progress?: number;
   failReason?: string;
   clips: AudioClipRecord[];
+  lyrics?: AudioLyricsPayload | null;
   raw: unknown;
+}
+
+export interface AudioLyricsPayload {
+  text?: string;
+  title?: string;
+  tags?: string[];
+  status?: string;
+  errorMessage?: string;
 }
 
 interface AudioPollingOptions {
@@ -145,6 +159,61 @@ function normalizeStatus(value: unknown): string {
 function normalizeOptionalString(value: unknown): string | undefined {
   const normalized = normalizeStatus(value);
   return normalized || undefined;
+}
+
+function normalizeSunoAction(value: unknown): SunoAction | undefined {
+  const normalized = normalizeStatus(value).toLowerCase();
+  if (normalized === 'lyrics') {
+    return 'lyrics';
+  }
+  if (normalized === 'music') {
+    return 'music';
+  }
+  return undefined;
+}
+
+function resolveSunoModelId(model?: string | ModelRef | null): string | undefined {
+  if (!model) {
+    return undefined;
+  }
+
+  if (typeof model === 'string') {
+    return model;
+  }
+
+  return model.modelId || undefined;
+}
+
+function getForcedSunoParamValue(
+  params: AudioGenerationParams,
+  key: string
+): string | undefined {
+  const forcedParams = getForcedSunoParams(
+    resolveSunoModelId(params.modelRef) || params.model
+  );
+  const forcedValue = forcedParams[key];
+  return typeof forcedValue === 'string' ? forcedValue : undefined;
+}
+
+function resolveRequestedAction(params: AudioGenerationParams): SunoAction {
+  return (
+    normalizeSunoAction(getForcedSunoParamValue(params, 'sunoAction')) ||
+    normalizeSunoAction(params.sunoAction) ||
+    normalizeSunoAction(params.params?.sunoAction) ||
+    'music'
+  );
+}
+
+function normalizeLyricsTags(value: unknown): string[] | undefined {
+  if (Array.isArray(value)) {
+    const tags = value
+      .map((tag) => normalizeOptionalString(tag))
+      .filter((tag): tag is string => typeof tag === 'string');
+    return tags.length > 0 ? tags : undefined;
+  }
+
+  const singleTag = normalizeOptionalString(value);
+  return singleTag ? [singleTag] : undefined;
 }
 
 function toProgressNumber(value: unknown): number | undefined {
@@ -229,11 +298,81 @@ function resolveClipLifecycleStatus(clips: AudioClipRecord[]): string {
   return '';
 }
 
+function collectNestedDataCandidates(payload: any, maxDepth = 6): any[] {
+  const candidates: any[] = [];
+  let current = payload;
+
+  for (let depth = 0; depth < maxDepth; depth += 1) {
+    if (!current || typeof current !== 'object' || Array.isArray(current)) {
+      break;
+    }
+
+    candidates.push(current);
+    current = current.data;
+  }
+
+  return candidates;
+}
+
+function extractLyricsPayload(payload: any): AudioLyricsPayload | null {
+  const candidates = collectNestedDataCandidates(payload);
+  let fallback: AudioLyricsPayload | null = null;
+
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+      continue;
+    }
+
+    const text = normalizeOptionalString(candidate.text);
+    const title = normalizeOptionalString(candidate.title);
+    const tags = normalizeLyricsTags(candidate.tags);
+    const status =
+      normalizeOptionalString(candidate.status) ||
+      normalizeOptionalString(candidate.state);
+    const errorMessage =
+      normalizeOptionalString(candidate.error_message) ||
+      normalizeOptionalString(candidate.errorMessage);
+
+    if (text || title || tags) {
+      return {
+        text,
+        title,
+        tags,
+        status,
+        errorMessage,
+      };
+    }
+
+    if (!fallback && (status || errorMessage)) {
+      fallback = {
+        text,
+        title,
+        tags,
+        status,
+        errorMessage,
+      };
+    }
+  }
+
+  return fallback;
+}
+
 function normalizeLifecycleStatus(payload: any): string {
   const clips = extractAudioClips(payload);
   const clipStatus = resolveClipLifecycleStatus(clips);
   if (clipStatus) {
     return clipStatus;
+  }
+
+  const lyrics = extractLyricsPayload(payload);
+  const lyricsStatus = normalizeStatus(lyrics?.status);
+  if (lyricsStatus) {
+    if (isTerminalFailure(lyricsStatus)) {
+      return 'failed';
+    }
+    if (isTerminalSuccess(lyricsStatus)) {
+      return 'completed';
+    }
   }
 
   const statusCandidates = [
@@ -266,10 +405,12 @@ function normalizeLifecycleStatus(payload: any): string {
     (clip) =>
       typeof clip.audio_url === 'string' && clip.audio_url.trim().length > 0
   );
+  const hasLyricsResult =
+    typeof lyrics?.text === 'string' && lyrics.text.trim().length > 0;
 
   // Some providers keep a stale outer wrapper status while the nested task
   // payload and generated clips already indicate completion.
-  if (progress === 100 && hasAudioResult) {
+  if (progress === 100 && (hasAudioResult || hasLyricsResult)) {
     return 'completed';
   }
 
@@ -329,6 +470,7 @@ function normalizeAudioClipResult(
 }
 
 function extractFailureReason(payload: any, clips: AudioClipRecord[]): string {
+  const lyrics = extractLyricsPayload(payload);
   const candidates = [
     payload?.fail_reason,
     payload?.message,
@@ -338,6 +480,7 @@ function extractFailureReason(payload: any, clips: AudioClipRecord[]): string {
     payload?.data?.message,
     payload?.data?.error,
     clips[0]?.metadata?.error_message,
+    lyrics?.errorMessage,
   ];
 
   for (const candidate of candidates) {
@@ -346,7 +489,9 @@ function extractFailureReason(payload: any, clips: AudioClipRecord[]): string {
     }
   }
 
-  return '音乐生成失败';
+  return normalizeSunoAction(payload?.action || payload?.data?.action) === 'lyrics'
+    ? '歌词生成失败'
+    : '音乐生成失败';
 }
 
 function getPrimaryTaskId(payload: any, fallback = ''): string {
@@ -383,12 +528,14 @@ function normalizeAudioTaskResponse(
       typeof right.batch_index === 'number' ? right.batch_index : Number.MAX_SAFE_INTEGER;
     return leftIndex - rightIndex;
   });
+  const lyrics = extractLyricsPayload(payload);
 
   return {
     taskId: getPrimaryTaskId(payload, fallbackTaskId),
     action:
       normalizeStatus(payload?.action) ||
       normalizeStatus(payload?.data?.action) ||
+      normalizeStatus(payload?.data?.data?.action) ||
       undefined,
     status: normalizeLifecycleStatus(payload),
     progress: resolveProgressValue(
@@ -401,9 +548,12 @@ function normalizeAudioTaskResponse(
         isTerminalSuccess(normalizeStatus(clip.status || clip.state))
       )
         ? 100
+        : lyrics?.text
+        ? 100
         : undefined),
     failReason: extractFailureReason(payload, clips),
     clips,
+    lyrics,
     raw: payload,
   };
 }
@@ -427,7 +577,7 @@ function resolveVersionValue(params: AudioGenerationParams): string {
   const continueSource =
     typeof params.params?.continueSource === 'string'
       ? params.params.continueSource
-      : undefined;
+      : getForcedSunoParamValue(params, 'continueSource');
   const uploadedContinuation =
     continueSource === 'upload' || params.params?.uploadedContinuation === true;
 
@@ -436,7 +586,7 @@ function resolveVersionValue(params: AudioGenerationParams): string {
     : requestedVersion;
 }
 
-function buildSubmitBody(params: AudioGenerationParams): string {
+function buildMusicSubmitBody(params: AudioGenerationParams): string {
   const body: Record<string, unknown> = {
     prompt: params.prompt,
     mv: resolveVersionValue(params),
@@ -482,9 +632,74 @@ function buildSubmitBody(params: AudioGenerationParams): string {
   return JSON.stringify(body);
 }
 
+function buildLyricsSubmitBody(params: AudioGenerationParams): string {
+  const body: Record<string, unknown> = {
+    prompt: params.prompt,
+  };
+
+  const notifyHook =
+    params.notifyHook ||
+    (typeof params.params?.notifyHook === 'string'
+      ? params.params.notifyHook
+      : undefined) ||
+    (typeof params.params?.notify_hook === 'string'
+      ? params.params.notify_hook
+      : undefined);
+
+  if (notifyHook) {
+    body.notify_hook = notifyHook;
+  }
+
+  return JSON.stringify(body);
+}
+
+function buildSubmitBody(params: AudioGenerationParams): string {
+  return resolveRequestedAction(params) === 'lyrics'
+    ? buildLyricsSubmitBody(params)
+    : buildMusicSubmitBody(params);
+}
+
+function resolveSubmitPath(
+  params: AudioGenerationParams,
+  binding?: NonNullable<
+    ReturnType<typeof resolveInvocationPlanFromRoute>
+  >['binding'] | null
+): string {
+  const action = resolveRequestedAction(params);
+  const submitPathByAction = binding?.metadata?.audio?.submitPathByAction;
+  if (submitPathByAction?.[action]) {
+    return submitPathByAction[action];
+  }
+
+  if (
+    action === 'lyrics' ||
+    getForcedSunoParamValue(params, 'sunoAction') === 'lyrics'
+  ) {
+    return '/suno/submit/lyrics';
+  }
+
+  return binding?.submitPath || '/suno/submit/music';
+}
+
 export function extractAudioGenerationResult(
   response: AudioTaskResponse
 ): AudioGenerationResult {
+  const action = normalizeSunoAction(response.action);
+  const lyrics = response.lyrics;
+  if (action === 'lyrics' || lyrics?.text || lyrics?.title) {
+    return {
+      url: '',
+      resultKind: 'lyrics',
+      title: lyrics?.title,
+      lyricsText: lyrics?.text,
+      lyricsTitle: lyrics?.title,
+      lyricsTags: lyrics?.tags,
+      format: 'lyrics',
+      providerTaskId: response.taskId || undefined,
+      raw: response.raw,
+    };
+  }
+
   const clipsWithAudio = response.clips
     .map((clip) => normalizeAudioClipResult(clip))
     .filter((clip): clip is AudioGenerationClipResult => clip !== null);
@@ -504,6 +719,7 @@ export function extractAudioGenerationResult(
 
   return {
     url: primaryUrl,
+    resultKind: 'audio',
     urls: urls.length > 1 ? urls : undefined,
     title: primaryClip?.title,
     duration: primaryClip?.duration ?? null,
@@ -515,6 +731,18 @@ export function extractAudioGenerationResult(
     clips: clipsWithAudio.length > 0 ? clipsWithAudio : undefined,
     raw: response.raw,
   };
+}
+
+function hasResolvedTaskResult(response: AudioTaskResponse): boolean {
+  if (response.clips.length > 0) {
+    return response.clips.some(
+      (clip) =>
+        typeof clip.audio_url === 'string' && clip.audio_url.trim().length > 0
+    );
+  }
+
+  return typeof response.lyrics?.text === 'string' &&
+    response.lyrics.text.trim().length > 0;
 }
 
 class AudioAPIService {
@@ -531,7 +759,7 @@ class AudioAPIService {
     }
 
     const response = await providerTransport.send(providerContext, {
-      path: binding?.submitPath || '/suno/submit/music',
+      path: resolveSubmitPath(params, binding),
       baseUrlStrategy,
       method: 'POST',
       headers: {
@@ -543,7 +771,7 @@ class AudioAPIService {
     if (!response.ok) {
       const errorText = await response.text();
       const error = new Error(
-        `音乐生成提交失败: ${response.status} - ${errorText}`
+        `${resolveRequestedAction(params) === 'lyrics' ? '歌词' : '音乐'}生成提交失败: ${response.status} - ${errorText}`
       );
       (error as any).apiErrorBody = errorText;
       (error as any).httpStatus = response.status;
@@ -559,7 +787,7 @@ class AudioAPIService {
     routeModel?: string | ModelRef | null
   ): Promise<AudioTaskResponse> {
     if (!taskId.trim()) {
-      throw new Error('音乐任务 ID 为空，无法查询任务状态');
+      throw new Error('Suno 任务 ID 为空，无法查询任务状态');
     }
 
     const { providerContext, binding } = resolveAudioPlanContext(routeModel);
@@ -582,7 +810,7 @@ class AudioAPIService {
     if (!response.ok) {
       const errorText = await response.text();
       const error = new Error(
-        `音乐任务查询失败: ${response.status} - ${errorText}`
+        `Suno 任务查询失败: ${response.status} - ${errorText}`
       );
       (error as any).apiErrorBody = errorText;
       (error as any).httpStatus = response.status;
@@ -607,7 +835,9 @@ class AudioAPIService {
     const submitResponse = await this.submitAudioGeneration(params);
 
     if (!submitResponse.taskId.trim()) {
-      throw new Error('音乐生成提交成功，但未返回任务 ID');
+      throw new Error(
+        `${resolveRequestedAction(params) === 'lyrics' ? '歌词' : '音乐'}生成提交成功，但未返回任务 ID`
+      );
     }
 
     if (onSubmitted) {
@@ -619,10 +849,15 @@ class AudioAPIService {
     }
 
     if (isTerminalFailure(submitResponse.status)) {
-      throw new Error(submitResponse.failReason || '音乐生成失败');
+      throw new Error(
+        submitResponse.failReason ||
+          (resolveRequestedAction(params) === 'lyrics'
+            ? '歌词生成失败'
+            : '音乐生成失败')
+      );
     }
 
-    if (isTerminalSuccess(submitResponse.status) && submitResponse.clips.length > 0) {
+    if (isTerminalSuccess(submitResponse.status) && hasResolvedTaskResult(submitResponse)) {
       return submitResponse;
     }
 
@@ -645,11 +880,13 @@ class AudioAPIService {
     }
 
     if (isTerminalSuccess(immediate.status)) {
-      return immediate;
+      if (hasResolvedTaskResult(immediate)) {
+        return immediate;
+      }
     }
 
     if (isTerminalFailure(immediate.status)) {
-      throw new Error(immediate.failReason || '音乐生成失败');
+      throw new Error(immediate.failReason || 'Suno 生成失败');
     }
 
     return this.pollUntilComplete(taskId, options);
@@ -678,11 +915,13 @@ class AudioAPIService {
         }
 
         if (isTerminalSuccess(result.status)) {
-          return result;
+          if (hasResolvedTaskResult(result)) {
+            return result;
+          }
         }
 
         if (isTerminalFailure(result.status)) {
-          throw new Error(result.failReason || '音乐生成失败');
+          throw new Error(result.failReason || 'Suno 生成失败');
         }
       } catch (error) {
         consecutiveErrors += 1;
@@ -698,7 +937,7 @@ class AudioAPIService {
       }
     }
 
-    throw new Error('音乐生成超时，请稍后重试');
+    throw new Error('Suno 生成超时，请稍后重试');
   }
 
   private sleep(ms: number): Promise<void> {

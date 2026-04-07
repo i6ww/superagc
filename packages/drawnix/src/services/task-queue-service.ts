@@ -151,6 +151,8 @@ class TaskQueueService {
             title: task.params.title,
             tags: task.params.tags,
             mv: task.params.mv,
+            sunoAction: task.params.sunoAction,
+            notifyHook: task.params.notifyHook,
             continueClipId: task.params.continueClipId,
             continueAt: task.params.continueAt,
             params: {
@@ -179,12 +181,16 @@ class TaskQueueService {
           result: {
             url: result.url,
             urls: result.urls,
-            format: result.format || 'mp3',
+            format: result.format || (result.resultKind === 'lyrics' ? 'lyrics' : 'mp3'),
             size: 0,
+            resultKind: result.resultKind,
             duration:
               typeof result.duration === 'number' ? result.duration : undefined,
             previewImageUrl: result.imageUrl,
             title: result.title,
+            lyricsText: result.lyricsText,
+            lyricsTitle: result.lyricsTitle,
+            lyricsTags: result.lyricsTags,
             providerTaskId: result.providerTaskId || task.remoteId,
             primaryClipId: result.primaryClipId,
             clipIds: result.clipIds,

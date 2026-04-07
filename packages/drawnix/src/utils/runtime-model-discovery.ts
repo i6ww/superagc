@@ -23,6 +23,7 @@ import {
   type ModelRef,
   type ProviderProfile,
 } from './settings-manager';
+import { applySunoAliasPresentation, isSunoLikeModelId } from './suno-model-aliases';
 
 const LEGACY_CACHE_KEY = 'drawnix-runtime-model-discovery';
 
@@ -244,6 +245,9 @@ function inferVendorByKeywords(modelId: string): ModelVendor {
   if (lowerId.includes('kling')) return ModelVendor.KLING;
   if (lowerId.includes('veo')) return ModelVendor.VEO;
   if (lowerId.includes('sora')) return ModelVendor.SORA;
+  if (lowerId.includes('suno') || lowerId.includes('chirp')) {
+    return ModelVendor.SUNO;
+  }
   if (
     lowerId.includes('seedream') ||
     lowerId.includes('seedance') ||
@@ -360,6 +364,9 @@ function inferVendor(model: RemoteModelListItem): ModelVendor {
     owner.includes('doubao')
   ) {
     return ModelVendor.DOUBAO;
+  }
+  if (owner === 'suno' || owner.includes('suno') || owner.includes('chirp')) {
+    return ModelVendor.SUNO;
   }
   if (owner === 'google' || owner.includes('google')) {
     return keywordVendor !== ModelVendor.OTHER
@@ -596,6 +603,8 @@ function inferModelType(model: RemoteModelListItem): ModelType {
       if (hasId('veo')) return 'video';
       if (hasId('imagen', 'gpt-image')) return 'image';
       break;
+    case ModelVendor.SUNO:
+      return 'audio';
     case ModelVendor.OTHER:
       if (hasAudioIdSignal()) {
         return 'audio';
@@ -672,6 +681,7 @@ function buildFallbackConfig(model: RemoteModelListItem): ModelConfig {
   const type = inferModelType(model);
   const vendor = inferVendor(model);
   const vendorLabel = VENDOR_NAMES[vendor];
+  const lowerId = model.id.toLowerCase();
   const supportsTools =
     type === 'text' &&
     (model.supported_endpoint_types || []).some((item) =>
@@ -693,7 +703,7 @@ function buildFallbackConfig(model: RemoteModelListItem): ModelConfig {
     };
   }
 
-  return {
+  const fallbackConfig: ModelConfig = {
     id: model.id,
     label: model.id,
     shortLabel: model.id,
@@ -710,7 +720,10 @@ function buildFallbackConfig(model: RemoteModelListItem): ModelConfig {
     type,
     vendor,
     supportsTools,
-    tags: ['runtime'],
+    tags:
+      type === 'audio' && isSunoLikeModelId(lowerId)
+        ? ['runtime', 'suno', 'audio', 'music']
+        : ['runtime'],
     imageDefaults:
       type === 'image'
         ? { aspectRatio: 'auto', width: 1024, height: 1024 }
@@ -720,6 +733,10 @@ function buildFallbackConfig(model: RemoteModelListItem): ModelConfig {
         ? { duration: '8', size: '1280x720', aspectRatio: '16:9' }
         : undefined,
   };
+
+  return type === 'audio'
+    ? applySunoAliasPresentation(fallbackConfig)
+    : fallbackConfig;
 }
 
 function adaptRuntimeModel(model: RemoteModelListItem): ModelConfig | null {
@@ -836,6 +853,7 @@ function createPinnedRuntimeModel(
   type: ModelType
 ): ModelConfig {
   const profileName = getProfileById(profileId)?.name || '供应商模型';
+  const vendor = inferVendorByKeywords(modelId);
   return attachRuntimeSource(profileId, {
     id: modelId,
     label: modelId,
@@ -843,7 +861,7 @@ function createPinnedRuntimeModel(
     shortCode: buildShortCode(modelId, type),
     description: `${profileName} · ${modelId}`,
     type,
-    vendor: ModelVendor.OTHER,
+    vendor,
   });
 }
 

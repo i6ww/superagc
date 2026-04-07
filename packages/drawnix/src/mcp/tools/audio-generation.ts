@@ -18,6 +18,8 @@ export interface AudioGenerationParams {
   prompt: string;
   model?: string;
   modelRef?: ModelRef | null;
+  sunoAction?: 'music' | 'lyrics';
+  notifyHook?: string;
   title?: string;
   tags?: string;
   mv?: string;
@@ -51,6 +53,8 @@ async function executeAsync(params: AudioGenerationParams): Promise<MCPResult> {
       model: params.model || getCurrentAudioModel(),
       modelRef: params.modelRef || null,
       prompt: params.prompt,
+      sunoAction: params.sunoAction,
+      notifyHook: params.notifyHook,
       title: params.title,
       tags: params.tags,
       mv: params.mv,
@@ -70,10 +74,14 @@ async function executeAsync(params: AudioGenerationParams): Promise<MCPResult> {
       data: {
         url: result.url,
         urls: result.urls,
+        resultKind: result.resultKind,
         title: result.title,
+        lyricsText: result.lyricsText,
+        lyricsTitle: result.lyricsTitle,
+        lyricsTags: result.lyricsTags,
         duration: result.duration,
         imageUrl: result.imageUrl,
-        format: result.format || 'mp3',
+        format: result.format || (result.resultKind === 'lyrics' ? 'lyrics' : 'mp3'),
         providerTaskId: result.providerTaskId,
         primaryClipId: result.primaryClipId,
         clipIds: result.clipIds,
@@ -114,6 +122,8 @@ function executeQueue(
         prompt: params.prompt,
         model: params.model || getCurrentAudioModel(),
         modelRef: params.modelRef || null,
+        sunoAction: params.sunoAction,
+        notifyHook: params.notifyHook,
         title: params.title,
         tags: params.tags,
         mv: params.mv,
@@ -188,6 +198,14 @@ export const audioGenerationTool: MCPTool = {
       title: {
         type: 'string',
         description: '歌曲标题',
+      },
+      sunoAction: {
+        type: 'string',
+        description: 'Suno 动作类型，music 或 lyrics',
+      },
+      notifyHook: {
+        type: 'string',
+        description: '歌词生成完成后的回调地址',
       },
       tags: {
         type: 'string',

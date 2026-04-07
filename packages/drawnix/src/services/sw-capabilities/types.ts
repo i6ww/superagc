@@ -216,6 +216,8 @@ export interface AudioGenerationParams {
   prompt: string;
   model?: string;
   modelRef?: ModelRef | null;
+  sunoAction?: string;
+  notifyHook?: string;
   title?: string;
   tags?: string;
   mv?: string;

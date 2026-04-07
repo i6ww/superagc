@@ -535,6 +535,8 @@ class GenerationAPIService {
           title: params.title,
           tags: params.tags,
           mv: params.mv,
+          sunoAction: params.sunoAction,
+          notifyHook: params.notifyHook,
           continueClipId: params.continueClipId,
           continueAt: params.continueAt,
           params: {
@@ -559,12 +561,16 @@ class GenerationAPIService {
       return {
         url: result.url,
         urls: result.urls,
-        format: result.format || 'mp3',
+        format: result.format || (result.resultKind === 'lyrics' ? 'lyrics' : 'mp3'),
         size: 0,
+        resultKind: result.resultKind,
         duration:
           typeof result.duration === 'number' ? result.duration : undefined,
         previewImageUrl: result.imageUrl,
         title: result.title,
+        lyricsText: result.lyricsText,
+        lyricsTitle: result.lyricsTitle,
+        lyricsTags: result.lyricsTags,
         providerTaskId: result.providerTaskId,
         primaryClipId: result.primaryClipId,
         clipIds: result.clipIds,
@@ -727,12 +733,20 @@ class GenerationAPIService {
       return {
         url: result.url,
         urls: result.urls,
-        format: result.format || 'mp3',
+        format: result.format || (result.resultKind === 'lyrics' ? 'lyrics' : 'mp3'),
         size: 0,
+        resultKind: result.resultKind,
         duration:
           typeof result.duration === 'number' ? result.duration : undefined,
         previewImageUrl: result.imageUrl,
         title: result.title,
+        lyricsText: result.lyricsText,
+        lyricsTitle: result.lyricsTitle,
+        lyricsTags: result.lyricsTags,
+        providerTaskId: result.providerTaskId,
+        primaryClipId: result.primaryClipId,
+        clipIds: result.clipIds,
+        clips: result.clips,
       };
     } catch (error: any) {
       const duration = Date.now() - startTime;
