@@ -37,6 +37,8 @@ export interface VendorTabPanelProps {
   children: React.ReactNode;
   /** 紧凑模式（标签宽度缩小） */
   compact?: boolean;
+  /** 第一列底部扩展区 */
+  tabsFooter?: React.ReactNode;
 }
 
 export const VendorTabPanel: React.FC<VendorTabPanelProps> = ({
@@ -49,6 +51,7 @@ export const VendorTabPanel: React.FC<VendorTabPanelProps> = ({
   searchQuery,
   children,
   compact = false,
+  tabsFooter,
 }) => {
   const isSearching = !!searchQuery?.trim();
   const hasMiddle = middleTabs && middleTabs.length > 0 && !isSearching;
@@ -75,25 +78,30 @@ export const VendorTabPanel: React.FC<VendorTabPanelProps> = ({
     >
       {!isSearching && (
         <div className="vendor-tab-panel__tabs">
-          {tabs.map(({ id, label, count, icon }) => {
-            const isActive = activeTab === id;
-            return (
-              <button
-                key={id}
-                className={`vendor-tab-panel__tab ${
-                  isActive ? 'vendor-tab-panel__tab--active' : ''
-                }`}
-                onClick={() => handleTabClick(id)}
-                type="button"
-              >
-                {icon ? (
-                  <span className="vendor-tab-panel__tab-icon">{icon}</span>
-                ) : null}
-                <span className="vendor-tab-panel__tab-label">{label}</span>
-                <span className="vendor-tab-panel__tab-count">{count}</span>
-              </button>
-            );
-          })}
+          <div className="vendor-tab-panel__tabs-list">
+            {tabs.map(({ id, label, count, icon }) => {
+              const isActive = activeTab === id;
+              return (
+                <button
+                  key={id}
+                  className={`vendor-tab-panel__tab ${
+                    isActive ? 'vendor-tab-panel__tab--active' : ''
+                  }`}
+                  onClick={() => handleTabClick(id)}
+                  type="button"
+                >
+                  {icon ? (
+                    <span className="vendor-tab-panel__tab-icon">{icon}</span>
+                  ) : null}
+                  <span className="vendor-tab-panel__tab-label">{label}</span>
+                  <span className="vendor-tab-panel__tab-count">{count}</span>
+                </button>
+              );
+            })}
+          </div>
+          {tabsFooter ? (
+            <div className="vendor-tab-panel__tabs-footer">{tabsFooter}</div>
+          ) : null}
         </div>
       )}
       {hasMiddle && (

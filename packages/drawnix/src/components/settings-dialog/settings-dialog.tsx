@@ -69,6 +69,11 @@ export { VIDEO_MODEL_SELECT_OPTIONS as VIDEO_MODEL_OPTIONS } from '../../constan
 
 type SettingsView = 'providers' | 'presets' | 'canvas';
 type CompactPanelMode = 'catalog' | 'detail';
+type ProviderNavigationIntent =
+  | { action: 'select'; profileId: string }
+  | { action: 'create' };
+
+const SETTINGS_PROVIDER_NAV_EVENT = 'aitu:settings:provider-nav';
 
 const VIEW_SECTIONS: Array<{ value: SettingsView; label: string }> = [
   { value: 'providers', label: '供应商' },
@@ -271,6 +276,27 @@ function createProfile(index: number): ProviderProfile {
       supportsTools: true,
     },
   };
+}
+
+function readPendingProviderNavigationIntent():
+  | ProviderNavigationIntent
+  | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const intent =
+    (window as typeof window & {
+      __aituPendingProviderNavigationIntent?: ProviderNavigationIntent;
+    }).__aituPendingProviderNavigationIntent || null;
+
+  (
+    window as typeof window & {
+      __aituPendingProviderNavigationIntent?: ProviderNavigationIntent;
+    }
+  ).__aituPendingProviderNavigationIntent = undefined;
+
+  return intent;
 }
 
 function inferAuthTypeForProviderType(
@@ -572,13 +598,21 @@ export const SettingsDialog = ({
       DEFAULT_INVOCATION_PRESET_ID;
     const geminiConfig = geminiSettings.get();
     let nextShowWorkZoneCard = true;
+    const pendingProviderIntent = readPendingProviderNavigationIntent();
+    const nextSelectedProfileId =
+      pendingProviderIntent?.action === 'select' &&
+      nextProfiles.some((profile) => profile.id === pendingProviderIntent.profileId)
+        ? pendingProviderIntent.profileId
+        : nextProfiles[0]?.id || LEGACY_DEFAULT_PROVIDER_PROFILE_ID;
 
     setProfilesDraft(nextProfiles);
     setPresetsDraft(nextPresets);
     setInitialProfiles(nextProfiles);
     setActivePresetIdDraft(nextActivePresetId);
     setSelectedProfileId((currentProfileId) =>
-      nextProfiles.some((profile) => profile.id === currentProfileId)
+      pendingProviderIntent
+        ? nextSelectedProfileId
+        : nextProfiles.some((profile) => profile.id === currentProfileId)
         ? currentProfileId
         : nextProfiles[0]?.id || LEGACY_DEFAULT_PROVIDER_PROFILE_ID
     );
@@ -601,7 +635,9 @@ export const SettingsDialog = ({
     setShowWorkZoneCard(nextShowWorkZoneCard);
 
     setActiveView('providers');
-    setCompactProviderMode('catalog');
+    setCompactProviderMode(
+      pendingProviderIntent && isCompactLayout ? 'detail' : 'catalog'
+    );
     setCompactPresetMode('catalog');
     setModelSearchQuery('');
     setDiscoveryDialogOpen(false);
@@ -617,6 +653,10 @@ export const SettingsDialog = ({
         showWorkZoneCard: nextShowWorkZoneCard,
       })
     );
+
+    if (pendingProviderIntent?.action === 'create') {
+      applyProviderNavigationIntent(pendingProviderIntent, nextProfiles);
+    }
   }, [appState.openSettings]);
 
   useEffect(() => {
@@ -781,6 +821,35 @@ export const SettingsDialog = ({
     }
   };
 
+  const applyProviderNavigationIntent = (
+    intent: ProviderNavigationIntent,
+    baseProfiles?: ProviderProfile[]
+  ) => {
+    const sourceProfiles = baseProfiles || profilesDraft;
+
+    setActiveView('providers');
+    if (isCompactLayout) {
+      setCompactProviderMode('detail');
+    }
+
+    if (intent.action === 'select') {
+      const targetProfileId = sourceProfiles.some(
+        (profile) => profile.id === intent.profileId
+      )
+        ? intent.profileId
+        : sourceProfiles[sourceProfiles.length - 1]?.id ||
+          LEGACY_DEFAULT_PROVIDER_PROFILE_ID;
+      setSelectedProfileId(targetProfileId);
+      return sourceProfiles;
+    }
+
+    const nextProfile = createProfile(sourceProfiles.length + 1);
+    const nextProfiles = [...sourceProfiles, nextProfile];
+    setProfilesDraft(nextProfiles);
+    setSelectedProfileId(nextProfile.id);
+    return nextProfiles;
+  };
+
   const handleAddProfile = () => {
     const nextProfile = createProfile(profilesDraft.length + 1);
     setProfilesDraft((current) => [...current, nextProfile]);
@@ -791,6 +860,34 @@ export const SettingsDialog = ({
       setCompactProviderMode('detail');
     }
   };
+
+  useEffect(() => {
+    if (!appState.openSettings) {
+      return;
+    }
+
+    const handleProviderNavigation = (
+      event: Event
+    ) => {
+      const detail = (event as CustomEvent<ProviderNavigationIntent>).detail;
+      if (!detail) {
+        return;
+      }
+      applyProviderNavigationIntent(detail);
+    };
+
+    window.addEventListener(
+      SETTINGS_PROVIDER_NAV_EVENT,
+      handleProviderNavigation as EventListener
+    );
+
+    return () => {
+      window.removeEventListener(
+        SETTINGS_PROVIDER_NAV_EVENT,
+        handleProviderNavigation as EventListener
+      );
+    };
+  }, [appState.openSettings, isCompactLayout, profilesDraft]);
 
   const handleDeleteProfile = (profileId: string) => {
     if (isManagedProviderProfile(profileId)) {

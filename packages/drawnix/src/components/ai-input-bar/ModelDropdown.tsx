@@ -16,7 +16,7 @@ import React, {
   useMemo,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronDown } from 'lucide-react';
+import { Check, ChevronDown, Plus } from 'lucide-react';
 import {
   IMAGE_MODELS,
   getModelConfig,
@@ -28,6 +28,7 @@ import { ATTACHED_ELEMENT_CLASS_NAME } from '@plait/core';
 import { Z_INDEX } from '../../constants/z-index';
 import { useControllableState } from '../../hooks/useControllableState';
 import { useProviderProfiles } from '../../hooks/use-provider-profiles';
+import { useDrawnix } from '../../hooks/use-drawnix';
 import {
   ModelVendorMark,
   getDiscoveryVendorLabel,
@@ -40,6 +41,16 @@ import {
   groupModelsByProvider,
   DEFAULT_PROVIDER_ID,
 } from '../../utils/model-grouping';
+import {
+  LEGACY_DEFAULT_PROVIDER_PROFILE_ID,
+  TUZI_ORIGINAL_PROVIDER_PROFILE_ID,
+} from '../../utils/settings-manager';
+
+const SETTINGS_PROVIDER_NAV_EVENT = 'aitu:settings:provider-nav';
+
+type ProviderSettingsIntent =
+  | { action: 'select'; profileId: string }
+  | { action: 'create' };
 
 export interface ModelDropdownProps {
   /** 当前选中的模型 ID */
@@ -88,6 +99,7 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
   isOpen: controlledIsOpen,
   onOpenChange,
 }) => {
+  const { setAppState } = useDrawnix();
   const { value: isOpen, setValue: setIsOpen } = useControllableState({
     controlledValue: controlledIsOpen,
     defaultValue: false,
@@ -130,6 +142,10 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
   const providerGroups = useMemo(
     () => groupModelsByProvider(models, providerProfiles),
     [models, providerProfiles]
+  );
+  const providerModelCountMap = useMemo(
+    () => new Map(providerGroups.map((group) => [group.providerId, group.totalCount])),
+    [providerGroups]
   );
 
   // 当前选中的供应商
@@ -310,6 +326,41 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
     setActiveVendor(vendorId);
     setHighlightedIndex(0);
   }, []);
+
+  const handleOpenProviderSettings = useCallback(() => {
+    const availableProfiles = providerProfiles.filter(
+      (profile) => profile.id !== LEGACY_DEFAULT_PROVIDER_PROFILE_ID
+    );
+    const lastProfile =
+      availableProfiles[availableProfiles.length - 1] || null;
+    const lastProfileModelCount = lastProfile
+      ? providerModelCountMap.get(lastProfile.id) || 0
+      : 0;
+
+    const intent: ProviderSettingsIntent =
+      lastProfile && lastProfileModelCount === 0
+        ? { action: 'select', profileId: lastProfile.id }
+        : availableProfiles.some(
+            (profile) =>
+              profile.id === TUZI_ORIGINAL_PROVIDER_PROFILE_ID &&
+              (providerModelCountMap.get(profile.id) || 0) === 0
+          )
+        ? { action: 'select', profileId: TUZI_ORIGINAL_PROVIDER_PROFILE_ID }
+        : { action: 'create' };
+
+    (
+      window as typeof window & {
+        __aituPendingProviderNavigationIntent?: ProviderSettingsIntent;
+      }
+    ).__aituPendingProviderNavigationIntent = intent;
+    window.dispatchEvent(
+      new CustomEvent<ProviderSettingsIntent>(SETTINGS_PROVIDER_NAV_EVENT, {
+        detail: intent,
+      })
+    );
+    setIsOpen(false);
+    setAppState((prev) => ({ ...prev, openSettings: true }));
+  }, [providerProfiles, providerModelCountMap, setAppState, setIsOpen]);
 
   // 当过滤结果变化时，高亮选中模型或重置到第一项
   useEffect(() => {
@@ -646,6 +697,20 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
               onMiddleTabChange={handleVendorChange}
               searchQuery={searchQuery}
               compact
+              tabsFooter={
+                <button
+                  type="button"
+                  className="model-dropdown__provider-action"
+                  onClick={handleOpenProviderSettings}
+                  title={
+                    language === 'zh'
+                      ? '新增供应商或打开供应商设置'
+                      : 'Add provider or open provider settings'
+                  }
+                >
+                  <Plus size={16} />
+                </button>
+              }
             >
               <div className="model-dropdown__list-pane">
                 {!isSearching && activeCategory ? (
