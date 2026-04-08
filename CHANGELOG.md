@@ -1,3 +1,13 @@
+## 0.6.16 (2026-04-08)
+
+### 🩹 Fixes
+
+- 修复 Suno 默认动作与 release 卡死问题 ([9d216539](https://github.com/ljquan/aitu/commit/9d216539))
+
+### ❤️  Thank You
+
+- liquid <ljquan@qq.com>
+
 ## 0.6.15 (2026-04-08)
 
 ### 🚀 Features

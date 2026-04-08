@@ -1,10 +1,8 @@
 {
-  "version": "0.6.15",
-  "buildTime": "2026-04-08T16:05:19.368Z",
+  "version": "0.6.16",
+  "buildTime": "2026-04-08T16:50:36.871Z",
   "gitCommit": "unknown",
   "changelog": [
-    "sort models by freshness and persist model-scoped generation preferences",
-    "优化播放器定位、高度、拖拽和垂直布局",
-    "完善音频预览与下载体验"
+    "修复 Suno 默认动作与 release 卡死问题"
   ]
 }

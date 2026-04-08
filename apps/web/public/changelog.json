@@ -1,6 +1,19 @@
 {
   "versions": [
     {
+      "version": "0.6.16",
+      "date": "2026-04-08",
+      "changes": {
+        "features": [],
+        "fixes": [
+          "修复 Suno 默认动作与 release 卡死问题"
+        ],
+        "improvements": []
+      },
+      "type": "patch",
+      "highlights": "修复 Suno 默认动作与 release 卡死问题"
+    },
+    {
       "version": "0.6.15",
       "date": "2026-04-08",
       "changes": {
