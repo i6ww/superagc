@@ -1,3 +1,16 @@
+## 0.6.15 (2026-04-08)
+
+### 🚀 Features
+
+- 优化播放器定位、高度、拖拽和垂直布局 ([78038789](https://github.com/ljquan/aitu/commit/78038789))
+- 完善音频预览与下载体验 ([d3f5a1d5](https://github.com/ljquan/aitu/commit/d3f5a1d5))
+- sort models by freshness and persist model-scoped generation preferences ([98ad2a06](https://github.com/ljquan/aitu/commit/98ad2a06))
+- add provider config shortcut ([14901355](https://github.com/ljquan/aitu/commit/14901355))
+
+### ❤️  Thank You
+
+- liquid <ljquan@qq.com>
+
 ## 0.6.14 (2026-04-08)
 
 ### 🚀 Features

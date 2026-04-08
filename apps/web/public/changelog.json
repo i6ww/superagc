@@ -1,6 +1,22 @@
 {
   "versions": [
     {
+      "version": "0.6.15",
+      "date": "2026-04-08",
+      "changes": {
+        "features": [
+          "优化播放器定位、高度、拖拽和垂直布局",
+          "完善音频预览与下载体验",
+          "sort models by freshness and persist model-scoped generation preferences",
+          "add provider config shortcut"
+        ],
+        "fixes": [],
+        "improvements": []
+      },
+      "type": "patch",
+      "highlights": "优化播放器定位、高度、拖拽和垂直布局"
+    },
+    {
       "version": "0.6.14",
       "date": "2026-04-08",
       "changes": {
