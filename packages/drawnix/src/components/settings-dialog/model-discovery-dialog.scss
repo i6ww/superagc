@@ -84,14 +84,7 @@
 .model-discovery-dialog__toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
-}
-
-.model-discovery-dialog__toolbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 
 .model-discovery-dialog__search {
@@ -457,10 +450,16 @@
 .model-discovery-dialog__footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
   padding-top: 14px;
   border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.model-discovery-dialog__footer-bulk {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
 }
 
 .model-discovery-dialog__selection-count {
@@ -515,13 +514,13 @@
     display: none;
   }
 
-  .model-discovery-dialog__toolbar-actions,
-  .model-discovery-dialog__actions {
+  .model-discovery-dialog__actions,
+  .model-discovery-dialog__footer-bulk {
     width: 100%;
   }
 
-  .model-discovery-dialog__toolbar-actions > *,
-  .model-discovery-dialog__actions > * {
+  .model-discovery-dialog__actions > *,
+  .model-discovery-dialog__footer-bulk > * {
     flex: 1;
   }
 

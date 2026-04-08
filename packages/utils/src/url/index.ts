@@ -67,12 +67,18 @@ export function normalizeImageDataUrl(
     trimmed.startsWith('data:') ||
     trimmed.startsWith('blob:') ||
     trimmed.startsWith('http://') ||
-    trimmed.startsWith('https://') ||
-    trimmed.startsWith('/') ||
-    trimmed.startsWith('./') ||
-    trimmed.startsWith('../')
+    trimmed.startsWith('https://')
   ) {
     return trimmed;
+  }
+
+  // 以 / 开头：先检查是否为已知 base64 签名（如 /9j/ 是 JPEG），
+  // 否则视为相对路径原样返回
+  if (trimmed.startsWith('/') || trimmed.startsWith('./') || trimmed.startsWith('../')) {
+    if (!inferImageMimeTypeFromBase64(trimmed)) {
+      return trimmed;
+    }
+    // 是 base64，继续走下面的转换逻辑
   }
 
   const normalized = sanitizeBase64Payload(trimmed);

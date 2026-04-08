@@ -17,6 +17,7 @@ import { getInsertionPointForSelectedElements, getInsertionPointBelowBottommostE
 import { assetStorageService } from '../services/asset-storage-service';
 import { analytics } from '../utils/posthog-analytics';
 import { cacheRemoteUrl } from '../services/media-executor/fallback-utils';
+import { normalizeImageDataUrl } from '@aitu/utils';
 
 /**
  * 从保存的选中元素IDs计算插入点
@@ -75,6 +76,7 @@ const getInsertionPointFromSavedSelection = (
 };
 
 export const loadHTMLImageElement = (dataURL: DataURL, crossOrigin = false) => {
+  const normalizedURL = normalizeImageDataUrl(dataURL) as DataURL;
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image();
     if (crossOrigin) {
@@ -87,7 +89,7 @@ export const loadHTMLImageElement = (dataURL: DataURL, crossOrigin = false) => {
     image.onerror = (error) => {
       reject(error);
     };
-    image.src = dataURL;
+    image.src = normalizedURL;
   });
 };
 
@@ -121,12 +123,17 @@ export const loadHTMLImageElementWithRetry = (
   maxRetries = 3,
   bypassSWAfterRetries = 1
 ): Promise<HTMLImageElement> => {
+  // 存量数据可能存有原始 base64，先统一转为 data URL
+  const normalizedURL = normalizeImageDataUrl(dataURL) as DataURL;
+  if (normalizedURL !== dataURL) {
+    console.debug('[loadHTMLImageElementWithRetry] normalized raw base64 →', normalizedURL.slice(0, 60) + '...');
+  }
   // 外部 URL 不设置 crossOrigin（避免 CORS），不追加参数（避免破坏签名）
-  const isExternalUrl = dataURL.startsWith('http://') || dataURL.startsWith('https://');
+  const isExternalUrl = normalizedURL.startsWith('http://') || normalizedURL.startsWith('https://');
 
   return new Promise((resolve, reject) => {
     let retryCount = 0;
-    let currentUrl = dataURL;
+    let currentUrl = normalizedURL;
     let bypassSW = false;
 
     const tryLoad = () => {
@@ -148,13 +155,13 @@ export const loadHTMLImageElementWithRetry = (
             // 外部 URL 不追加任何参数，直接重试原始 URL
             const delay = Math.min(1000 * Math.pow(2, retryCount - 1), 5000);
             setTimeout(() => {
-              image.src = dataURL;
+              image.src = normalizedURL;
             }, delay);
           } else {
             // 本地 URL：可以追加 bypass_sw 和 _retry 参数
             if (retryCount >= bypassSWAfterRetries && !bypassSW) {
               bypassSW = true;
-              currentUrl = addBypassSWParam(dataURL) as DataURL;
+              currentUrl = addBypassSWParam(normalizedURL) as DataURL;
             }
             const separator = currentUrl.includes('?') ? '&' : '?';
             const retryUrl = `${currentUrl}${separator}_retry=${Date.now()}`;
@@ -164,7 +171,7 @@ export const loadHTMLImageElementWithRetry = (
             }, delay);
           }
         } else {
-          console.error(`[loadHTMLImageElement] 加载失败，已重试 ${maxRetries} 次:`, dataURL);
+          console.error(`[loadHTMLImageElement] 加载失败，已重试 ${maxRetries} 次:`, normalizedURL);
           reject(error);
         }
       };
@@ -342,11 +349,15 @@ export const insertImageFromUrl = async (
   skipScroll?: boolean,
   skipImageLoad?: boolean // 如果为 true 且提供了 referenceDimensions，则跳过图片加载直接使用提供的尺寸
 ) => {
-  // 外部 URL 先缓存到本地，避免 CORS/Referer 问题
-  let resolvedUrl = imageUrl;
-  if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-    const cachedUrl = await cacheRemoteUrl(imageUrl, `insert-${Date.now()}`, 'image', 'png');
-    if (cachedUrl !== imageUrl) {
+  // 外部 URL 和 data URL 先缓存到本地
+  let resolvedUrl = normalizeImageDataUrl(imageUrl);
+  if (
+    resolvedUrl.startsWith('http://') ||
+    resolvedUrl.startsWith('https://') ||
+    resolvedUrl.startsWith('data:')
+  ) {
+    const cachedUrl = await cacheRemoteUrl(resolvedUrl, `insert-${Date.now()}`, 'image', 'png');
+    if (cachedUrl !== resolvedUrl) {
       resolvedUrl = cachedUrl;
     }
   }

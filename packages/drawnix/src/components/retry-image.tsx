@@ -11,8 +11,9 @@
  * - Graceful degradation for virtual paths when SW is unavailable
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { unifiedCacheService } from '../services/unified-cache-service';
+import { normalizeImageDataUrl } from '@aitu/utils';
 
 export interface RetryImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
   /** Image source URL */
@@ -133,10 +134,12 @@ export const RetryImage: React.FC<RetryImageProps> = ({
   eager,
   ...imgProps
 }) => {
+  // 存量数据可能存有原始 base64，先统一转为 data URL
+  const normalizedSrc = useMemo(() => normalizeImageDataUrl(src), [src]);
   // 自动检测是否应该 eager 加载
-  const shouldEagerLoad = eager ?? isCachedUrl(src);
-  
-  const [imageSrc, setImageSrc] = useState<string>(src);
+  const shouldEagerLoad = eager ?? isCachedUrl(normalizedSrc);
+
+  const [imageSrc, setImageSrc] = useState<string>(normalizedSrc);
   const [retryCount, setRetryCount] = useState<number>(0);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [hasError, setHasError] = useState<boolean>(false);
@@ -183,7 +186,7 @@ export const RetryImage: React.FC<RetryImageProps> = ({
 
   // Handle image load error with retry logic
   const handleError = useCallback(async () => {
-    if (src.startsWith('data:')) {
+    if (normalizedSrc.startsWith('data:')) {
       setIsLoading(false);
       setHasError(true);
       onLoadFailure?.(new Error('Failed to load inline data image'));
@@ -202,8 +205,8 @@ export const RetryImage: React.FC<RetryImageProps> = ({
       }
       
       // 对于虚拟路径，在绕过 SW 后尝试降级到 blob URL
-      if (shouldBypassSW && isVirtualUrl(src) && !blobUrlRef.current) {
-        const blobUrl = await tryFallbackToBlobUrl(src);
+      if (shouldBypassSW && isVirtualUrl(normalizedSrc) && !blobUrlRef.current) {
+        const blobUrl = await tryFallbackToBlobUrl(normalizedSrc);
         if (blobUrl) {
           blobUrlRef.current = blobUrl;
           setRetryCount(nextRetryCount);
@@ -224,7 +227,7 @@ export const RetryImage: React.FC<RetryImageProps> = ({
         }
         
         // 构建重试 URL
-        let retryUrl = src;
+        let retryUrl = normalizedSrc;
         
         // 如果需要绕过 SW，添加 bypass_sw 参数
         if (shouldBypassSW || bypassSW) {
@@ -244,7 +247,7 @@ export const RetryImage: React.FC<RetryImageProps> = ({
       const error = new Error(`Failed to load image after ${maxRetries} retries`);
       onLoadFailure?.(error);
     }
-  }, [retryCount, maxRetries, src, getRetryDelay, onLoadFailure, bypassSW, bypassSWAfterRetries, tryFallbackToBlobUrl]);
+  }, [retryCount, maxRetries, normalizedSrc, getRetryDelay, onLoadFailure, bypassSW, bypassSWAfterRetries, tryFallbackToBlobUrl]);
 
   // Reset state when src changes and handle virtual path fallback
   useEffect(() => {
@@ -253,36 +256,36 @@ export const RetryImage: React.FC<RetryImageProps> = ({
       URL.revokeObjectURL(blobUrlRef.current);
       blobUrlRef.current = null;
     }
-    
+
     setRetryCount(0);
     setIsLoading(true);
     setHasError(false);
     setBypassSW(false);
-    
+
     // 检查是否需要虚拟路径降级
     // 条件：是虚拟路径 && SW 不可用
-    if (isVirtualUrl(src) && !isSWAvailable()) {
+    if (isVirtualUrl(normalizedSrc) && !isSWAvailable()) {
       // 异步尝试降级
-      tryFallbackToBlobUrl(src).then((blobUrl) => {
+      tryFallbackToBlobUrl(normalizedSrc).then((blobUrl) => {
         if (blobUrl) {
           blobUrlRef.current = blobUrl;
           setImageSrc(blobUrl);
         } else {
           // 降级失败，仍然使用原始 URL（可能会失败，但有重试机制）
-          setImageSrc(src);
+          setImageSrc(normalizedSrc);
         }
       });
     } else {
-      setImageSrc(src);
+      setImageSrc(normalizedSrc);
     }
-    
+
     // Clear any pending retry timeouts
     return () => {
       if (retryTimeoutRef.current) {
         clearTimeout(retryTimeoutRef.current);
       }
     };
-  }, [src, tryFallbackToBlobUrl]);
+  }, [normalizedSrc, tryFallbackToBlobUrl]);
 
   // Cleanup on unmount
   useEffect(() => {

@@ -38,6 +38,7 @@ import { ModelHealthBadge } from '../shared/ModelHealthBadge';
 import { KeyboardDropdown } from './KeyboardDropdown';
 import {
   groupModelsByProvider,
+  DEFAULT_PROVIDER_ID,
 } from '../../utils/model-grouping';
 
 export interface ModelDropdownProps {
@@ -197,6 +198,17 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
   const shortCode = currentModel?.shortCode || 'img';
   const isSearching = Boolean(searchQuery.trim());
 
+  // 从 selectionKey 或 currentModel 推导当前选中模型所属的供应商 ID 和 vendor
+  const selectedProviderHint = useMemo(() => {
+    if (currentModel?.sourceProfileId) return currentModel.sourceProfileId;
+    if (selectedSelectionKey?.includes('::')) {
+      return selectedSelectionKey.split('::')[0];
+    }
+    return DEFAULT_PROVIDER_ID;
+  }, [currentModel, selectedSelectionKey]);
+
+  const selectedVendorHint = currentModel?.vendor ?? null;
+
   // 当外部选中的模型变化时，同步搜索框内容（仅 form 变体）
   useEffect(() => {
     if (variant === 'form' && !isOpen) {
@@ -299,21 +311,32 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
     setHighlightedIndex(0);
   }, []);
 
-  // 当过滤结果变化时，重置高亮索引
+  // 当过滤结果变化时，高亮选中模型或重置到第一项
   useEffect(() => {
-    setHighlightedIndex(0);
-  }, [displayedModels]);
+    const selectedKey = selectedSelectionKey || selectedModel;
+    const idx = displayedModels.findIndex(
+      (m) => getModelKey(m) === selectedKey
+    );
+    setHighlightedIndex(idx >= 0 ? idx : 0);
+  }, [displayedModels, selectedModel, selectedSelectionKey, getModelKey]);
 
   useEffect(() => {
     if (isSearching) return;
 
-    // 确保 activeProviderId 有效
+    // 确保 activeProviderId 有效，优先用 selectedProviderHint（即使 currentModel 还没加载）
     if (
       !activeProviderId ||
       !providerGroups.some((g) => g.providerId === activeProviderId)
     ) {
-      if (providerGroups.length > 0) {
-        setActiveProviderId(providerGroups[0].providerId);
+      const matchedProvider = providerGroups.find(
+        (g) => g.providerId === selectedProviderHint
+      );
+      setActiveProviderId(
+        matchedProvider?.providerId || providerGroups[0]?.providerId || null
+      );
+      if (selectedVendorHint) {
+        setActiveVendor(selectedVendorHint);
+        return;
       }
     }
 
@@ -332,6 +355,8 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
     activeProvider,
     activeVendor,
     isSearching,
+    selectedProviderHint,
+    selectedVendorHint,
   ]);
 
   // 切换下拉菜单
@@ -340,10 +365,11 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
       e?.preventDefault(); // 阻止触发输入框失焦
       if (disabled) return;
       const next = !isOpen;
-      if (next && currentModel) {
-        const pid = currentModel.sourceProfileId || providerGroups[0]?.providerId || null;
-        setActiveProviderId(pid);
-        setActiveVendor(currentModel.vendor);
+      if (next) {
+        setActiveProviderId(selectedProviderHint);
+        if (selectedVendorHint) {
+          setActiveVendor(selectedVendorHint);
+        }
       }
       if (variant === 'form') {
         if (next) {
@@ -363,7 +389,8 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
       variant,
       currentModel,
       selectedModel,
-      providerGroups,
+      selectedProviderHint,
+      selectedVendorHint,
     ]
   );
 
@@ -500,11 +527,9 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
           if (!isOpen) {
             setIsOpen(true);
             setSearchQuery('');
-            if (currentModel) {
-              setActiveProviderId(
-                currentModel.sourceProfileId || providerGroups[0]?.providerId || null
-              );
-              setActiveVendor(currentModel.vendor);
+            setActiveProviderId(selectedProviderHint);
+            if (selectedVendorHint) {
+              setActiveVendor(selectedVendorHint);
             }
           }
         }}
@@ -644,6 +669,10 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
                       const isSelected =
                         modelKey === (selectedSelectionKey || selectedModel);
                       const isHighlighted = index === highlightedIndex;
+                      const displayName = model.shortLabel || model.label;
+                      const showIdTooltip =
+                        displayName !== model.id &&
+                        !displayName.includes(model.id);
                       return (
                         <div
                           key={modelKey}
@@ -659,6 +688,7 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
                           onMouseEnter={() => setHighlightedIndex(index)}
                           role="option"
                           aria-selected={isSelected}
+                          title={showIdTooltip ? model.id : undefined}
                         >
                           <div className="model-dropdown__item-content">
                             <div className="model-dropdown__item-name">

@@ -27,6 +27,7 @@ import {
   type SWTask,
 } from './media-executor/task-storage-writer';
 import { taskStorageReader } from './task-storage-reader';
+import { normalizeImageDataUrl } from '@aitu/utils';
 import { executorFactory, waitForTaskCompletion } from './media-executor';
 import { hasInvocationRouteCredentials } from '../utils/settings-manager';
 import { DEFAULT_AUDIO_MODEL_ID } from '../constants/model-config';
@@ -179,8 +180,8 @@ class TaskQueueService {
           status: TaskStatus.COMPLETED,
           progress: 100,
           result: {
-            url: result.url,
-            urls: result.urls,
+            url: normalizeImageDataUrl(result.url),
+            urls: result.urls?.map((u: string) => normalizeImageDataUrl(u)),
             format: result.format || (result.resultKind === 'lyrics' ? 'lyrics' : 'mp3'),
             size: 0,
             resultKind: result.resultKind,

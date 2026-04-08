@@ -110,8 +110,8 @@ export const DEFAULT_INVOCATION_PRESET_ID = 'default';
 export const TUZI_ORIGINAL_PROVIDER_PROFILE_ID = 'tuzi-origin';
 export const TUZI_PROVIDER_ICON_URL = '/logo-tuzi.png';
 export const TUZI_PROVIDER_DEFAULT_BASE_URL = 'https://api.tu-zi.com/v1';
-export const TUZI_DEFAULT_PROVIDER_NAME = '兔子 AI';
-export const TUZI_ORIGINAL_PROVIDER_NAME = '兔子 原价';
+export const TUZI_DEFAULT_PROVIDER_NAME = 'default 分组';
+export const TUZI_ORIGINAL_PROVIDER_NAME = '原价分组';
 
 const DEFAULT_PROVIDER_CAPABILITIES: ProviderCapabilities = {
   supportsModelsEndpoint: true,

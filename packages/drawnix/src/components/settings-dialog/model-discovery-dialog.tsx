@@ -352,24 +352,6 @@ export const ModelDiscoveryDialog: React.FC<ModelDiscoveryDialogProps> = ({
               placeholder="搜索模型名称、ID 或品牌"
             />
           </label>
-          <div className="model-discovery-dialog__toolbar-actions">
-            <button
-              type="button"
-              className="model-discovery-dialog__ghost-button"
-              onClick={toggleVisibleModels}
-              disabled={visibleModels.length === 0}
-            >
-              {allVisibleSelected ? '取消当前结果' : '添加当前结果'}
-            </button>
-            <button
-              type="button"
-              className="model-discovery-dialog__ghost-button model-discovery-dialog__ghost-button--muted"
-              onClick={() => setDraftSelection([])}
-              disabled={draftSelection.length === 0}
-            >
-              清空已选
-            </button>
-          </div>
         </div>
 
         <div className="model-discovery-dialog__type-tabs">
@@ -542,6 +524,24 @@ export const ModelDiscoveryDialog: React.FC<ModelDiscoveryDialogProps> = ({
             已选 {selectedCount} 个 · 图 {selectedTypeCounts.image} / 视{' '}
             {selectedTypeCounts.video} / 文 {selectedTypeCounts.text}
           </span>
+          <div className="model-discovery-dialog__footer-bulk">
+            <button
+              type="button"
+              className="model-discovery-dialog__ghost-button"
+              onClick={toggleVisibleModels}
+              disabled={visibleModels.length === 0}
+            >
+              {allVisibleSelected ? '取消全选' : '全选'}
+            </button>
+            <button
+              type="button"
+              className="model-discovery-dialog__ghost-button model-discovery-dialog__ghost-button--muted"
+              onClick={() => setDraftSelection([])}
+              disabled={draftSelection.length === 0}
+            >
+              清空
+            </button>
+          </div>
           <div className="model-discovery-dialog__actions">
             <button
               type="button"

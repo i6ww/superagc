@@ -27,7 +27,7 @@ describe('settings-repository', () => {
         get: () => [
           {
             id: 'legacy-default',
-            name: '兔子 AI',
+            name: 'default 分组',
             providerType: 'custom',
             baseUrl: 'https://api.tu-zi.com/v1',
             apiKey: 'legacy-key',

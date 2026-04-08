@@ -441,6 +441,9 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             const isSelected =
               (model.type === 'image' && selectedImageModel === model.id) ||
               (model.type === 'video' && selectedVideoModel === model.id);
+            const displayName = model.shortLabel || model.label;
+            const showIdTooltip =
+              displayName !== model.id && !displayName.includes(model.id);
 
             return (
               <div
@@ -455,6 +458,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                 onClick={() => handleSelect(model.id)}
                 role="option"
                 aria-selected={isSelected}
+                title={showIdTooltip ? model.id : undefined}
               >
                 <div className="ai-model-selector__item-content">
                   <div className="ai-model-selector__item-name">

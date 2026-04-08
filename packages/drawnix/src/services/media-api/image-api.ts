@@ -29,7 +29,8 @@ export { isAsyncImageModel, aspectRatioToSize };
 
 function normalizeImageResultUrl(item: Record<string, unknown>): string | undefined {
   if (typeof item.url === 'string' && item.url) {
-    return item.url;
+    // url 字段可能是原始 base64（如 /9j/4AAQ...），需要转为 data URL
+    return normalizeImageDataUrl(item.url);
   }
 
   const b64 = typeof item.b64_json === 'string' ? item.b64_json : '';
@@ -37,15 +38,7 @@ function normalizeImageResultUrl(item: Record<string, unknown>): string | undefi
     return undefined;
   }
 
-  if (b64.startsWith('data:')) {
-    return b64;
-  }
-
-  const mimeType =
-    typeof item.mime_type === 'string' && item.mime_type
-      ? item.mime_type
-      : 'image/png';
-  return `data:${mimeType};base64,${b64}`;
+  return normalizeImageDataUrl(b64);
 }
 
 /**
