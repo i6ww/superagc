@@ -69,6 +69,25 @@ export const AudioPlaylistTabs: React.FC<AudioPlaylistTabsProps> = ({
             'audio-playlist-tabs__chip--active': selectedPlaylistId === AUDIO_PLAYLIST_ALL_ID,
           })}
           onClick={() => onSelect(AUDIO_PLAYLIST_ALL_ID)}
+          onContextMenu={
+            manageable
+              ? (event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setContextMenu({
+                    x: event.clientX,
+                    y: event.clientY,
+                    playlist: {
+                      id: AUDIO_PLAYLIST_ALL_ID,
+                      name: allLabel,
+                      createdAt: 0,
+                      updatedAt: 0,
+                      isSystem: true,
+                    },
+                  });
+                }
+              : undefined
+          }
         >
           <ListMusic size={14} />
           <span>{allLabel}</span>
@@ -78,7 +97,7 @@ export const AudioPlaylistTabs: React.FC<AudioPlaylistTabsProps> = ({
         {playlists.map((playlist) => {
           const playlistCount = (playlistItems[playlist.id] || []).length;
           const isFavorites = playlist.id === AUDIO_PLAYLIST_FAVORITES_ID;
-          const isManageable = manageable && !playlist.isSystem;
+          const isManageable = manageable;
 
           return (
             <button
@@ -138,7 +157,7 @@ export const AudioPlaylistTabs: React.FC<AudioPlaylistTabsProps> = ({
               <span>新建播放列表</span>
             </button>
 
-            {onRename ? (
+            {!contextMenu.playlist.isSystem && onRename ? (
               <button
                 type="button"
                 className="audio-playlist-tabs__context-item"
@@ -152,7 +171,7 @@ export const AudioPlaylistTabs: React.FC<AudioPlaylistTabsProps> = ({
               </button>
             ) : null}
 
-            {onDelete ? (
+            {!contextMenu.playlist.isSystem && onDelete ? (
               <button
                 type="button"
                 className="audio-playlist-tabs__context-item audio-playlist-tabs__context-item--danger"
