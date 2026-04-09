@@ -65,11 +65,12 @@ import {
   ModelVendorMark,
 } from '../shared/ModelVendorBrand';
 import { WinBoxWindow } from '../winbox';
+import { TtsSettingsPanel } from '../project-drawer/TtsSettingsPanel';
 
 export { IMAGE_MODEL_GROUPED_SELECT_OPTIONS as IMAGE_MODEL_GROUPED_OPTIONS } from '../../constants/model-config';
 export { VIDEO_MODEL_SELECT_OPTIONS as VIDEO_MODEL_OPTIONS } from '../../constants/model-config';
 
-type SettingsView = 'providers' | 'presets' | 'canvas';
+type SettingsView = 'providers' | 'presets' | 'canvas' | 'speech';
 type CompactPanelMode = 'catalog' | 'detail';
 type ProviderNavigationIntent =
   | { action: 'select'; profileId: string }
@@ -82,6 +83,7 @@ const VIEW_SECTIONS: Array<{ value: SettingsView; label: string }> = [
   { value: 'providers', label: '供应商' },
   { value: 'presets', label: '模型预设' },
   { value: 'canvas', label: '画布显示' },
+  { value: 'speech', label: '语音播放' },
 ];
 
 const PROVIDER_TYPE_OPTIONS: ProviderProfile['providerType'][] = [
@@ -2241,6 +2243,10 @@ export const SettingsDialog = ({
   const renderActiveView = () => {
     if (activeView === 'canvas') {
       return renderCanvasSettings();
+    }
+
+    if (activeView === 'speech') {
+      return <TtsSettingsPanel />;
     }
 
     if (activeView === 'presets') {

@@ -6,6 +6,7 @@
  */
 
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { ttsSettings, type TtsSettings } from '../utils/settings-manager';
 
 export interface TextToSpeechState {
   /** 是否正在朗读 */
@@ -14,6 +15,123 @@ export interface TextToSpeechState {
   isPaused: boolean;
   /** 是否支持语音合成 */
   isSupported: boolean;
+}
+
+export const DEFAULT_TTS_SETTINGS: TtsSettings = {
+  selectedVoice: '',
+  rate: 1,
+  pitch: 1,
+  volume: 1,
+  voicesByLanguage: {},
+};
+
+const LANGUAGE_VOICE_FALLBACKS: Array<{
+  code: string;
+  aliases: string[];
+  pattern: RegExp;
+}> = [
+  { code: 'ja-JP', aliases: ['ja', 'ja-jp'], pattern: /[\u3040-\u30ff]/g },
+  { code: 'ko-KR', aliases: ['ko', 'ko-kr'], pattern: /[\uac00-\ud7af]/g },
+  {
+    code: 'zh-CN',
+    aliases: ['zh', 'zh-cn', 'zh-hans', 'cmn'],
+    pattern: /[\u4e00-\u9fff]/g,
+  },
+  {
+    code: 'ru-RU',
+    aliases: ['ru', 'ru-ru'],
+    pattern: /[\u0400-\u04ff]/g,
+  },
+  {
+    code: 'ar-SA',
+    aliases: ['ar', 'ar-sa'],
+    pattern: /[\u0600-\u06ff]/g,
+  },
+  {
+    code: 'en-US',
+    aliases: ['en', 'en-us'],
+    pattern: /[A-Za-z]/g,
+  },
+];
+
+export function normalizeVoiceLanguageKey(language: string): string {
+  return language.trim().toLowerCase().split('-')[0] || 'zh';
+}
+
+export function inferSpeechLanguage(text: string): string {
+  const normalized = text.trim();
+  if (!normalized) {
+    return 'zh-CN';
+  }
+
+  let bestMatch = LANGUAGE_VOICE_FALLBACKS[2];
+  let bestCount = 0;
+
+  LANGUAGE_VOICE_FALLBACKS.forEach((candidate) => {
+    const matches = normalized.match(candidate.pattern);
+    const count = matches?.length || 0;
+    if (count > bestCount) {
+      bestCount = count;
+      bestMatch = candidate;
+    }
+  });
+
+  return bestMatch.code;
+}
+
+export function resolveVoice(
+  voices: SpeechSynthesisVoice[],
+  settings: TtsSettings,
+  language: string
+): SpeechSynthesisVoice | null {
+  if (voices.length === 0) {
+    return null;
+  }
+
+  const normalizedLanguage = language.toLowerCase();
+  const baseLanguage = normalizeVoiceLanguageKey(normalizedLanguage);
+  const languageMeta =
+    LANGUAGE_VOICE_FALLBACKS.find(
+      (candidate) =>
+        candidate.code.toLowerCase() === normalizedLanguage ||
+        candidate.aliases.includes(normalizedLanguage) ||
+        candidate.aliases.includes(baseLanguage)
+    ) || null;
+
+  const configuredVoiceUri =
+    settings.voicesByLanguage?.[baseLanguage] || settings.selectedVoice;
+  if (configuredVoiceUri) {
+    const configuredVoice = voices.find(
+      (voice) => voice.voiceURI === configuredVoiceUri
+    );
+    if (configuredVoice) {
+      return configuredVoice;
+    }
+  }
+
+  const exactVoice = voices.find(
+    (voice) => voice.lang.toLowerCase() === normalizedLanguage
+  );
+  if (exactVoice) {
+    return exactVoice;
+  }
+
+  const aliasVoice = voices.find((voice) => {
+    const voiceLanguage = voice.lang.toLowerCase();
+    const voiceBaseLanguage = normalizeVoiceLanguageKey(voiceLanguage);
+    return (
+      voiceBaseLanguage === baseLanguage ||
+      languageMeta?.aliases.some(
+        (alias) =>
+          voiceLanguage === alias || voiceLanguage.startsWith(`${alias}-`)
+      ) === true
+    );
+  });
+  if (aliasVoice) {
+    return aliasVoice;
+  }
+
+  return voices.find((voice) => voice.default) || voices[0] || null;
 }
 
 /**
@@ -59,19 +177,42 @@ export function useTextToSpeech() {
     isPaused: false,
     isSupported: typeof window !== 'undefined' && 'speechSynthesis' in window,
   });
-
+  const [settings, setSettings] = useState<TtsSettings>(() => {
+    const persisted = ttsSettings.get();
+    return {
+      ...DEFAULT_TTS_SETTINGS,
+      ...(persisted || {}),
+      voicesByLanguage: persisted?.voicesByLanguage || {},
+    };
+  });
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const stateRef = useRef(state);
 
   useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
+  useEffect(() => {
+    const handleSettingsChange = (nextSettings: TtsSettings) => {
+      setSettings({
+        ...DEFAULT_TTS_SETTINGS,
+        ...(nextSettings || {}),
+        voicesByLanguage: nextSettings?.voicesByLanguage || {},
+      });
+    };
+
+    ttsSettings.addListener(handleSettingsChange);
+
     return () => {
-      if (state.isSupported) {
+      ttsSettings.removeListener(handleSettingsChange);
+      if (stateRef.current.isSupported) {
         window.speechSynthesis.cancel();
       }
     };
-  }, [state.isSupported]);
+  }, []);
 
   const speak = useCallback(
-    (content: string) => {
+    (content: string, preferredLanguage?: string) => {
       if (!state.isSupported) return;
 
       window.speechSynthesis.cancel();
@@ -80,16 +221,16 @@ export function useTextToSpeech() {
       if (!plainText) return;
 
       const utterance = new SpeechSynthesisUtterance(plainText);
-      utterance.lang = 'zh-CN';
-      utterance.rate = 1.0;
-      utterance.pitch = 1.0;
+      const speechLanguage = preferredLanguage || inferSpeechLanguage(plainText);
+      utterance.lang = speechLanguage;
+      utterance.rate = settings.rate;
+      utterance.pitch = settings.pitch;
+      utterance.volume = settings.volume;
 
       const voices = window.speechSynthesis.getVoices();
-      const zhVoice = voices.find(
-        (voice) => voice.lang.startsWith('zh') && voice.localService
-      ) || voices.find((voice) => voice.lang.startsWith('zh'));
-      if (zhVoice) {
-        utterance.voice = zhVoice;
+      const resolvedVoice = resolveVoice(voices, settings, speechLanguage);
+      if (resolvedVoice) {
+        utterance.voice = resolvedVoice;
       }
 
       utterance.onend = () => {
@@ -106,7 +247,7 @@ export function useTextToSpeech() {
       window.speechSynthesis.speak(utterance);
       setState((prev) => ({ ...prev, isSpeaking: true, isPaused: false }));
     },
-    [state.isSupported]
+    [settings, state.isSupported]
   );
 
   const pause = useCallback(() => {

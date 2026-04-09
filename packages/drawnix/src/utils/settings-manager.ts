@@ -86,8 +86,17 @@ export interface InvocationPreset {
   audio: RouteConfig;
 }
 
+export interface TtsSettings {
+  selectedVoice?: string;
+  rate: number;
+  pitch: number;
+  volume: number;
+  voicesByLanguage?: Record<string, string>;
+}
+
 export interface AppSettings {
   gemini: GeminiSettings;
+  tts: TtsSettings;
   providerProfiles: ProviderProfile[];
   providerCatalogs: ProviderCatalog[];
   invocationPresets: InvocationPreset[];
@@ -132,6 +141,13 @@ const DEFAULT_SETTINGS: AppSettings = {
     imageModelName: 'gemini-3-pro-image-preview-vip',
     videoModelName: 'veo3.1',
     textModelName: 'deepseek-v3.2',
+  },
+  tts: {
+    selectedVoice: '',
+    rate: 1,
+    pitch: 1,
+    volume: 1,
+    voicesByLanguage: {},
   },
   providerProfiles: [],
   providerCatalogs: [],
@@ -664,6 +680,13 @@ class SettingsManager {
       gemini: {
         ...DEFAULT_SETTINGS.gemini,
         ...(mergedSettings.gemini || {}),
+      },
+      tts: {
+        ...DEFAULT_SETTINGS.tts,
+        ...(mergedSettings.tts || {}),
+        voicesByLanguage: this.normalizeStringRecord(
+          mergedSettings.tts?.voicesByLanguage
+        ),
       },
       providerProfiles: this.normalizeProviderProfiles(
         mergedSettings.providerProfiles
@@ -1527,6 +1550,26 @@ export const geminiSettings = {
   },
   removeListener: (listener: SettingsListener<GeminiSettings>) => {
     settingsManager.removeListener('gemini', listener);
+  },
+};
+
+export const ttsSettings = {
+  get: () => settingsManager.getSetting<TtsSettings>('tts'),
+  update: async (settings: Partial<TtsSettings>) => {
+    const currentTtsSettings =
+      settingsManager.getSetting<TtsSettings>('tts') || DEFAULT_SETTINGS.tts;
+    await settingsManager.updateSettings({
+      tts: {
+        ...currentTtsSettings,
+        ...settings,
+      },
+    });
+  },
+  addListener: (listener: SettingsListener<TtsSettings>) => {
+    settingsManager.addListener('tts', listener);
+  },
+  removeListener: (listener: SettingsListener<TtsSettings>) => {
+    settingsManager.removeListener('tts', listener);
   },
 };
 
