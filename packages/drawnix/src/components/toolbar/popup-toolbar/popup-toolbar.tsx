@@ -87,6 +87,7 @@ import { duplicateFrame, focusFrame } from '../../../utils/frame-duplicate';
 import { isPlaitMind, findMindRootFromSelection } from '../../../services/ppt';
 import { openCardInKnowledgeBase } from '../../../utils/card-actions';
 import { isAudioNodeElement } from '../../../types/audio-node.types';
+import { openMusicPlayerToolAndPlay } from '../../../services/tool-launch-service';
 
 export const PopupToolbar = () => {
   const board = useBoard();
@@ -170,6 +171,7 @@ export const PopupToolbar = () => {
     hasMindmapToPPT?: boolean; // 是否显示思维导图转PPT按钮
     hasCardEdit?: boolean; // 是否显示 Card 编辑按钮（打开知识库）
     hasFramePlay?: boolean; // 是否显示 Frame 幻灯片播放按钮
+    hasAudioPlayer?: boolean; // 是否显示在音乐播放器中播放按钮
   } = {
     fill: 'red',
   };
@@ -366,6 +368,11 @@ export const PopupToolbar = () => {
       isFrameElement(selectedElements[0]) &&
       !PlaitBoard.hasBeenTextEditing(board);
 
+    const hasAudioPlayer =
+      selectedElements.length === 1 &&
+      isAudioNodeElement(selectedElements[0]) &&
+      !PlaitBoard.hasBeenTextEditing(board);
+
     state = {
       ...getElementState(board),
       hasFill,
@@ -394,6 +401,7 @@ export const PopupToolbar = () => {
       hasMindmapToPPT,
       hasCardEdit,
       hasFramePlay,
+      hasAudioPlayer,
     };
   }
 
@@ -1309,6 +1317,49 @@ export const PopupToolbar = () => {
                     setSlideshowFrameId(frameElement.id);
                     setShowSlideshow(true);
                   }
+                }}
+              />
+            )}
+            {state.hasAudioPlayer && (
+              <ToolButton
+                className="audio-player-play"
+                key="audio-player-play"
+                type="icon"
+                icon={<Play size={15} />}
+                visible={true}
+                title={language === 'zh' ? '在音乐播放器中播放' : 'Play in Music Player'}
+                aria-label={language === 'zh' ? '在音乐播放器中播放' : 'Play in Music Player'}
+                data-track="toolbar_click_audio_player_play"
+                onPointerUp={() => {
+                  const audioElement = selectedElements.find(el => isAudioNodeElement(el));
+                  if (!audioElement || !isAudioNodeElement(audioElement)) {
+                    return;
+                  }
+
+                  void openMusicPlayerToolAndPlay({
+                    source: {
+                      elementId: audioElement.id,
+                      audioUrl: audioElement.audioUrl,
+                      title: audioElement.title,
+                      duration: audioElement.duration,
+                      previewImageUrl: audioElement.previewImageUrl,
+                      providerTaskId: audioElement.providerTaskId,
+                      clipId: audioElement.clipId,
+                      clipIds: audioElement.clipIds,
+                    },
+                    queue: [
+                      {
+                        elementId: audioElement.id,
+                        audioUrl: audioElement.audioUrl,
+                        title: audioElement.title,
+                        duration: audioElement.duration,
+                        previewImageUrl: audioElement.previewImageUrl,
+                        providerTaskId: audioElement.providerTaskId,
+                        clipId: audioElement.clipId,
+                        clipIds: audioElement.clipIds,
+                      },
+                    ],
+                  });
                 }}
               />
             )}

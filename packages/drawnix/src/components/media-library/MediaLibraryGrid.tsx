@@ -58,6 +58,7 @@ import { useGitHubSync } from '../../contexts/GitHubSyncContext';
 import { useAudioPlaylists } from '../../contexts/AudioPlaylistContext';
 import { mediaSyncService } from '../../services/github-sync/media-sync-service';
 import { taskQueueService } from '../../services/task-queue';
+import { openMusicPlayerToolAndPlay } from '../../services/tool-launch-service';
 import { TaskStatus, TaskType } from '../../types/task.types';
 import {
   AUDIO_PLAYLIST_ALL_ID,
@@ -1391,6 +1392,43 @@ export function MediaLibraryGrid({
           style={{ top: assetContextMenu.y, left: assetContextMenu.x }}
           onClick={(event) => event.stopPropagation()}
         >
+          <button
+            type="button"
+            className="media-library-grid__context-item"
+            onClick={async () => {
+              const audioQueue = filteredResult.assets
+                .filter((asset) => asset.type === AssetType.AUDIO)
+                .map((asset) => ({
+                  elementId: `asset:${asset.id}`,
+                  audioUrl: asset.url,
+                  title: asset.name,
+                  previewImageUrl: asset.thumbnail,
+                }));
+              const activePlaylist = selectedPlaylistId
+                ? audioPlaylists.find((playlist) => playlist.id === selectedPlaylistId) || null
+                : null;
+              setAssetContextMenu(null);
+              await openMusicPlayerToolAndPlay({
+                source: {
+                  elementId: `asset:${assetContextMenu.asset.id}`,
+                  audioUrl: assetContextMenu.asset.url,
+                  title: assetContextMenu.asset.name,
+                  previewImageUrl: assetContextMenu.asset.thumbnail,
+                },
+                queue: audioQueue,
+                playlist:
+                  activePlaylist && selectedPlaylistId !== AUDIO_PLAYLIST_ALL_ID
+                    ? {
+                        playlistId: activePlaylist.id,
+                        playlistName: activePlaylist.name,
+                      }
+                    : undefined,
+              });
+            }}
+          >
+            <Music size={14} />
+            <span>在音乐播放器中打开</span>
+          </button>
           <button
             type="button"
             className="media-library-grid__context-item"

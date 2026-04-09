@@ -12,6 +12,7 @@ export interface AudioTrackListItem {
   isActive?: boolean;
   isPlaying?: boolean;
   isFavorite?: boolean;
+  canFavorite?: boolean;
 }
 
 interface AudioTrackListProps {
@@ -66,7 +67,7 @@ export const AudioTrackList: React.FC<AudioTrackListProps> = ({
               onClick={(event) => event.stopPropagation()}
               onPointerDown={(event) => event.stopPropagation()}
             >
-              {showFavoriteButton ? (
+              {showFavoriteButton && item.canFavorite !== false ? (
                 <button
                   type="button"
                   className={classNames('audio-track-list__favorite-btn', {

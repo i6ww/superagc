@@ -16,6 +16,14 @@ interface CanvasAudioPlayerPlaylistProps {
 
 const ASSET_ELEMENT_ID_PREFIX = 'asset:';
 
+function getAssetIdFromSource(item?: CanvasAudioPlaybackSource): string | null {
+  if (!item?.elementId?.startsWith(ASSET_ELEMENT_ID_PREFIX)) {
+    return null;
+  }
+
+  return item.elementId.slice(ASSET_ELEMENT_ID_PREFIX.length);
+}
+
 function formatDuration(duration?: number): string {
   if (typeof duration !== 'number' || !Number.isFinite(duration) || duration <= 0) {
     return '--:--';
@@ -71,23 +79,24 @@ export const CanvasAudioPlayerPlaylist: React.FC<CanvasAudioPlayerPlaylistProps>
     ),
     [playlistItems, selectedPlaylistId]
   );
-  const showPlaylistActions = queueSource === 'playlist';
-
   return (
     <div className="canvas-audio-player__playlist">
       <AudioTrackList
         className="canvas-audio-player__playlist-list"
-        items={queue.map((item, index) => ({
-          id: `${item.audioUrl}-${index}`,
-          title: item.title || '未命名音频',
-          subtitle: formatDuration(item.duration),
-          previewImageUrl: item.previewImageUrl,
-          isActive: index === activeQueueIndex,
-          isPlaying: index === activeQueueIndex,
-          isFavorite: item.elementId?.startsWith(ASSET_ELEMENT_ID_PREFIX)
-            ? favoriteAssetIds.has(item.elementId.slice(ASSET_ELEMENT_ID_PREFIX.length))
-            : false,
-        }))}
+        items={queue.map((item, index) => {
+          const assetId = getAssetIdFromSource(item);
+
+          return {
+            id: `${item.audioUrl}-${index}`,
+            title: item.title || '未命名音频',
+            subtitle: formatDuration(item.duration),
+            previewImageUrl: item.previewImageUrl,
+            isActive: index === activeQueueIndex,
+            isPlaying: index === activeQueueIndex,
+            isFavorite: assetId ? favoriteAssetIds.has(assetId) : false,
+            canFavorite: !!assetId,
+          };
+        })}
         onSelect={(selectedItem) => {
           const nextItem = queue.find((item, index) => `${item.audioUrl}-${index}` === selectedItem.id);
           if (nextItem) {
@@ -95,13 +104,8 @@ export const CanvasAudioPlayerPlaylist: React.FC<CanvasAudioPlayerPlaylistProps>
           }
         }}
         onContextMenu={(selectedItem, event) => {
-          if (!showPlaylistActions) {
-            return;
-          }
           const nextItem = queue.find((item, index) => `${item.audioUrl}-${index}` === selectedItem.id);
-          const assetId = nextItem?.elementId?.startsWith(ASSET_ELEMENT_ID_PREFIX)
-            ? nextItem.elementId.slice(ASSET_ELEMENT_ID_PREFIX.length)
-            : null;
+          const assetId = getAssetIdFromSource(nextItem);
           if (!assetId) {
             return;
           }
@@ -114,18 +118,13 @@ export const CanvasAudioPlayerPlaylist: React.FC<CanvasAudioPlayerPlaylistProps>
           });
         }}
         onToggleFavorite={(selectedItem) => {
-          if (!showPlaylistActions) {
-            return;
-          }
           const nextItem = queue.find((item, index) => `${item.audioUrl}-${index}` === selectedItem.id);
-          const assetId = nextItem?.elementId?.startsWith(ASSET_ELEMENT_ID_PREFIX)
-            ? nextItem.elementId.slice(ASSET_ELEMENT_ID_PREFIX.length)
-            : null;
+          const assetId = getAssetIdFromSource(nextItem);
           if (assetId) {
             void toggleFavorite(assetId);
           }
         }}
-        showFavoriteButton={showPlaylistActions}
+        showFavoriteButton
         showPlaybackIndicator
       />
       <AudioTrackContextMenu

@@ -3,85 +3,49 @@
 .canvas-audio-player__playlist {
   position: absolute;
   top: calc(100% + 10px);
-  left: 14px;
-  width: min(320px, calc(100vw - 32px));
+  left: 0;
+  right: 0;
+  width: auto;
+  max-width: 100%;
   max-height: min(360px, calc(100vh - 160px));
   padding: 8px;
   display: grid;
   gap: 6px;
   overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.97);
   border: 1px solid rgba(148, 163, 184, 0.16);
   box-shadow: 0 18px 48px rgba(15, 23, 42, 0.14);
   backdrop-filter: blur(18px);
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
-.canvas-audio-player__playlist-item {
-  width: 100%;
-  min-width: 0;
-  padding: 8px;
-  border: none;
-  border-radius: 14px;
-  background: transparent;
-  display: grid;
-  grid-template-columns: 32px minmax(0, 1fr);
-  align-items: center;
+.canvas-audio-player__playlist-list {
   gap: 10px;
-  cursor: pointer;
-  text-align: left;
-  transition:
-    background-color 0.16s ease,
-    transform 0.16s ease;
-
-  &:hover,
-  &:focus-visible {
-    outline: none;
-    background: rgba(37, 99, 235, 0.08);
-  }
-}
-
-.canvas-audio-player__playlist-item--active {
-  background: rgba(37, 99, 235, 0.12);
-}
-
-.canvas-audio-player__playlist-cover {
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  overflow: hidden;
-  background:
-    linear-gradient(160deg, rgba(29, 78, 216, 0.92), rgba(15, 23, 42, 0.9));
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
-
-  img,
-  .canvas-audio-player__cover-fallback {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    object-fit: cover;
-    color: rgba(255, 255, 255, 0.9);
-  }
-}
-
-.canvas-audio-player__playlist-meta {
   min-width: 0;
 }
 
-.canvas-audio-player__playlist-title {
-  font-size: 12px;
-  font-weight: 700;
-  color: #0f172a;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.canvas-audio-player__playlist-list .audio-track-list__item {
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.9);
+  min-width: 0;
 }
 
-.canvas-audio-player__playlist-subtitle {
-  margin-top: 2px;
-  font-size: 10px;
+.canvas-audio-player__playlist-list .audio-track-list__item--active {
+  background: rgba(219, 234, 254, 0.72);
+}
+
+.canvas-audio-player__playlist-list .audio-track-list__title {
+  font-size: 14px;
+}
+
+.canvas-audio-player__playlist-list .audio-track-list__subtitle {
   font-weight: 600;
-  color: rgba(100, 116, 139, 0.82);
 }
