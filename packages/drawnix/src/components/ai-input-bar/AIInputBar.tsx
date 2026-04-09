@@ -252,6 +252,17 @@ function findMatchingSelectableModel(
   );
 }
 
+function resolveGenerationTypeForModelSelection(
+  currentGenerationType: GenerationType,
+  modelType: ModelConfig['type']
+): GenerationType {
+  if (currentGenerationType === 'agent' && modelType === 'text') {
+    return 'agent';
+  }
+
+  return modelType as GenerationType;
+}
+
 /**
  * 检查 URL 是否为视频
  */
@@ -1638,6 +1649,11 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
 
     const applyModelSelection = useCallback(
       (model: ModelConfig) => {
+        const nextGenerationType = resolveGenerationTypeForModelSelection(
+          generationType,
+          model.type
+        );
+
         analytics.track('ai_input_change_model', {
           model: model.id,
           type: model.type,
@@ -1648,29 +1664,31 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
         clearTriggerSymbol();
 
         // 更新状态（反显到下方下拉框）
-        setGenerationType(model.type as GenerationType);
+        setGenerationType(nextGenerationType);
         setSelectedModel(model.id);
         const nextModelRef = getModelRefFromConfig(model);
         setSelectedModelRef(nextModelRef);
-        setPersistedModelSelection(model.type as PersistedGenerationType, {
+        setPersistedModelSelection(nextGenerationType as PersistedGenerationType, {
           modelId: model.id,
           modelRef: nextModelRef,
           providerIdHint: model.sourceProfileId || nextModelRef?.profileId,
           vendorHint: model.vendor,
         });
         setSelectedParams(
-          loadScopedAIInputModelParams(
-            model.type as GenerationType,
-            model.id,
-            getSelectionKey(model.id, nextModelRef)
-          )
+          nextGenerationType === 'agent'
+            ? {}
+            : loadScopedAIInputModelParams(
+                nextGenerationType,
+                model.id,
+                getSelectionKey(model.id, nextModelRef)
+              )
         );
 
         // 关闭下拉菜单并保持焦点
         setModelDropdownOpen(false);
         setTimeout(() => inputRef.current?.focus(), 0);
       },
-      [clearTriggerSymbol]
+      [clearTriggerSymbol, generationType]
     );
 
     // 处理模型选择（从下拉菜单）

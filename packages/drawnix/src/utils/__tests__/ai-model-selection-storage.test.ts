@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AI_MODEL_SELECTION_CACHE_KEY } from '../../constants/storage';
 
@@ -49,6 +50,35 @@ describe('ai-model-selection-storage', () => {
       profileId: 'provider-c',
       providerIdHint: 'provider-c',
       vendorHint: 'DEEPSEEK',
+    });
+  });
+
+  it('agent 选择应优先使用独立缓存，不与 text 混写', async () => {
+    const { getPersistedModelSelection, setPersistedModelSelection } =
+      await import('../ai-model-selection-storage');
+
+    setPersistedModelSelection('text', {
+      modelId: 'deepseek-v3.2',
+      modelRef: { profileId: 'provider-text', modelId: 'deepseek-v3.2' },
+      providerIdHint: 'provider-text',
+      vendorHint: 'DEEPSEEK',
+    });
+    setPersistedModelSelection('agent', {
+      modelId: 'gemini-2.5-pro',
+      modelRef: { profileId: 'provider-agent', modelId: 'gemini-2.5-pro' },
+      providerIdHint: 'provider-agent',
+      vendorHint: 'GEMINI',
+    });
+
+    expect(getPersistedModelSelection('agent')).toMatchObject({
+      modelId: 'gemini-2.5-pro',
+      profileId: 'provider-agent',
+      providerIdHint: 'provider-agent',
+      vendorHint: 'GEMINI',
+    });
+    expect(getPersistedModelSelection('text')).toMatchObject({
+      modelId: 'deepseek-v3.2',
+      profileId: 'provider-text',
     });
   });
 

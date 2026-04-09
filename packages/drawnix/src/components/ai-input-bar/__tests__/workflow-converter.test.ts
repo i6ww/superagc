@@ -1,8 +1,49 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect, vi } from 'vitest';
+
+vi.hoisted(() => {
+  const createObjectStore = () => ({
+    createIndex: () => undefined,
+    count: () => ({ onsuccess: null, onerror: null, result: 0 }),
+    get: () => ({ onsuccess: null, onerror: null, result: undefined }),
+    put: () => ({ onsuccess: null, onerror: null }),
+  });
+  const createDatabase = () => ({
+    objectStoreNames: { contains: () => true },
+    createObjectStore: () => createObjectStore(),
+    transaction: () => ({
+      objectStore: () => createObjectStore(),
+    }),
+    close: () => undefined,
+    onclose: null,
+  });
+
+  Object.defineProperty(globalThis, 'indexedDB', {
+    value: {
+      open: () => {
+        const request = {
+          result: createDatabase(),
+          error: null,
+          onsuccess: null,
+          onerror: null,
+          onupgradeneeded: null,
+          onblocked: null,
+          transaction: null,
+        };
+        queueMicrotask(() => {
+          request.onupgradeneeded?.({ target: request });
+          request.onsuccess?.(new Event('success'));
+        });
+        return request;
+      },
+    },
+    configurable: true,
+  });
+});
 import {
   convertDirectGenerationToWorkflow,
   convertAgentFlowToWorkflow,
+  convertSkillFlowToWorkflow,
   convertToWorkflow,
   parseAIResponseToSteps,
   updateStepStatus,
@@ -12,6 +53,7 @@ import {
   WorkflowStep,
 } from '../workflow-converter';
 import type { ParsedGenerationParams } from '../../../utils/ai-input-parser';
+import { initializeMCP } from '../../../mcp';
 
 // Helper to create mock ParsedGenerationParams
 const createMockParams = (overrides: Partial<ParsedGenerationParams> = {}): ParsedGenerationParams => ({
@@ -46,6 +88,10 @@ const createMockParams = (overrides: Partial<ParsedGenerationParams> = {}): Pars
 });
 
 describe('workflow-converter', () => {
+  beforeAll(() => {
+    initializeMCP();
+  });
+
   describe('convertDirectGenerationToWorkflow', () => {
     describe('图片生成场景', () => {
       it('应该正确转换单张图片生成请求', () => {
@@ -307,6 +353,40 @@ describe('workflow-converter', () => {
 
       expect(workflow.scenarioType).toBe('agent_flow');
       expect(workflow.steps[0].mcp).toBe('ai_analyze');
+    });
+  });
+
+  describe('convertSkillFlowToWorkflow', () => {
+    it('图片型 skill 在回退到 Agent 路径时仍应注入 generate_image 工具链', async () => {
+      const params = createMockParams({
+        scenario: 'agent_flow',
+        generationType: 'agent',
+        modelId: 'deepseek-v3.2',
+        prompt: '做一张小红书封面图，春日露营咖啡氛围',
+        userInstruction: '做一张小红书封面图，春日露营咖啡氛围',
+        rawInput: '做一张小红书封面图，春日露营咖啡氛围',
+        hasExtraContent: true,
+      });
+
+      const workflow = await convertSkillFlowToWorkflow(params, {
+        id: 'xhs-image-skill',
+        name: '小红书图',
+        type: 'external',
+        outputType: 'image',
+        content:
+          '你是小红书图片设计专家。先分析主题，再产出适合封面的高质量图片提示词。不要只返回文案。',
+      });
+
+      expect(workflow.scenarioType).toBe('skill_flow');
+      expect(workflow.steps).toHaveLength(1);
+      expect(workflow.steps[0].mcp).toBe('ai_analyze');
+
+      const messages = workflow.steps[0].args.messages as Array<{
+        role: string;
+        content: string;
+      }>;
+      expect(messages[0].content).toContain('generate_image');
+      expect(messages[0].content).toContain('必须实际调用工具生成图片');
     });
   });
 
