@@ -1,3 +1,14 @@
+import {
+  DEFAULT_TTS_SETTINGS,
+  resolveVoice,
+} from '../hooks/useTextToSpeech';
+import { ttsSettings } from '../utils/settings-manager';
+import type {
+  ReadingPlaybackOrigin,
+  ReadingPlaybackSource,
+  ReadingSubtitleSegment,
+} from './reading-playback-source';
+
 export interface CanvasAudioPlaybackSource {
   elementId?: string;
   audioUrl: string;
@@ -9,9 +20,13 @@ export interface CanvasAudioPlaybackSource {
   clipIds?: string[];
 }
 
-export type CanvasAudioQueueSource = 'canvas' | 'playlist';
+export type PlaybackQueueSource = 'canvas' | 'playlist' | 'reading';
+export type CanvasAudioQueueSource = PlaybackQueueSource;
+export type PlaybackMediaType = 'audio' | 'reading' | null;
+export type PlaybackQueueItem = CanvasAudioPlaybackSource | ReadingPlaybackSource;
 
 export interface CanvasAudioPlaybackState {
+  mediaType: PlaybackMediaType;
   activeElementId?: string;
   activeAudioUrl?: string;
   activeTitle?: string;
@@ -19,10 +34,15 @@ export interface CanvasAudioPlaybackState {
   activePreviewImageUrl?: string;
   activeProviderTaskId?: string;
   activeClipIds?: string[];
-  queueSource: CanvasAudioQueueSource;
+  activeReadingSourceId?: string;
+  activeReadingOrigin?: ReadingPlaybackOrigin;
+  activeReadingSegmentIndex: number;
+  readingSegments: ReadingSubtitleSegment[];
+  subtitleMode: 'none' | 'estimated';
+  queueSource: PlaybackQueueSource;
   activePlaylistId?: string;
   activePlaylistName?: string;
-  queue: CanvasAudioPlaybackSource[];
+  queue: PlaybackQueueItem[];
   activeQueueIndex: number;
   playing: boolean;
   currentTime: number;
@@ -45,6 +65,7 @@ const ANALYSIS_MIN_FRAME_MS = 48;
 const ANALYSIS_SMOOTHING = 0.68;
 const WAVEFORM_SMOOTHING = 0.42;
 const PULSE_SMOOTHING = 0.52;
+const READING_PROGRESS_INTERVAL_MS = 250;
 export const EMPTY_AUDIO_SPECTRUM = Object.freeze(
   Array.from({ length: ANALYSIS_BAND_COUNT }, () => 0)
 );
@@ -53,6 +74,10 @@ export const EMPTY_AUDIO_WAVEFORM = Object.freeze(
 );
 
 const INITIAL_STATE: CanvasAudioPlaybackState = {
+  mediaType: null,
+  activeReadingSegmentIndex: -1,
+  readingSegments: [],
+  subtitleMode: 'none',
   queueSource: 'canvas',
   queue: [],
   activeQueueIndex: -1,
@@ -70,6 +95,11 @@ interface CanvasAudioPlaybackRuntime {
   audioContextFactory?: () => AudioContext;
   requestFrame?: (callback: FrameRequestCallback) => number;
   cancelFrame?: (handle: number) => void;
+  speechSynthesis?: SpeechSynthesis;
+  utteranceFactory?: (text: string) => SpeechSynthesisUtterance;
+  setInterval?: typeof window.setInterval;
+  clearInterval?: typeof window.clearInterval;
+  now?: () => number;
 }
 
 function getPlaybackErrorMessage(error: unknown): string {
@@ -84,6 +114,18 @@ function getPlaybackErrorMessage(error: unknown): string {
   return '音频播放失败，请稍后重试';
 }
 
+export function isReadingPlaybackSource(
+  source: PlaybackQueueItem | undefined | null
+): source is ReadingPlaybackSource {
+  return !!source && 'readingSourceId' in source;
+}
+
+function isAudioPlaybackSource(
+  source: PlaybackQueueItem | undefined | null
+): source is CanvasAudioPlaybackSource {
+  return !!source && 'audioUrl' in source;
+}
+
 export class CanvasAudioPlaybackService {
   private audio: HTMLAudioElement | null = null;
   private audioContext: AudioContext | null = null;
@@ -96,6 +138,11 @@ export class CanvasAudioPlaybackService {
   private readonly listeners = new Set<PlaybackListener>();
   private state: CanvasAudioPlaybackState = INITIAL_STATE;
   private canvasQueue: CanvasAudioPlaybackSource[] = [];
+  private currentReadingSource: ReadingPlaybackSource | null = null;
+  private readingVersion = 0;
+  private readingProgressHandle: number | ReturnType<typeof setInterval> | null = null;
+  private readingSegmentResumeAt = 0;
+  private readingSegmentOffsetMs = 0;
 
   constructor(
     private readonly audioFactory: () => HTMLAudioElement = () => new Audio(),
@@ -134,6 +181,62 @@ export class CanvasAudioPlaybackService {
       ...this.state,
       ...patch,
     });
+  }
+
+  private getSpeechSynthesis(): SpeechSynthesis | null {
+    if (this.runtime.speechSynthesis) {
+      return this.runtime.speechSynthesis;
+    }
+
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      return null;
+    }
+
+    return window.speechSynthesis;
+  }
+
+  private getUtteranceFactory(): ((text: string) => SpeechSynthesisUtterance) | null {
+    if (this.runtime.utteranceFactory) {
+      return this.runtime.utteranceFactory;
+    }
+
+    if (typeof window === 'undefined' || typeof window.SpeechSynthesisUtterance === 'undefined') {
+      return null;
+    }
+
+    return (text: string) => new window.SpeechSynthesisUtterance(text);
+  }
+
+  private getSetInterval(): typeof window.setInterval | null {
+    if (this.runtime.setInterval) {
+      return this.runtime.setInterval;
+    }
+
+    if (typeof window === 'undefined') {
+      return null;
+    }
+
+    return window.setInterval.bind(window);
+  }
+
+  private getClearInterval(): typeof window.clearInterval | null {
+    if (this.runtime.clearInterval) {
+      return this.runtime.clearInterval;
+    }
+
+    if (typeof window === 'undefined') {
+      return null;
+    }
+
+    return window.clearInterval.bind(window);
+  }
+
+  private getNow(): number {
+    if (this.runtime.now) {
+      return this.runtime.now();
+    }
+
+    return Date.now();
   }
 
   private ensureAudio(): HTMLAudioElement {
@@ -191,35 +294,39 @@ export class CanvasAudioPlaybackService {
     return window.cancelAnimationFrame.bind(window);
   }
 
-  private getSourceKey(source: Pick<CanvasAudioPlaybackSource, 'elementId' | 'audioUrl'>): string {
+  private getSourceKey(source: PlaybackQueueItem): string {
+    if (isReadingPlaybackSource(source)) {
+      return source.readingSourceId;
+    }
     return `${source.elementId || ''}::${source.audioUrl}`;
   }
 
-  private normalizeQueue(queue: CanvasAudioPlaybackSource[]): CanvasAudioPlaybackSource[] {
+  private normalizeQueue<T extends PlaybackQueueItem>(queue: T[]): T[] {
     const seen = new Set<string>();
-    const normalized: CanvasAudioPlaybackSource[] = [];
+    const normalized: T[] = [];
 
     queue.forEach((source) => {
-      if (!source?.audioUrl) {
-        return;
-      }
-
       const key = this.getSourceKey(source);
       if (seen.has(key)) {
         return;
       }
 
       seen.add(key);
-      normalized.push({ ...source });
+      const clonedSource = isReadingPlaybackSource(source)
+        ? {
+            ...source,
+            segments: source.segments.map((segment) => ({ ...segment })),
+            origin: { ...source.origin },
+          }
+        : { ...source };
+
+      normalized.push(clonedSource as T);
     });
 
     return normalized;
   }
 
-  private findQueueIndex(
-    queue: CanvasAudioPlaybackSource[],
-    source: Pick<CanvasAudioPlaybackSource, 'elementId' | 'audioUrl'>
-  ): number {
+  private findQueueIndex(queue: PlaybackQueueItem[], source: PlaybackQueueItem): number {
     const sourceKey = this.getSourceKey(source);
     return queue.findIndex((item) => this.getSourceKey(item) === sourceKey);
   }
@@ -235,7 +342,12 @@ export class CanvasAudioPlaybackService {
   }
 
   private handlePlay = (): void => {
+    if (this.state.mediaType !== 'audio') {
+      return;
+    }
+
     this.patchState({
+      mediaType: 'audio',
       playing: true,
       error: undefined,
     });
@@ -243,6 +355,10 @@ export class CanvasAudioPlaybackService {
   };
 
   private handlePause = (): void => {
+    if (this.state.mediaType !== 'audio') {
+      return;
+    }
+
     const audio = this.audio;
     this.stopAnalysisLoop();
     this.patchState({
@@ -253,6 +369,10 @@ export class CanvasAudioPlaybackService {
   };
 
   private handleEnded = (): void => {
+    if (this.state.mediaType !== 'audio') {
+      return;
+    }
+
     const duration = this.audio && Number.isFinite(this.audio.duration)
       ? this.audio.duration
       : this.state.duration;
@@ -267,7 +387,7 @@ export class CanvasAudioPlaybackService {
   };
 
   private handleTimeUpdate = (): void => {
-    if (!this.audio) {
+    if (!this.audio || this.state.mediaType !== 'audio') {
       return;
     }
 
@@ -280,7 +400,7 @@ export class CanvasAudioPlaybackService {
   };
 
   private handleLoadedMetadata = (): void => {
-    if (!this.audio) {
+    if (!this.audio || this.state.mediaType !== 'audio') {
       return;
     }
 
@@ -293,7 +413,7 @@ export class CanvasAudioPlaybackService {
   };
 
   private handleDurationChange = (): void => {
-    if (!this.audio) {
+    if (!this.audio || this.state.mediaType !== 'audio') {
       return;
     }
 
@@ -443,7 +563,7 @@ export class CanvasAudioPlaybackService {
     this.lastAnalysisFrameAt = 0;
 
     const step = (timestamp: number) => {
-      if (!this.analyserNode || !this.analyserData || !this.state.playing) {
+      if (!this.analyserNode || !this.analyserData || !this.state.playing || this.state.mediaType !== 'audio') {
         this.analysisFrameHandle = null;
         return;
       }
@@ -510,9 +630,83 @@ export class CanvasAudioPlaybackService {
     this.startAnalysisLoop();
   }
 
+  private stopReadingProgressLoop(): void {
+    if (!this.readingProgressHandle) {
+      return;
+    }
+
+    this.getClearInterval()?.(this.readingProgressHandle);
+    this.readingProgressHandle = null;
+  }
+
+  private startReadingProgressLoop(): void {
+    this.stopReadingProgressLoop();
+    const setIntervalFn = this.getSetInterval();
+    if (!setIntervalFn || !this.currentReadingSource || this.state.activeReadingSegmentIndex < 0) {
+      return;
+    }
+
+    this.readingProgressHandle = setIntervalFn(() => {
+      if (!this.currentReadingSource || this.state.activeReadingSegmentIndex < 0 || !this.state.playing) {
+        return;
+      }
+
+      const segment = this.currentReadingSource.segments[this.state.activeReadingSegmentIndex];
+      if (!segment) {
+        return;
+      }
+
+      const elapsedMs = this.readingSegmentOffsetMs + Math.max(0, this.getNow() - this.readingSegmentResumeAt);
+      const currentTimeMs = Math.min(segment.endMs, segment.startMs + elapsedMs);
+      this.patchState({
+        currentTime: currentTimeMs / 1000,
+      });
+    }, READING_PROGRESS_INTERVAL_MS);
+  }
+
+  private clearReadingRuntime(cancelSpeech = true): void {
+    this.readingVersion += 1;
+    this.stopReadingProgressLoop();
+    this.readingSegmentResumeAt = 0;
+    this.readingSegmentOffsetMs = 0;
+    this.currentReadingSource = null;
+    if (cancelSpeech) {
+      this.getSpeechSynthesis()?.cancel();
+    }
+  }
+
+  private stopAudioForReading(): void {
+    this.stopAnalysisLoop();
+    if (this.audio) {
+      this.audio.pause();
+    }
+    this.patchState({
+      analysisAvailable: false,
+      spectrumLevels: [...EMPTY_AUDIO_SPECTRUM],
+      waveformLevels: [...EMPTY_AUDIO_WAVEFORM],
+      pulseLevel: 0,
+      activeAudioUrl: undefined,
+      activeClipId: undefined,
+      activeProviderTaskId: undefined,
+      activeClipIds: undefined,
+    });
+  }
+
+  private stopReadingForAudio(): void {
+    this.clearReadingRuntime(true);
+    this.patchState({
+      activeReadingSourceId: undefined,
+      activeReadingOrigin: undefined,
+      activeReadingSegmentIndex: -1,
+      readingSegments: [],
+      subtitleMode: 'none',
+    });
+  }
+
   private async startPlayback(source: CanvasAudioPlaybackSource): Promise<void> {
+    this.stopReadingForAudio();
     const audio = this.ensureAudio();
-    const switchingTrack = this.state.activeAudioUrl !== source.audioUrl;
+    const switchingTrack = this.state.activeAudioUrl !== source.audioUrl || this.state.mediaType !== 'audio';
     const activeQueueIndex = this.findQueueIndex(this.state.queue, source);
 
     if (switchingTrack) {
@@ -523,11 +717,12 @@ export class CanvasAudioPlaybackService {
       try {
         audio.load();
       } catch {
-        // Some browser mocks do not implement load().
+        // ignore
       }
     }
 
     this.patchState({
+      mediaType: 'audio',
       activeElementId: source.elementId,
       activeAudioUrl: source.audioUrl,
       activeTitle: source.title,
@@ -538,6 +733,11 @@ export class CanvasAudioPlaybackService {
       activeQueueIndex,
       currentTime: switchingTrack ? 0 : audio.currentTime,
       duration: source.duration || (Number.isFinite(audio.duration) ? audio.duration : 0),
+      activeReadingSourceId: undefined,
+      activeReadingOrigin: undefined,
+      activeReadingSegmentIndex: -1,
+      readingSegments: [],
+      subtitleMode: 'none',
       analysisAvailable: false,
       spectrumLevels: [...EMPTY_AUDIO_SPECTRUM],
       waveformLevels: [...EMPTY_AUDIO_WAVEFORM],
@@ -556,8 +756,139 @@ export class CanvasAudioPlaybackService {
     }
   }
 
+  private createReadingUtterance(text: string, preferredLanguage: string): SpeechSynthesisUtterance | null {
+    const speechSynthesis = this.getSpeechSynthesis();
+    const utteranceFactory = this.getUtteranceFactory();
+    if (!speechSynthesis || !utteranceFactory) {
+      return null;
+    }
+
+    const settings = {
+      ...DEFAULT_TTS_SETTINGS,
+      ...(ttsSettings.get() || {}),
+      voicesByLanguage: ttsSettings.get()?.voicesByLanguage || {},
+    };
+    const utterance = utteranceFactory(text);
+    utterance.lang = preferredLanguage;
+    utterance.rate = settings.rate;
+    utterance.pitch = settings.pitch;
+    utterance.volume = settings.volume;
+    const voice = resolveVoice(speechSynthesis.getVoices(), settings, preferredLanguage);
+    if (voice) {
+      utterance.voice = voice;
+    }
+    return utterance;
+  }
+
+  private beginReadingSegment(
+    source: ReadingPlaybackSource,
+    segmentIndex: number,
+    sourceVersion = this.readingVersion
+  ): void {
+    const speechSynthesis = this.getSpeechSynthesis();
+    if (!speechSynthesis) {
+      this.patchState({
+        playing: false,
+        error: '当前浏览器不支持语音朗读',
+      });
+      return;
+    }
+
+    const segment = source.segments[segmentIndex];
+    if (!segment) {
+      this.patchState({
+        playing: false,
+        currentTime: this.state.duration,
+        activeReadingSegmentIndex: source.segments.length - 1,
+      });
+      return;
+    }
+
+    const utterance = this.createReadingUtterance(segment.text, source.preferredLanguage);
+    if (!utterance) {
+      this.patchState({
+        playing: false,
+        error: '当前浏览器不支持语音朗读',
+      });
+      return;
+    }
+
+    this.readingSegmentOffsetMs = 0;
+    this.readingSegmentResumeAt = this.getNow();
+    utterance.onend = () => {
+      if (sourceVersion !== this.readingVersion) {
+        return;
+      }
+
+      this.stopReadingProgressLoop();
+      const isLastSegment = segmentIndex >= source.segments.length - 1;
+      if (isLastSegment) {
+        this.patchState({
+          playing: false,
+          currentTime: segment.endMs / 1000,
+          activeReadingSegmentIndex: segmentIndex,
+        });
+        return;
+      }
+
+      this.beginReadingSegment(source, segmentIndex + 1, sourceVersion);
+    };
+    utterance.onerror = () => {
+      if (sourceVersion !== this.readingVersion) {
+        return;
+      }
+
+      this.stopReadingProgressLoop();
+      this.patchState({
+        playing: false,
+        error: '朗读失败，请稍后重试',
+      });
+    };
+
+    this.patchState({
+      mediaType: 'reading',
+      activeElementId: source.elementId,
+      activeTitle: source.title,
+      activePreviewImageUrl: source.previewImageUrl,
+      activeReadingSourceId: source.readingSourceId,
+      activeReadingOrigin: source.origin,
+      activeReadingSegmentIndex: segmentIndex,
+      readingSegments: source.segments,
+      subtitleMode: 'estimated',
+      currentTime: segment.startMs / 1000,
+      duration: (source.segments[source.segments.length - 1]?.endMs || 0) / 1000,
+      playing: true,
+      analysisAvailable: false,
+      spectrumLevels: [...EMPTY_AUDIO_SPECTRUM],
+      waveformLevels: [...EMPTY_AUDIO_WAVEFORM],
+      pulseLevel: 0,
+      error: undefined,
+    });
+
+    this.startReadingProgressLoop();
+    speechSynthesis.speak(utterance);
+  }
+
+  private startReading(source: ReadingPlaybackSource, segmentIndex = 0): void {
+    this.stopAudioForReading();
+    this.clearReadingRuntime(true);
+    this.currentReadingSource = source;
+    this.readingVersion += 1;
+
+    const activeQueueIndex = this.findQueueIndex(this.state.queue, source);
+    this.patchState({
+      queueSource: 'reading',
+      activePlaylistId: undefined,
+      activePlaylistName: undefined,
+      activeQueueIndex,
+    });
+
+    this.beginReadingSegment(source, Math.max(0, Math.min(segmentIndex, source.segments.length - 1)));
+  }
+
   async togglePlayback(source: CanvasAudioPlaybackSource): Promise<void> {
-    const isSameTrack = this.state.activeElementId === source.elementId
+    const isSameTrack = this.state.mediaType === 'audio'
+      && this.state.activeElementId === source.elementId
       && this.state.activeAudioUrl === source.audioUrl;
 
     if (isSameTrack && this.state.playing) {
@@ -568,6 +899,22 @@ export class CanvasAudioPlaybackService {
     await this.startPlayback(source);
   }
 
+  toggleReadingPlayback(source: ReadingPlaybackSource): void {
+    const isSameSource = this.state.mediaType === 'reading'
+      && this.state.activeReadingSourceId === source.readingSourceId;
+
+    if (isSameSource) {
+      if (this.state.playing) {
+        this.pausePlayback();
+      } else {
+        void this.resumePlayback();
+      }
+      return;
+    }
+
+    this.startReading(source);
+  }
+
   setCanvasQueue(queue: CanvasAudioPlaybackSource[]): void {
     const normalizedQueue = this.normalizeQueue(queue);
     this.canvasQueue = normalizedQueue;
@@ -576,11 +923,15 @@ export class CanvasAudioPlaybackService {
       return;
     }
 
-    const activeQueueIndex = this.state.activeAudioUrl
-      ? this.findQueueIndex(normalizedQueue, {
+    const activeSource = this.state.activeAudioUrl
+      ? {
           elementId: this.state.activeElementId,
           audioUrl: this.state.activeAudioUrl,
-        })
+        } as CanvasAudioPlaybackSource
+      : null;
+
+    const activeQueueIndex = activeSource
+      ? this.findQueueIndex(normalizedQueue, activeSource)
       : -1;
 
     this.patchState({
@@ -602,6 +953,29 @@ export class CanvasAudioPlaybackService {
     await this.togglePlayback(source);
   }
 
+  setReadingQueue(queue: ReadingPlaybackSource[]): void {
+    const normalizedQueue = this.normalizeQueue(queue);
+    const activeSource = this.state.activeReadingSourceId
+      ? normalizedQueue.find((item) => item.readingSourceId === this.state.activeReadingSourceId)
+      : null;
+
+    this.patchState({
+      queueSource: 'reading',
+      activePlaylistId: undefined,
+      activePlaylistName: undefined,
+      queue: normalizedQueue,
+      activeQueueIndex: activeSource ? this.findQueueIndex(normalizedQueue, activeSource) : -1,
+    });
+  }
+
+  toggleReadingPlaybackInQueue(
+    source: ReadingPlaybackSource,
+    queue: ReadingPlaybackSource[]
+  ): void {
+    this.setReadingQueue(queue);
+    this.toggleReadingPlayback(source);
+  }
+
   setQueue(
     queue: CanvasAudioPlaybackSource[],
     options?: {
@@ -614,23 +988,41 @@ export class CanvasAudioPlaybackService {
     if ((options?.queueSource || 'canvas') === 'canvas') {
       this.canvasQueue = normalizedQueue;
     }
-    const activeQueueIndex = this.state.activeAudioUrl
-      ? this.findQueueIndex(normalizedQueue, {
+    const activeSource = this.state.activeAudioUrl
+      ? {
           elementId: this.state.activeElementId,
           audioUrl: this.state.activeAudioUrl,
-        })
-      : -1;
+        } as CanvasAudioPlaybackSource
+      : null;
 
     this.patchState({
       queueSource: options?.queueSource || 'canvas',
       activePlaylistId: options?.queueSource === 'playlist' ? options.playlistId : undefined,
       activePlaylistName: options?.queueSource === 'playlist' ? options.playlistName : undefined,
       queue: normalizedQueue,
-      activeQueueIndex,
+      activeQueueIndex: activeSource ? this.findQueueIndex(normalizedQueue, activeSource) : -1,
     });
   }
 
   pausePlayback(): void {
+    if (this.state.mediaType === 'reading') {
+      const speechSynthesis = this.getSpeechSynthesis();
+      if (!speechSynthesis || this.state.activeReadingSegmentIndex < 0) {
+        return;
+      }
+
+      speechSynthesis.pause();
+      if (this.readingSegmentResumeAt > 0) {
+        this.readingSegmentOffsetMs += Math.max(0, this.getNow() - this.readingSegmentResumeAt);
+      }
+      this.readingSegmentResumeAt = 0;
+      this.stopReadingProgressLoop();
+      this.patchState({
+        playing: false,
+      });
+      return;
+    }
+
     if (!this.audio) {
       return;
     }
@@ -644,7 +1036,14 @@ export class CanvasAudioPlaybackService {
       return;
     }
 
-    await this.startPlayback(this.state.queue[previousIndex]);
+    const target = this.state.queue[previousIndex];
+    if (isReadingPlaybackSource(target)) {
+      this.startReading(target);
+      return;
+    }
+    if (isAudioPlaybackSource(target)) {
+      await this.startPlayback(target);
+    }
   }
 
   async playNext(): Promise<void> {
@@ -653,10 +1052,38 @@ export class CanvasAudioPlaybackService {
       return;
     }
 
-    await this.startPlayback(this.state.queue[nextIndex]);
+    const target = this.state.queue[nextIndex];
+    if (isReadingPlaybackSource(target)) {
+      this.startReading(target);
+      return;
+    }
+    if (isAudioPlaybackSource(target)) {
+      await this.startPlayback(target);
+    }
   }
 
   async resumePlayback(): Promise<void> {
+    if (this.state.mediaType === 'reading') {
+      const speechSynthesis = this.getSpeechSynthesis();
+      if (!speechSynthesis || !this.currentReadingSource) {
+        return;
+      }
+
+      if (this.state.activeReadingSegmentIndex < 0) {
+        this.startReading(this.currentReadingSource);
+        return;
+      }
+
+      this.readingSegmentResumeAt = this.getNow();
+      speechSynthesis.resume();
+      this.startReadingProgressLoop();
+      this.patchState({
+        playing: true,
+        error: undefined,
+      });
+      return;
+    }
+
     if (!this.audio || !this.state.activeAudioUrl) {
       return;
     }
@@ -673,7 +1100,7 @@ export class CanvasAudioPlaybackService {
   }
 
   seekTo(time: number): void {
-    if (!this.audio) {
+    if (this.state.mediaType !== 'audio' || !this.audio) {
       return;
     }
 
@@ -687,6 +1114,15 @@ export class CanvasAudioPlaybackService {
       currentTime: nextTime,
       duration,
     });
+  }
+
+  seekToReadingSegment(index: number): void {
+    if (!this.currentReadingSource) {
+      return;
+    }
+
+    const boundedIndex = Math.max(0, Math.min(index, this.currentReadingSource.segments.length - 1));
+    this.startReading(this.currentReadingSource, boundedIndex);
   }
 
   setVolume(volume: number): void {
@@ -703,6 +1139,7 @@ export class CanvasAudioPlaybackService {
 
   stopAndClear(): void {
     this.stopAnalysisLoop();
+    this.clearReadingRuntime(true);
 
     if (this.audio) {
       this.audio.pause();
@@ -712,7 +1149,7 @@ export class CanvasAudioPlaybackService {
       try {
         this.audio.load();
       } catch {
-        // Some browser mocks do not implement load().
+        // ignore
       }
     }
 

@@ -89,8 +89,10 @@ import { openCardInKnowledgeBase } from '../../../utils/card-actions';
 import { isAudioNodeElement } from '../../../types/audio-node.types';
 import { getCanvasAudioPlaybackQueue } from '../../../data/audio';
 import { openMusicPlayerToolAndPlay } from '../../../services/tool-launch-service';
-import { useTextToSpeech } from '../../../hooks/useTextToSpeech';
+import { useCanvasAudioPlayback } from '../../../hooks/useCanvasAudioPlayback';
 import {
+  createCanvasReadingPlaybackSource,
+  createCanvasReadingPlaybackQueue,
   getCanvasSpeechText,
   type CanvasSpeechTextResult,
 } from './text-to-speech-utils';
@@ -125,6 +127,7 @@ export const PopupToolbar = () => {
   const [slideshowFrameId, setSlideshowFrameId] = useState<string | undefined>();
   const [speechTextResult, setSpeechTextResult] = useState<CanvasSpeechTextResult>({
     text: '',
+    title: '',
     source: null,
   });
 
@@ -135,41 +138,46 @@ export const PopupToolbar = () => {
 
   // 初始化全局鼠标位置跟踪
   useGlobalMousePosition();
-  const { isSpeaking, isPaused, isSupported, speak, pause, resume, stop } =
-    useTextToSpeech();
-  const lastSpokenTextRef = useRef('');
+  const playback = useCanvasAudioPlayback();
   const previousSpeechSelectionKeyRef = useRef<string>('');
+  const activeReadingSourceId = playback.mediaType === 'reading'
+    ? playback.activeReadingSourceId
+    : undefined;
+  const isCurrentReadingSelection =
+    !!speechTextResult.sourceId
+    && !!activeReadingSourceId
+    && activeReadingSourceId.startsWith(speechTextResult.sourceId);
   const speechSelectionKey = useMemo(
     () => selectedElements.map((element) => element.id).sort().join('|'),
     [selectedElements]
   );
-  const speechActionLabel = isSpeaking
-    ? isPaused
+  const speechActionLabel = isCurrentReadingSelection
+    ? playback.playing
       ? language === 'zh'
-        ? '继续朗读'
-        : 'Resume reading'
-      : language === 'zh'
         ? '暂停朗读'
         : 'Pause reading'
+      : language === 'zh'
+        ? '继续朗读'
+        : 'Resume reading'
     : language === 'zh'
       ? '语音朗读'
       : 'Read aloud';
 
   useEffect(() => {
     if (
-      isSpeaking &&
+      playback.mediaType === 'reading' &&
       previousSpeechSelectionKeyRef.current &&
       previousSpeechSelectionKeyRef.current !== speechSelectionKey
     ) {
-      stop();
+      playback.stopPlayback();
     }
     previousSpeechSelectionKeyRef.current = speechSelectionKey;
-  }, [speechSelectionKey, isSpeaking, stop]);
+  }, [playback, speechSelectionKey]);
 
   useEffect(() => {
     if (selectedElements.length === 0 || movingOrDragging) {
       setSpeechTextResult((prev) =>
-        prev.text || prev.source ? { text: '', source: null } : prev
+        prev.text || prev.source ? { text: '', title: '', source: null } : prev
       );
       return;
     }
@@ -177,7 +185,12 @@ export const PopupToolbar = () => {
     const updateSpeechText = () => {
       const next = getCanvasSpeechText(board, selectedElements);
       setSpeechTextResult((prev) =>
-        prev.text === next.text && prev.source === next.source ? prev : next
+        prev.text === next.text
+          && prev.source === next.source
+          && prev.title === next.title
+          && prev.sourceId === next.sourceId
+          ? prev
+          : next
       );
     };
 
@@ -437,7 +450,7 @@ export const PopupToolbar = () => {
       !PlaitBoard.hasBeenTextEditing(board);
 
     const hasTextToSpeech =
-      isSupported &&
+      (typeof window !== 'undefined' && 'speechSynthesis' in window) &&
       !PlaitBoard.hasBeenTextEditing(board) &&
       speechTextResult.text.length > 0;
 
@@ -736,34 +749,36 @@ export const PopupToolbar = () => {
                 key="text-to-speech"
                 type="icon"
                 icon={
-                  isSpeaking && !isPaused ? (
+                  isCurrentReadingSelection && playback.playing ? (
                     <VolumeX size={15} />
                   ) : (
                     <Volume2 size={15} />
                   )
                 }
                 visible={true}
-                selected={isSpeaking && !isPaused}
+                selected={isCurrentReadingSelection && playback.playing}
                 title={speechActionLabel}
                 aria-label={speechActionLabel}
                 data-track="toolbar_click_text_to_speech"
                 onPointerUp={() => {
                   if (!speechTextResult.text) return;
-                  if (isSpeaking) {
-                    if (lastSpokenTextRef.current !== speechTextResult.text) {
-                      lastSpokenTextRef.current = speechTextResult.text;
-                      speak(speechTextResult.text);
-                      return;
-                    }
-                    if (isPaused) {
-                      resume();
+                  const readingSource = createCanvasReadingPlaybackSource(speechTextResult);
+                  if (!readingSource) return;
+                  const readingQueue = createCanvasReadingPlaybackQueue(board, speechTextResult);
+
+                  if (isCurrentReadingSelection) {
+                    if (playback.playing) {
+                      playback.pausePlayback();
                     } else {
-                      pause();
+                      void playback.resumePlayback();
                     }
                     return;
                   }
-                  lastSpokenTextRef.current = speechTextResult.text;
-                  speak(speechTextResult.text);
+
+                  void openMusicPlayerToolAndPlay({
+                    source: readingSource,
+                    queue: readingQueue.length > 0 ? readingQueue : [readingSource],
+                  });
                 }}
               />
             )}

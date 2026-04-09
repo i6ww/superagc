@@ -1,9 +1,10 @@
 import React, { useMemo } from 'react';
-import { Heart, ListMusic, Pencil, Plus, Trash2 } from 'lucide-react';
+import { BookOpen, Heart, ListMusic, Pencil, Plus, Trash2 } from 'lucide-react';
 import classNames from 'classnames';
 import type { AudioPlaylist, AudioPlaylistItem } from '../../types/audio-playlist.types';
 import {
   AUDIO_PLAYLIST_ALL_ID,
+  AUDIO_PLAYLIST_ALL_TRACKS_ID,
   AUDIO_PLAYLIST_FAVORITES_ID,
 } from '../../types/audio-playlist.types';
 import {
@@ -17,6 +18,8 @@ interface AudioPlaylistTabsProps {
   className?: string;
   selectedPlaylistId: string;
   allCount: number;
+  allTracksCount?: number;
+  allTracksLabel?: string;
   playlists: AudioPlaylist[];
   playlistItems: Record<string, AudioPlaylistItem[]>;
   onSelect: (playlistId: string) => void;
@@ -31,6 +34,8 @@ export const AudioPlaylistTabs: React.FC<AudioPlaylistTabsProps> = ({
   className,
   selectedPlaylistId,
   allCount,
+  allTracksCount,
+  allTracksLabel = '全部语音',
   playlists,
   playlistItems,
   onSelect,
@@ -77,6 +82,20 @@ export const AudioPlaylistTabs: React.FC<AudioPlaylistTabsProps> = ({
   return (
     <>
       <div className={classNames('audio-playlist-tabs', className)}>
+        {typeof allTracksCount === 'number' ? (
+          <button
+            type="button"
+            className={classNames('audio-playlist-tabs__chip', {
+              'audio-playlist-tabs__chip--active': selectedPlaylistId === AUDIO_PLAYLIST_ALL_TRACKS_ID,
+            })}
+            onClick={() => onSelect(AUDIO_PLAYLIST_ALL_TRACKS_ID)}
+          >
+            <BookOpen size={14} />
+            <span>{allTracksLabel}</span>
+            <span className="audio-playlist-tabs__count">{allTracksCount}</span>
+          </button>
+        ) : null}
+
         <button
           type="button"
           className={classNames('audio-playlist-tabs__chip', {

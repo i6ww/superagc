@@ -5,6 +5,7 @@ import {
   type CanvasAudioQueueSource,
   type CanvasAudioPlaybackState,
 } from '../services/canvas-audio-playback-service';
+import type { ReadingPlaybackSource } from '../services/reading-playback-source';
 
 export function useCanvasAudioPlaybackSelector<T>(
   selector: (state: CanvasAudioPlaybackState) => T
@@ -20,6 +21,8 @@ export function useCanvasAudioPlaybackControls() {
   return useMemo(() => ({
     setQueue: (queue: CanvasAudioPlaybackSource[]) =>
       canvasAudioPlaybackService.setQueue(queue),
+    setReadingQueue: (queue: ReadingPlaybackSource[]) =>
+      canvasAudioPlaybackService.setReadingQueue(queue),
     setPlaylistQueue: (
       queue: CanvasAudioPlaybackSource[],
       playlist: { playlistId: string; playlistName: string }
@@ -41,18 +44,26 @@ export function useCanvasAudioPlaybackControls() {
       canvasAudioPlaybackService.togglePlaybackInQueue(source, queue, options),
     togglePlayback: (source: CanvasAudioPlaybackSource) =>
       canvasAudioPlaybackService.togglePlayback(source),
+    toggleReadingPlayback: (source: ReadingPlaybackSource) =>
+      canvasAudioPlaybackService.toggleReadingPlayback(source),
+    toggleReadingPlaybackInQueue: (
+      source: ReadingPlaybackSource,
+      queue: ReadingPlaybackSource[]
+    ) =>
+      canvasAudioPlaybackService.toggleReadingPlaybackInQueue(source, queue),
     pausePlayback: () => canvasAudioPlaybackService.pausePlayback(),
     resumePlayback: () => canvasAudioPlaybackService.resumePlayback(),
     playPrevious: () => canvasAudioPlaybackService.playPrevious(),
     playNext: () => canvasAudioPlaybackService.playNext(),
     seekTo: (time: number) => canvasAudioPlaybackService.seekTo(time),
+    seekToReadingSegment: (index: number) => canvasAudioPlaybackService.seekToReadingSegment(index),
     setVolume: (volume: number) => canvasAudioPlaybackService.setVolume(volume),
     stopPlayback: () => canvasAudioPlaybackService.stopAndClear(),
   }), []);
 }
 
 export function useCanvasAudioPlayback() {
-  const state = useSyncExternalStore(
+  const state = useSyncExternalStore<CanvasAudioPlaybackState>(
     canvasAudioPlaybackService.subscribe.bind(canvasAudioPlaybackService),
     canvasAudioPlaybackService.getState.bind(canvasAudioPlaybackService),
     canvasAudioPlaybackService.getState.bind(canvasAudioPlaybackService)

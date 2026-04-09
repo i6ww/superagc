@@ -1,18 +1,26 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Input, Dialog } from 'tdesign-react';
-import { Pause, Play, Search, Minimize2, Music4, SkipBack, SkipForward } from 'lucide-react';
+import { Pause, Play, Search, Minimize2, SkipBack, SkipForward } from 'lucide-react';
 import { useAssets } from '../../../contexts/AssetContext';
 import { useAudioPlaylists } from '../../../contexts/AudioPlaylistContext';
 import { AssetType } from '../../../types/asset.types';
-import { AUDIO_PLAYLIST_ALL_ID } from '../../../types/audio-playlist.types';
+import {
+  AUDIO_PLAYLIST_ALL_ID,
+  AUDIO_PLAYLIST_ALL_TRACKS_ID,
+} from '../../../types/audio-playlist.types';
 import { AudioCover } from '../../../components/shared/AudioCover';
 import { AudioPlaylistTabs } from '../../../components/shared/AudioPlaylistTabs';
-import { AudioTrackList } from '../../../components/shared/AudioTrackList';
 import { AudioTrackContextMenu } from '../../../components/shared/AudioTrackContextMenu';
 import { useCanvasAudioPlayback } from '../../../hooks/useCanvasAudioPlayback';
+import { useAllTracksPlaybackSources } from '../../../hooks/useAllTracksPlaybackSources';
 import { useResolvedAudioDurations } from '../../../hooks/useResolvedAudioDurations';
+import {
+  isReadingPlaybackSource,
+  type PlaybackQueueItem,
+} from '../../../services/canvas-audio-playback-service';
 import { toolWindowService } from '../../../services/tool-window-service';
 import { MUSIC_PLAYER_TOOL_ID } from '../../tool-ids';
+import { MusicPlayerQueueList } from './MusicPlayerQueueList';
 import './music-player-tool.scss';
 
 function formatDuration(duration?: number): string {
@@ -41,8 +49,19 @@ export const MusicPlayerTool: React.FC = () => {
     getPlaylistAssetIds,
   } = useAudioPlaylists();
   const playback = useCanvasAudioPlayback();
+  const isReadingMode = playback.queueSource === 'reading';
+  const { noteMetas } = useAllTracksPlaybackSources();
   const [query, setQuery] = useState('');
-  const [selectedPlaylistId, setSelectedPlaylistId] = useState<string>(AUDIO_PLAYLIST_ALL_ID);
+  const [selectedPlaylistId, setSelectedPlaylistId] = useState<string>(() => {
+    if (playback.queueSource === 'reading') {
+      return AUDIO_PLAYLIST_ALL_TRACKS_ID;
+    }
+    if (playback.queueSource === 'playlist' && playback.activePlaylistId) {
+      return playback.activePlaylistId;
+    }
+    return AUDIO_PLAYLIST_ALL_ID;
+  });
+  const isAllTracksTab = selectedPlaylistId === AUDIO_PLAYLIST_ALL_TRACKS_ID;
   const [createDialogVisible, setCreateDialogVisible] = useState(false);
   const [playlistName, setPlaylistName] = useState('');
   const [contextMenu, setContextMenu] = useState<{
@@ -97,19 +116,55 @@ export const MusicPlayerTool: React.FC = () => {
       })),
     [audioAssets]
   );
-  const showPlaybackQueue = playback.queue.length > 0 && !!playback.activeAudioUrl;
-  const resolvedQueueDurations = useResolvedAudioDurations(playback.queue);
+  const showPlaybackQueue =
+    playback.queue.length > 0 && (isReadingMode || !!playback.activeAudioUrl);
+  const playbackTabId = isReadingMode
+    ? AUDIO_PLAYLIST_ALL_TRACKS_ID
+    : playback.queueSource === 'playlist'
+      ? playback.activePlaylistId || AUDIO_PLAYLIST_ALL_ID
+      : AUDIO_PLAYLIST_ALL_ID;
+  const shouldShowPlaybackQueue = showPlaybackQueue && selectedPlaylistId === playbackTabId;
+
+  useEffect(() => {
+    if (!showPlaybackQueue) {
+      return;
+    }
+
+    setSelectedPlaylistId((current) => (current === playbackTabId ? current : playbackTabId));
+  }, [playbackTabId, showPlaybackQueue]);
+
+  const audioPlaybackQueue = useMemo(
+    () => playback.queue.filter((item): item is typeof queue[number] => !isReadingPlaybackSource(item)),
+    [playback.queue]
+  );
+  const resolvedQueueDurations = useResolvedAudioDurations(audioPlaybackQueue);
+
+  const getQueueItemId = (item: PlaybackQueueItem, index: number) =>
+    isReadingPlaybackSource(item) ? item.readingSourceId : `${item.audioUrl}-${index}`;
 
   const queueListItems = useMemo(
     () =>
       playback.queue.map((item, index) => {
+        if (isReadingPlaybackSource(item)) {
+          const durationMs = item.segments[item.segments.length - 1]?.endMs || 0;
+          return {
+            id: getQueueItemId(item, index),
+            title: item.title || '朗读轨道',
+            subtitle: formatDuration(durationMs / 1000),
+            previewImageUrl: item.previewImageUrl,
+            isActive: index === playback.activeQueueIndex,
+            isPlaying: index === playback.activeQueueIndex && playback.playing,
+            canFavorite: false,
+          };
+        }
+
         const assetId = item.elementId?.startsWith('asset:')
           ? item.elementId.slice('asset:'.length)
           : (
             assets.find((asset) => asset.type === AssetType.AUDIO && asset.url === item.audioUrl)?.id || null
           );
         return {
-          id: `${item.audioUrl}-${index}`,
+          id: getQueueItemId(item, index),
           title: item.title || '未命名音频',
           subtitle: formatDuration(resolvedQueueDurations.get(item.audioUrl) ?? item.duration),
           previewImageUrl: item.previewImageUrl,
@@ -152,24 +207,22 @@ export const MusicPlayerTool: React.FC = () => {
   };
 
   const handlePlayQueueItem = async (itemId: string) => {
-    const selectedItem = playback.queue.find((item, index) => `${item.audioUrl}-${index}` === itemId);
+    const selectedItem = playback.queue.find((item, index) => getQueueItemId(item, index) === itemId);
     if (!selectedItem) {
+      return;
+    }
+    if (isReadingPlaybackSource(selectedItem)) {
+      playback.toggleReadingPlayback(selectedItem);
       return;
     }
     await playback.togglePlayback(selectedItem);
   };
 
-  const activeAssetCountLabel = `${showPlaybackQueue ? playback.queue.length : audioAssets.length} 首音频`;
-  const activePlaylist = playlists.find((playlist) => playlist.id === selectedPlaylistId) || null;
+  const activePlaylist = playlists.find((p) => p.id === selectedPlaylistId) || null;
   const fallbackAsset = audioAssets[0] || null;
-  const effectivePlaylistId = showPlaybackQueue
-    ? (playback.queueSource === 'playlist' ? playback.activePlaylistId || AUDIO_PLAYLIST_ALL_ID : AUDIO_PLAYLIST_ALL_ID)
-    : selectedPlaylistId;
   const currentPlaylistAssetIds = useMemo(
-    () => new Set(
-      effectivePlaylistId !== AUDIO_PLAYLIST_ALL_ID ? getPlaylistAssetIds(effectivePlaylistId) : []
-    ),
-    [effectivePlaylistId, getPlaylistAssetIds]
+    () => new Set(selectedPlaylistId !== AUDIO_PLAYLIST_ALL_ID ? getPlaylistAssetIds(selectedPlaylistId) : []),
+    [getPlaylistAssetIds, selectedPlaylistId]
   );
   const activeAsset = useMemo(() => {
     const elementAssetId = playback.activeElementId?.startsWith('asset:')
@@ -188,15 +241,36 @@ export const MusicPlayerTool: React.FC = () => {
 
     return audioAssets.find((asset) => asset.url === playback.activeAudioUrl) || null;
   }, [audioAssets, playback.activeAudioUrl, playback.activeElementId, playback.activeTitle]);
-  const displayAsset = activeAsset || fallbackAsset;
+  const activeReadingItem = useMemo(
+    () =>
+      isReadingMode && playback.activeQueueIndex >= 0
+        ? playback.queue[playback.activeQueueIndex]
+        : null,
+    [isReadingMode, playback.activeQueueIndex, playback.queue]
+  );
+  const displayAsset = isReadingMode ? null : (activeAsset || fallbackAsset);
   const activeAssetId = activeAsset?.id || null;
-  const resolvedPreviewImageUrl = playback.activePreviewImageUrl || displayAsset?.thumbnail;
+  const resolvedPreviewImageUrl = isReadingMode
+    ? (isReadingPlaybackSource(activeReadingItem) ? activeReadingItem.previewImageUrl : playback.activePreviewImageUrl)
+    : (playback.activePreviewImageUrl || displayAsset?.thumbnail);
   const currentQueueTitle = playback.queueSource === 'playlist'
     ? (playback.activePlaylistName || '播放列表')
-    : '当前播放队列';
-  const listHeaderTitle = showPlaybackQueue
+    : isReadingMode ? '朗读队列' : '当前播放队列';
+  const listHeaderTitle = shouldShowPlaybackQueue
     ? currentQueueTitle
-    : (activePlaylist?.name || '素材库音频');
+    : isAllTracksTab ? '全部语音' : (activePlaylist?.name || '素材库音频');
+  const activeAssetCountLabel = isReadingMode
+    ? `${shouldShowPlaybackQueue ? playback.queue.length : noteMetas.length} 段语音`
+    : isAllTracksTab ? `${noteMetas.length} 篇笔记`
+      : `${shouldShowPlaybackQueue ? playback.queue.length : audioAssets.length} 首音频`;
+
+  const closePlaylistDialog = () => {
+    setCreateDialogVisible(false);
+    setPlaylistName('');
+    setPendingAssetId(null);
+    setEditingPlaylistId(null);
+    setPlaylistDialogMode('create');
+  };
 
   const openCreatePlaylistDialog = (assetId?: string) => {
     setPendingAssetId(assetId || null);
@@ -205,7 +279,6 @@ export const MusicPlayerTool: React.FC = () => {
     setEditingPlaylistId(null);
     setCreateDialogVisible(true);
     setContextMenu(null);
-    setPlaylistContextMenu(null);
   };
 
   const openRenamePlaylistDialog = (playlistId: string, name: string) => {
@@ -214,8 +287,12 @@ export const MusicPlayerTool: React.FC = () => {
     setEditingPlaylistId(playlistId);
     setPlaylistName(name);
     setCreateDialogVisible(true);
-    setPlaylistContextMenu(null);
   };
+
+  const subtitleSegments = isReadingMode ? playback.readingSegments : [];
+  const activeSubtitleIndex = isReadingMode ? playback.activeReadingSegmentIndex : -1;
+
+  const isAudioTabSelected = selectedPlaylistId !== AUDIO_PLAYLIST_ALL_TRACKS_ID;
 
   return (
     <div className="music-player-tool">
@@ -223,7 +300,7 @@ export const MusicPlayerTool: React.FC = () => {
         <div className="music-player-tool__now-playing-cover">
           <AudioCover
             src={resolvedPreviewImageUrl}
-            alt={displayAsset?.name || '当前音频'}
+            alt={isReadingMode ? '当前朗读' : displayAsset?.name || '当前音频'}
             fallbackClassName="music-player-tool__now-playing-cover music-player-tool__now-playing-cover--fallback"
             iconSize={22}
           />
@@ -231,10 +308,16 @@ export const MusicPlayerTool: React.FC = () => {
         <div className="music-player-tool__now-playing-meta">
           <div className="music-player-tool__eyebrow">当前播放</div>
           <div className="music-player-tool__title">
-            {playback.activeTitle || displayAsset?.name || '未选择音频'}
+            {isReadingMode
+              ? (playback.activeTitle || (isReadingPlaybackSource(activeReadingItem) ? activeReadingItem.title : '未选择朗读'))
+              : (playback.activeTitle || displayAsset?.name || '未选择音频')}
           </div>
           <div className="music-player-tool__subtitle">
-            {playback.queueSource === 'playlist' ? (playback.activePlaylistName || '播放列表') : '画布音频'}
+            {playback.queueSource === 'playlist'
+              ? (playback.activePlaylistName || '播放列表')
+              : isReadingMode
+                ? '朗读轨道'
+                : '画布音频'}
             {' · '}
             {formatDuration(playback.currentTime)} / {formatDuration(playback.duration)}
           </div>
@@ -256,6 +339,8 @@ export const MusicPlayerTool: React.FC = () => {
             onClick={() => {
               if (playback.playing) {
                 playback.pausePlayback();
+              } else if (isReadingMode) {
+                void playback.resumePlayback();
               } else if (playback.activeAudioUrl) {
                 void playback.resumePlayback();
               } else if (fallbackAsset) {
@@ -264,7 +349,11 @@ export const MusicPlayerTool: React.FC = () => {
                 return;
               }
             }}
-            disabled={!playback.activeAudioUrl && !fallbackAsset}
+            disabled={
+              isReadingMode
+                ? !playback.activeReadingSourceId
+                : !playback.activeAudioUrl && !fallbackAsset
+            }
             aria-label={playback.playing ? '暂停' : '播放'}
             data-tooltip={playback.playing ? '暂停' : '播放'}
           >
@@ -295,30 +384,29 @@ export const MusicPlayerTool: React.FC = () => {
         </div>
       </div>
 
-      {!showPlaybackQueue ? (
-        <>
-          <div className="music-player-tool__search">
-            <Input
-              value={query}
-              onChange={(value) => setQuery(String(value))}
-              prefixIcon={<Search size={14} />}
-              placeholder="搜索素材库音频"
-              clearable
-            />
-          </div>
+      <AudioPlaylistTabs
+        className="music-player-tool__playlists"
+        selectedPlaylistId={selectedPlaylistId}
+        allCount={assets.filter((asset) => asset.type === AssetType.AUDIO).length}
+        allTracksCount={noteMetas.length}
+        playlists={playlists}
+        playlistItems={playlistItems}
+        onSelect={setSelectedPlaylistId}
+        onCreate={() => openCreatePlaylistDialog()}
+        onRename={(playlist) => openRenamePlaylistDialog(playlist.id, playlist.name)}
+        onDelete={(playlist) => void deletePlaylist(playlist.id)}
+      />
 
-          <AudioPlaylistTabs
-            className="music-player-tool__playlists"
-            selectedPlaylistId={selectedPlaylistId}
-            allCount={assets.filter((asset) => asset.type === AssetType.AUDIO).length}
-            playlists={playlists}
-            playlistItems={playlistItems}
-            onSelect={setSelectedPlaylistId}
-            onCreate={() => openCreatePlaylistDialog()}
-            onRename={(playlist) => openRenamePlaylistDialog(playlist.id, playlist.name)}
-            onDelete={(playlist) => void deletePlaylist(playlist.id)}
+      {isAudioTabSelected && !shouldShowPlaybackQueue ? (
+        <div className="music-player-tool__search">
+          <Input
+            value={query}
+            onChange={(value) => setQuery(String(value))}
+            prefixIcon={<Search size={14} />}
+            placeholder="搜索素材库音频"
+            clearable
           />
-        </>
+        </div>
       ) : null}
 
       <div className="music-player-tool__list-header">
@@ -326,99 +414,65 @@ export const MusicPlayerTool: React.FC = () => {
         <span>{activeAssetCountLabel}</span>
       </div>
 
+      {isReadingMode && subtitleSegments.length > 0 ? (
+        <div className="music-player-tool__subtitle-panel">
+          {subtitleSegments.map((segment, index) => {
+            const isActive = index === activeSubtitleIndex;
+            const isNearby = Math.abs(index - activeSubtitleIndex) <= 2;
+            if (!isActive && !isNearby) {
+              return null;
+            }
+
+            return (
+              <button
+                key={segment.id}
+                type="button"
+                className={`music-player-tool__subtitle-line ${isActive ? 'music-player-tool__subtitle-line--active' : ''}`}
+                onClick={() => playback.seekToReadingSegment(index)}
+              >
+                {segment.text}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+
       <div className="music-player-tool__list">
-        {showPlaybackQueue ? (
-          <AudioTrackList
-            className="audio-track-list--queue"
-            items={queueListItems}
-            onSelect={(item) => void handlePlayQueueItem(item.id)}
-            onContextMenu={(item, event) => {
-              const selectedItem = playback.queue.find((queueItem, index) => `${queueItem.audioUrl}-${index}` === item.id);
-              const assetId = selectedItem?.elementId?.startsWith('asset:')
-                ? selectedItem.elementId.slice('asset:'.length)
-                : (
-                  selectedItem
-                    ? assets.find((asset) => asset.type === AssetType.AUDIO && asset.url === selectedItem.audioUrl)?.id || null
-                    : null
-                );
-              if (!assetId) {
-                return;
-              }
-              event.preventDefault();
-              event.stopPropagation();
-              setContextMenu({
-                x: event.clientX,
-                y: event.clientY,
-                assetId,
-              });
-            }}
-            onToggleFavorite={(item) => {
-              const selectedItem = playback.queue.find((queueItem, index) => `${queueItem.audioUrl}-${index}` === item.id);
-              const assetId = selectedItem?.elementId?.startsWith('asset:')
-                ? selectedItem.elementId.slice('asset:'.length)
-                : (
-                  selectedItem
-                    ? assets.find((asset) => asset.type === AssetType.AUDIO && asset.url === selectedItem.audioUrl)?.id || null
-                    : null
-                );
-              if (assetId) {
-                void toggleFavorite(assetId);
-              }
-            }}
-            onTogglePlayback={(item) => {
-              void handlePlayQueueItem(item.id);
-            }}
-            showFavoriteButton
-            showPlaybackIndicator
-          />
-        ) : audioAssets.length === 0 ? (
-          <div className="music-player-tool__empty">
-            <Music4 size={18} />
-            <span>当前列表里还没有音频</span>
-          </div>
-        ) : (
-          <AudioTrackList
-            items={audioAssets.map((asset) => ({
-              id: asset.id,
-              title: asset.name,
-              subtitle: new Date(asset.createdAt).toLocaleDateString('zh-CN'),
-              previewImageUrl: asset.thumbnail,
-              isActive: activeAssetId === asset.id,
-              isPlaying: activeAssetId === asset.id && playback.playing,
-              isFavorite: favoriteAssetIds.has(asset.id),
-              canFavorite: true,
-            }))}
-            onSelect={(item) => void handlePlayAsset(item.id)}
-            onContextMenu={(item, event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              setContextMenu({
-                x: event.clientX,
-                y: event.clientY,
-                assetId: item.id,
-              });
-            }}
-            onToggleFavorite={(item) => {
-              void toggleFavorite(item.id);
-            }}
-            onTogglePlayback={(item) => {
-              void handlePlayAsset(item.id);
-            }}
-            showFavoriteButton
-            showPlaybackIndicator
-          />
-        )}
+        <MusicPlayerQueueList
+          showPlaybackQueue={shouldShowPlaybackQueue}
+          isReadingMode={isReadingMode}
+          isAllTracksTab={isAllTracksTab}
+          queueListItems={queueListItems}
+          audioAssetItems={audioAssets.map((asset) => ({
+            id: asset.id,
+            title: asset.name,
+            subtitle: new Date(asset.createdAt).toLocaleDateString('zh-CN'),
+            previewImageUrl: asset.thumbnail,
+            isActive: activeAssetId === asset.id,
+            isPlaying: activeAssetId === asset.id && playback.playing,
+            isFavorite: favoriteAssetIds.has(asset.id),
+            canFavorite: true,
+          }))}
+          queue={playback.queue}
+          assets={assets}
+          activeReadingSourceId={playback.activeReadingSourceId}
+          playing={playback.playing}
+          getQueueItemId={getQueueItemId}
+          onPlayQueueItem={(itemId) => void handlePlayQueueItem(itemId)}
+          onPlayAsset={(assetId) => void handlePlayAsset(assetId)}
+          onContextMenu={(assetId, x, y) =>
+            setContextMenu({ x, y, assetId })
+          }
+          onToggleFavorite={(assetId) => void toggleFavorite(assetId)}
+          onSetReadingQueue={playback.setReadingQueue}
+          onToggleReadingPlayback={playback.toggleReadingPlayback}
+        />
       </div>
 
       <Dialog
         visible={createDialogVisible}
         header={playlistDialogMode === 'rename' ? '重命名播放列表' : '新建播放列表'}
-        onClose={() => {
-          setCreateDialogVisible(false);
-          setPendingAssetId(null);
-          setEditingPlaylistId(null);
-          setPlaylistDialogMode('create');
-        }}
+        onClose={closePlaylistDialog}
         onConfirm={async () => {
           if (playlistDialogMode === 'rename' && editingPlaylistId) {
             await renamePlaylist(editingPlaylistId, playlistName);
@@ -429,19 +483,9 @@ export const MusicPlayerTool: React.FC = () => {
             }
             setSelectedPlaylistId(playlist.id);
           }
-          setCreateDialogVisible(false);
-          setPlaylistName('');
-          setPendingAssetId(null);
-          setEditingPlaylistId(null);
-          setPlaylistDialogMode('create');
+          closePlaylistDialog();
         }}
-        onCancel={() => {
-          setCreateDialogVisible(false);
-          setPendingAssetId(null);
-          setEditingPlaylistId(null);
-          setPlaylistDialogMode('create');
-          setPlaylistName('');
-        }}
+        onCancel={closePlaylistDialog}
         confirmBtn="确定"
         cancelBtn="取消"
       >
@@ -458,7 +502,7 @@ export const MusicPlayerTool: React.FC = () => {
         playlists={playlists}
         playlistItems={playlistItems}
         favoriteAssetIds={favoriteAssetIds}
-        selectedPlaylistId={effectivePlaylistId === AUDIO_PLAYLIST_ALL_ID ? null : effectivePlaylistId}
+        selectedPlaylistId={selectedPlaylistId === AUDIO_PLAYLIST_ALL_ID ? null : selectedPlaylistId}
         currentPlaylistAssetIds={currentPlaylistAssetIds}
         onClose={() => setContextMenu(null)}
         onToggleFavorite={(assetId) => void toggleFavorite(assetId)}

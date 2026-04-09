@@ -1,21 +1,36 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Dialog, Input } from 'tdesign-react';
+import { Music4 } from 'lucide-react';
 import { AudioTrackList } from '../shared/AudioTrackList';
 import { AudioTrackContextMenu } from '../shared/AudioTrackContextMenu';
+import { AudioPlaylistTabs } from '../shared/AudioPlaylistTabs';
 import { useContextMenuState } from '../shared';
 import { useAssets } from '../../contexts/AssetContext';
 import { useResolvedAudioDurations } from '../../hooks/useResolvedAudioDurations';
+import { useAllTracksPlaybackSources } from '../../hooks/useAllTracksPlaybackSources';
 import { AssetType } from '../../types/asset.types';
 import { useAudioPlaylists } from '../../contexts/AudioPlaylistContext';
-import { AUDIO_PLAYLIST_ALL_ID } from '../../types/audio-playlist.types';
-import type { CanvasAudioPlaybackSource, CanvasAudioQueueSource } from '../../services/canvas-audio-playback-service';
+import {
+  AUDIO_PLAYLIST_ALL_ID,
+  AUDIO_PLAYLIST_ALL_TRACKS_ID,
+} from '../../types/audio-playlist.types';
+import {
+  isReadingPlaybackSource,
+  type CanvasAudioPlaybackSource,
+  type CanvasAudioQueueSource,
+  type PlaybackQueueItem,
+} from '../../services/canvas-audio-playback-service';
+import type { ReadingPlaybackSource } from '../../services/reading-playback-source';
 
 interface CanvasAudioPlayerPlaylistProps {
-  queue: CanvasAudioPlaybackSource[];
+  queue: PlaybackQueueItem[];
   activeQueueIndex: number;
   queueSource: CanvasAudioQueueSource;
   activePlaylistId?: string;
-  onSelect: (item: CanvasAudioPlaybackSource) => void;
+  playing?: boolean;
+  activeReadingSourceId?: string;
+  onSelect: (item: PlaybackQueueItem) => void;
+  onPlayAllTracksItem?: (noteId: string) => void;
 }
 
 const ASSET_ELEMENT_ID_PREFIX = 'asset:';
@@ -38,12 +53,20 @@ function formatDuration(duration?: number): string {
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
+function formatReadingDuration(source: ReadingPlaybackSource): string {
+  const totalDurationMs = source.segments[source.segments.length - 1]?.endMs || 0;
+  return formatDuration(totalDurationMs / 1000);
+}
+
 export const CanvasAudioPlayerPlaylist: React.FC<CanvasAudioPlayerPlaylistProps> = ({
   queue,
   activeQueueIndex,
   queueSource,
   activePlaylistId,
+  playing = false,
+  activeReadingSourceId,
   onSelect,
+  onPlayAllTracksItem,
 }) => {
   const { assets } = useAssets();
   const {
@@ -63,10 +86,16 @@ export const CanvasAudioPlayerPlaylist: React.FC<CanvasAudioPlayerPlaylistProps>
   const [createDialogVisible, setCreateDialogVisible] = useState(false);
   const [playlistName, setPlaylistName] = useState('');
   const [pendingAssetId, setPendingAssetId] = useState<string | null>(null);
+  const { noteMetas, loadReadingSource, buildReadingQueue } = useAllTracksPlaybackSources();
+  const [selectedTabId, setSelectedTabId] = useState<string>(
+    queueSource === 'reading' ? AUDIO_PLAYLIST_ALL_TRACKS_ID : AUDIO_PLAYLIST_ALL_ID
+  );
+  const isAllTracksTab = selectedTabId === AUDIO_PLAYLIST_ALL_TRACKS_ID;
 
   const selectedPlaylistId =
     queueSource === 'playlist' && activePlaylistId ? activePlaylistId : AUDIO_PLAYLIST_ALL_ID;
-  const resolvedDurations = useResolvedAudioDurations(queue);
+  const audioQueue = queue.filter((item): item is CanvasAudioPlaybackSource => !isReadingPlaybackSource(item));
+  const resolvedDurations = useResolvedAudioDurations(audioQueue);
   const resolveAssetId = (item?: CanvasAudioPlaybackSource): string | null => {
     const directAssetId = getAssetIdFromSource(item);
     if (directAssetId) {
@@ -90,11 +119,141 @@ export const CanvasAudioPlayerPlaylist: React.FC<CanvasAudioPlayerPlaylistProps>
     ),
     [playlistItems, selectedPlaylistId]
   );
+  const handlePlayAllTracksItem = useCallback(
+    async (noteId: string) => {
+      if (onPlayAllTracksItem) {
+        onPlayAllTracksItem(noteId);
+        return;
+      }
+      const source = await loadReadingSource(noteId);
+      if (!source) return;
+      const fullQueue = await buildReadingQueue(noteId);
+      // 通过 onSelect 传递给父组件处理
+      onSelect(source);
+    },
+    [onPlayAllTracksItem, loadReadingSource, buildReadingQueue, onSelect]
+  );
+
+  const allTracksListItems = useMemo(
+    () =>
+      noteMetas.map((meta) => ({
+        id: meta.id,
+        title: meta.title || '未命名笔记',
+        subtitle: new Date(meta.updatedAt).toLocaleDateString('zh-CN'),
+        canFavorite: false,
+        isActive: activeReadingSourceId?.includes(meta.id) === true,
+        isPlaying: playing && activeReadingSourceId?.includes(meta.id) === true,
+      })),
+    [noteMetas, activeReadingSourceId, playing]
+  );
+
+  if (queueSource === 'reading') {
+    return (
+      <div className="canvas-audio-player__playlist">
+        <AudioPlaylistTabs
+          className="canvas-audio-player__playlist-tabs"
+          selectedPlaylistId={selectedTabId}
+          allCount={audioQueue.length}
+          allTracksCount={noteMetas.length}
+          playlists={playlists}
+          playlistItems={playlistItems}
+          onSelect={setSelectedTabId}
+          onCreate={() => {
+            setPlaylistName('');
+            setCreateDialogVisible(true);
+          }}
+        />
+        {isAllTracksTab ? (
+          allTracksListItems.length === 0 ? (
+            <div className="canvas-audio-player__playlist-empty">
+              <Music4 size={16} />
+              <span>知识库还没有笔记</span>
+            </div>
+          ) : (
+            <AudioTrackList
+              className="canvas-audio-player__playlist-list"
+              items={allTracksListItems}
+              onSelect={(item) => void handlePlayAllTracksItem(item.id)}
+              onTogglePlayback={(item) => void handlePlayAllTracksItem(item.id)}
+              showPlaybackIndicator
+            />
+          )
+        ) : (
+          <AudioTrackList
+            className="canvas-audio-player__playlist-list audio-track-list--queue"
+            items={queue.map((item, index) => {
+              const readingItem = item as ReadingPlaybackSource;
+              return {
+                id: readingItem.readingSourceId,
+                title: readingItem.title || '朗读轨道',
+                subtitle: formatReadingDuration(readingItem),
+                previewImageUrl: readingItem.previewImageUrl,
+                isActive: index === activeQueueIndex,
+                isPlaying: index === activeQueueIndex,
+                canFavorite: false,
+              };
+            })}
+            onSelect={(selectedItem) => {
+              const nextItem = queue.find(
+                (item) =>
+                  isReadingPlaybackSource(item)
+                  && item.readingSourceId === selectedItem.id
+              );
+              if (nextItem) {
+                onSelect(nextItem);
+              }
+            }}
+            onTogglePlayback={(selectedItem) => {
+              const nextItem = queue.find(
+                (item) =>
+                  isReadingPlaybackSource(item)
+                  && item.readingSourceId === selectedItem.id
+              );
+              if (nextItem) {
+                onSelect(nextItem);
+              }
+            }}
+            showPlaybackIndicator
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="canvas-audio-player__playlist">
-      <AudioTrackList
+      <AudioPlaylistTabs
+        className="canvas-audio-player__playlist-tabs"
+        selectedPlaylistId={selectedTabId}
+        allCount={audioQueue.length}
+        allTracksCount={noteMetas.length}
+        playlists={playlists}
+        playlistItems={playlistItems}
+        onSelect={setSelectedTabId}
+        onCreate={() => {
+          setPlaylistName('');
+          setCreateDialogVisible(true);
+        }}
+      />
+      {isAllTracksTab ? (
+        allTracksListItems.length === 0 ? (
+          <div className="canvas-audio-player__playlist-empty">
+            <Music4 size={16} />
+            <span>知识库还没有笔记</span>
+          </div>
+        ) : (
+          <AudioTrackList
+            className="canvas-audio-player__playlist-list"
+            items={allTracksListItems}
+            onSelect={(item) => void handlePlayAllTracksItem(item.id)}
+            onTogglePlayback={(item) => void handlePlayAllTracksItem(item.id)}
+            showPlaybackIndicator
+          />
+        )
+      ) : (
+        <AudioTrackList
         className="canvas-audio-player__playlist-list audio-track-list--queue"
-        items={queue.map((item, index) => {
+        items={audioQueue.map((item, index) => {
           const assetId = resolveAssetId(item);
 
           return {
@@ -109,13 +268,13 @@ export const CanvasAudioPlayerPlaylist: React.FC<CanvasAudioPlayerPlaylistProps>
           };
         })}
         onSelect={(selectedItem) => {
-          const nextItem = queue.find((item, index) => `${item.audioUrl}-${index}` === selectedItem.id);
+          const nextItem = audioQueue.find((item, index) => `${item.audioUrl}-${index}` === selectedItem.id);
           if (nextItem) {
             onSelect(nextItem);
           }
         }}
         onContextMenu={(selectedItem, event) => {
-          const nextItem = queue.find((item, index) => `${item.audioUrl}-${index}` === selectedItem.id);
+          const nextItem = audioQueue.find((item, index) => `${item.audioUrl}-${index}` === selectedItem.id);
           const assetId = resolveAssetId(nextItem);
           if (!assetId) {
             return;
@@ -125,14 +284,14 @@ export const CanvasAudioPlayerPlaylist: React.FC<CanvasAudioPlayerPlaylistProps>
           openContextMenuAt(event.clientX, event.clientY, assetId);
         }}
         onToggleFavorite={(selectedItem) => {
-          const nextItem = queue.find((item, index) => `${item.audioUrl}-${index}` === selectedItem.id);
+          const nextItem = audioQueue.find((item, index) => `${item.audioUrl}-${index}` === selectedItem.id);
           const assetId = resolveAssetId(nextItem);
           if (assetId) {
             void toggleFavorite(assetId);
           }
         }}
         onTogglePlayback={(selectedItem) => {
-          const nextItem = queue.find((item, index) => `${item.audioUrl}-${index}` === selectedItem.id);
+          const nextItem = audioQueue.find((item, index) => `${item.audioUrl}-${index}` === selectedItem.id);
           if (nextItem) {
             onSelect(nextItem);
           }
@@ -140,6 +299,7 @@ export const CanvasAudioPlayerPlaylist: React.FC<CanvasAudioPlayerPlaylistProps>
         showFavoriteButton
         showPlaybackIndicator
       />
+      )}
       <AudioTrackContextMenu
         contextMenu={
           contextMenu

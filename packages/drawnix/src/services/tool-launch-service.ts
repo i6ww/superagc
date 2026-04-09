@@ -1,7 +1,14 @@
 import { toolWindowService } from './tool-window-service';
-import { canvasAudioPlaybackService, type CanvasAudioPlaybackSource } from './canvas-audio-playback-service';
+import {
+  canvasAudioPlaybackService,
+  type CanvasAudioPlaybackSource,
+  isReadingPlaybackSource,
+} from './canvas-audio-playback-service';
 import { MUSIC_PLAYER_TOOL_ID } from '../tools/tool-ids';
 import type { ToolDefinition } from '../types/toolbox.types';
+import type { ReadingPlaybackSource } from './reading-playback-source';
+
+type MusicPlayerSource = CanvasAudioPlaybackSource | ReadingPlaybackSource;
 
 export function openMusicPlayerTool(): boolean {
   const tool: ToolDefinition = {
@@ -20,8 +27,8 @@ export function openMusicPlayerTool(): boolean {
 }
 
 interface OpenMusicPlayerAndPlayOptions {
-  source: CanvasAudioPlaybackSource;
-  queue?: CanvasAudioPlaybackSource[];
+  source: MusicPlayerSource;
+  queue?: MusicPlayerSource[];
   playlist?: {
     playlistId: string;
     playlistName: string;
@@ -34,18 +41,26 @@ export async function openMusicPlayerToolAndPlay(
   openMusicPlayerTool();
 
   if (options.queue && options.queue.length > 0) {
-    canvasAudioPlaybackService.setQueue(
-      options.queue,
-      options.playlist
-        ? {
-            queueSource: 'playlist',
-            playlistId: options.playlist.playlistId,
-            playlistName: options.playlist.playlistName,
-          }
-        : undefined
-    );
+    if (options.queue.every((item) => isReadingPlaybackSource(item))) {
+      canvasAudioPlaybackService.setReadingQueue(options.queue as ReadingPlaybackSource[]);
+    } else {
+      canvasAudioPlaybackService.setQueue(
+        options.queue as CanvasAudioPlaybackSource[],
+        options.playlist
+          ? {
+              queueSource: 'playlist',
+              playlistId: options.playlist.playlistId,
+              playlistName: options.playlist.playlistName,
+            }
+          : undefined
+      );
+    }
   }
 
-  await canvasAudioPlaybackService.togglePlayback(options.source);
+  if (isReadingPlaybackSource(options.source)) {
+    canvasAudioPlaybackService.toggleReadingPlayback(options.source);
+  } else {
+    await canvasAudioPlaybackService.togglePlayback(options.source);
+  }
   return true;
 }

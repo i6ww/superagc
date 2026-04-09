@@ -1,5 +1,24 @@
+// @vitest-environment jsdom
+
 import { describe, expect, it, beforeEach, vi } from 'vitest';
-import { getCanvasSpeechText } from './text-to-speech-utils';
+import { createCanvasReadingPlaybackQueue, getCanvasSpeechText } from './text-to-speech-utils';
+
+vi.mock('../../../hooks/useTextToSpeech', () => ({
+  DEFAULT_TTS_SETTINGS: {
+    selectedVoice: '',
+    rate: 1,
+    pitch: 1,
+    volume: 1,
+    voicesByLanguage: {},
+  },
+  inferSpeechLanguage: () => 'zh-CN',
+  markdownToPlainText: (markdown: string) =>
+    markdown
+      .replace(/^#{1,6}\s+/gm, '')
+      .replace(/^[\s]*[-*+]\s+/gm, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim(),
+}));
 
 vi.mock('../../card-element/CardElement', () => ({
   getCardBodyElement: vi.fn(),
@@ -36,6 +55,12 @@ describe('getCanvasSpeechText', () => {
 
     expect(result).toEqual({
       text: '第一段',
+      title: '标题',
+      sourceId: 'card:card-1:selection',
+      origin: {
+        kind: 'card',
+        id: 'card-1',
+      },
       source: 'selection',
     });
   });
@@ -50,6 +75,12 @@ describe('getCanvasSpeechText', () => {
 
     expect(result).toEqual({
       text: '标题\n\n正文',
+      title: '标题',
+      sourceId: 'card:card-1',
+      origin: {
+        kind: 'card',
+        id: 'card-1',
+      },
       source: 'element',
     });
   });
@@ -66,7 +97,38 @@ describe('getCanvasSpeechText', () => {
 
     expect(result).toEqual({
       text: '文本 A\n\n文本 B',
+      title: '已选 2 个元素',
+      sourceId: 'selection:text-1|text-2',
+      origin: undefined,
       source: 'element',
     });
+  });
+
+  it('会将同画布其他 Card 一起加入朗读队列，并保留当前项内容', () => {
+    const current = {
+      text: '当前卡片选区',
+      title: '当前卡片',
+      source: 'selection' as const,
+      sourceId: 'card:card-2:selection',
+      origin: {
+        kind: 'card' as const,
+        id: 'card-2',
+      },
+    };
+
+    const queue = createCanvasReadingPlaybackQueue(
+      {
+        children: [
+          { id: 'card-1', type: 'card', title: '第一张', body: '第一张正文' },
+          { id: 'card-2', type: 'card', title: '第二张', body: '第二张正文' },
+          { id: 'shape-1', type: 'shape', text: '忽略' },
+        ],
+      } as never,
+      current
+    );
+
+    expect(queue).toHaveLength(2);
+    expect(queue.map((item) => item.title)).toEqual(['第一张', '当前卡片']);
+    expect(queue[1]?.plainText).toBe('当前卡片选区');
   });
 });

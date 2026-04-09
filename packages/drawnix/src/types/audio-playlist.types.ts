@@ -1,5 +1,6 @@
 export const AUDIO_PLAYLIST_FAVORITES_ID = 'favorites';
 export const AUDIO_PLAYLIST_ALL_ID = 'all-audio';
+export const AUDIO_PLAYLIST_ALL_TRACKS_ID = 'all-tracks';
 
 export interface AudioPlaylist {
   id: string;

@@ -4,6 +4,7 @@ import {
   EMPTY_AUDIO_SPECTRUM,
   EMPTY_AUDIO_WAVEFORM,
 } from '../canvas-audio-playback-service';
+import { createReadingPlaybackSource } from '../reading-playback-source';
 
 class MockAudioElement extends EventTarget {
   src = '';
@@ -63,6 +64,32 @@ class MockAudioContext {
   resume = vi.fn(async () => {
     this.state = 'running';
   });
+}
+
+class MockSpeechSynthesis {
+  utterances: Array<SpeechSynthesisUtterance> = [];
+  paused = false;
+
+  speak(utterance: SpeechSynthesisUtterance): void {
+    this.utterances.push(utterance);
+  }
+
+  cancel(): void {
+    this.utterances = [];
+    this.paused = false;
+  }
+
+  pause(): void {
+    this.paused = true;
+  }
+
+  resume(): void {
+    this.paused = false;
+  }
+
+  getVoices(): SpeechSynthesisVoice[] {
+    return [];
+  }
 }
 
 describe('CanvasAudioPlaybackService', () => {
@@ -401,5 +428,59 @@ describe('CanvasAudioPlaybackService', () => {
     expect(service.getState().pulseLevel).toBe(0);
     expect(service.getState().spectrumLevels).toEqual([...EMPTY_AUDIO_SPECTRUM]);
     expect(service.getState().waveformLevels).toEqual([...EMPTY_AUDIO_WAVEFORM]);
+  });
+
+  it('plays reading sources and tracks subtitle progress', () => {
+    const audio = new MockAudioElement();
+    const speechSynthesis = new MockSpeechSynthesis();
+    let currentNow = 0;
+    let progressTick: (() => void) | null = null;
+    const readingSource = createReadingPlaybackSource({
+      elementId: 'kb-note:1',
+      title: '测试笔记',
+      content: '# 标题\n\n第一句。第二句。',
+      origin: {
+        kind: 'kb-note',
+        id: '1',
+      },
+    });
+
+    expect(readingSource).not.toBeNull();
+
+    const service = new CanvasAudioPlaybackService(
+      () => audio as unknown as HTMLAudioElement,
+      {
+        speechSynthesis: speechSynthesis as unknown as SpeechSynthesis,
+        utteranceFactory: (text) => ({ text } as SpeechSynthesisUtterance),
+        setInterval: ((callback: TimerHandler) => {
+          progressTick = callback as () => void;
+          return 1 as unknown as number;
+        }) as typeof window.setInterval,
+        clearInterval: vi.fn() as typeof window.clearInterval,
+        now: () => currentNow,
+      }
+    );
+
+    service.toggleReadingPlaybackInQueue(readingSource ? [readingSource][0] : (null as never), readingSource ? [readingSource] : []);
+
+    expect(service.getState()).toMatchObject({
+      mediaType: 'reading',
+      activeReadingSourceId: readingSource?.readingSourceId,
+      subtitleMode: 'estimated',
+      activeQueueIndex: 0,
+      playing: true,
+    });
+
+    currentNow = 900;
+    progressTick?.();
+    expect(service.getState().currentTime).toBeGreaterThan(0);
+
+    service.pausePlayback();
+    expect(service.getState().playing).toBe(false);
+    expect(speechSynthesis.paused).toBe(true);
+
+    void service.resumePlayback();
+    expect(service.getState().playing).toBe(true);
+    expect(speechSynthesis.paused).toBe(false);
   });
 });

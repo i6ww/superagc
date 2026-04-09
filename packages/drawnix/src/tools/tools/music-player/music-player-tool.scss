@@ -178,6 +178,40 @@
   justify-content: space-between;
 }
 
+.music-player-tool__subtitle-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.music-player-tool__subtitle-line {
+  border: none;
+  background: transparent;
+  color: #64748b;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition:
+    background-color 0.16s ease,
+    color 0.16s ease;
+}
+
+.music-player-tool__subtitle-line:hover {
+  background: rgba(37, 99, 235, 0.08);
+  color: #1e293b;
+}
+
+.music-player-tool__subtitle-line--active {
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
 .music-player-tool__list {
   min-height: 0;
   flex: 1;

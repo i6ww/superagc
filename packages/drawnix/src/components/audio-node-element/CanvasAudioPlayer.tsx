@@ -15,6 +15,7 @@ import { useCanvasAudioPlayback } from '../../hooks/useCanvasAudioPlayback';
 import { useDraggablePosition } from '../../hooks/useDraggablePosition';
 import { LS_KEYS } from '../../constants/storage-keys';
 import { toolWindowService } from '../../services/tool-window-service';
+import { isReadingPlaybackSource } from '../../services/canvas-audio-playback-service';
 import { MUSIC_PLAYER_TOOL_ID } from '../../tools/tool-ids';
 import { AudioCover } from '../shared/AudioCover';
 import { CanvasAudioPlayerVolume } from './CanvasAudioPlayerVolume';
@@ -85,12 +86,21 @@ export const CanvasAudioPlayer: React.FC = () => {
   const queueInfoLabel = hasQueueInfo
     ? `${playback.activeQueueIndex + 1}/${playback.queue.length}`
     : null;
+  const queueLabel = playback.queueSource === 'playlist'
+    ? (playback.activePlaylistName || '播放列表')
+    : playback.queueSource === 'reading'
+      ? '朗读轨道'
+      : '画布音频';
   const subtitle = hasQueueInfo
-    ? `${playback.queueSource === 'playlist' ? (playback.activePlaylistName || '播放列表') : '画布音频'} ${playback.activeQueueIndex + 1} / ${playback.queue.length}`
-    : playback.queueSource === 'playlist' ? (playback.activePlaylistName || '播放列表') : '画布音频';
+    ? `${queueLabel} ${playback.activeQueueIndex + 1} / ${playback.queue.length}`
+    : queueLabel;
   const mobileSubtitle = queueInfoLabel
     ? `${queueInfoLabel} · ${currentTimeLabel} / ${durationLabel}`
     : `${currentTimeLabel} / ${durationLabel}`;
+  const hasActivePlayback = playback.mediaType === 'reading'
+    ? !!playback.activeReadingSourceId
+    : !!playback.activeAudioUrl;
+  const canSeek = playback.mediaType === 'audio';
 
   const scrubberStyle = {
     '--canvas-audio-progress': `${progress}%`,
@@ -121,7 +131,7 @@ export const CanvasAudioPlayer: React.FC = () => {
   }, [playback]);
 
   useEffect(() => {
-    if (!playback.activeAudioUrl) {
+    if (!hasActivePlayback) {
       setPlaylistOpen(false);
       setMobileAnchorRect(null);
       return;
@@ -184,7 +194,7 @@ export const CanvasAudioPlayer: React.FC = () => {
       window.removeEventListener('orientationchange', scheduleUpdate);
       resizeObserver?.disconnect();
     };
-  }, [playback.activeAudioUrl]);
+  }, [hasActivePlayback]);
 
   useEffect(() => {
     if (!playlistOpen) return;
@@ -210,7 +220,7 @@ export const CanvasAudioPlayer: React.FC = () => {
     return () => subscription.unsubscribe();
   }, []);
 
-  if (!playback.activeAudioUrl || playerToolVisible) {
+  if (!hasActivePlayback || playerToolVisible) {
     return null;
   }
 
@@ -312,10 +322,15 @@ export const CanvasAudioPlayer: React.FC = () => {
           max={duration || 0}
           step={0.1}
           value={Math.min(currentTime, duration || currentTime)}
-          onChange={(event) => playback.seekTo(Number(event.target.value))}
+          onChange={(event) => {
+            if (canSeek) {
+              playback.seekTo(Number(event.target.value));
+            }
+          }}
           className="canvas-audio-player__slider canvas-audio-player__slider--progress"
           style={scrubberStyle}
-          aria-label="Audio progress"
+          aria-label={canSeek ? 'Audio progress' : 'Reading progress'}
+          disabled={!canSeek}
         />
         <span className="canvas-audio-player__time">{durationLabel}</span>
       </div>
@@ -365,8 +380,14 @@ export const CanvasAudioPlayer: React.FC = () => {
           activeQueueIndex={playback.activeQueueIndex}
           queueSource={playback.queueSource}
           activePlaylistId={playback.activePlaylistId}
+          playing={playback.playing}
+          activeReadingSourceId={playback.activeReadingSourceId}
           onSelect={(item) => {
-            void playback.togglePlayback(item);
+            if (isReadingPlaybackSource(item)) {
+              playback.toggleReadingPlayback(item);
+            } else {
+              void playback.togglePlayback(item);
+            }
             setPlaylistOpen(false);
           }}
         />

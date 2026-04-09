@@ -27,6 +27,38 @@
   }
 }
 
+.canvas-audio-player__playlist-tabs {
+  flex-shrink: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+
+  .audio-playlist-tabs__chip {
+    padding: 3px 8px;
+    font-size: 11px;
+  }
+
+  .audio-playlist-tabs__create {
+    padding: 3px 8px;
+    font-size: 11px;
+  }
+}
+
 .canvas-audio-player__playlist-list {
   min-width: 0;
+}
+
+.canvas-audio-player__playlist-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 80px;
+  color: #64748b;
+  font-size: 12px;
 }

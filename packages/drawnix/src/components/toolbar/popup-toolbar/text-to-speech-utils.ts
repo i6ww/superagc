@@ -4,10 +4,18 @@ import { MindElement } from '@plait/mind';
 import { getCardBodyElement } from '../../card-element/CardElement';
 import { markdownToPlainText } from '../../../hooks/useTextToSpeech';
 import { isCardElement } from '../../../types/card.types';
+import { sortElementsByPosition } from '../../../utils/selection-utils';
+import {
+  createReadingPlaybackSource,
+  type ReadingPlaybackSource,
+} from '../../../services/reading-playback-source';
 
 export interface CanvasSpeechTextResult {
   text: string;
   source: 'selection' | 'element' | null;
+  title?: string;
+  sourceId?: string;
+  origin?: ReadingPlaybackSource['origin'];
 }
 
 function normalizeSpeechText(text: string): string {
@@ -113,17 +121,30 @@ export function getCanvasSpeechText(
   selectedElements: PlaitElement[]
 ): CanvasSpeechTextResult {
   if (selectedElements.length === 0) {
-    return { text: '', source: null };
+    return { text: '', source: null, title: '' };
   }
 
   if (selectedElements.length === 1 && isCardElement(selectedElements[0])) {
+    const card = selectedElements[0];
     const selectedText = normalizeSpeechText(
-      getSelectedTextWithinElement(getCardBodyElement(selectedElements[0].id))
+      getSelectedTextWithinElement(getCardBodyElement(card.id))
     );
     if (selectedText) {
-      return { text: selectedText, source: 'selection' };
+      return {
+        text: selectedText,
+        source: 'selection',
+        title: card.title || '卡片朗读',
+        sourceId: `card:${card.id}:selection`,
+        origin: {
+          kind: 'card',
+          id: card.id,
+        },
+      };
     }
   }
+
+  const firstElement = selectedElements[0];
+  const firstCard = selectedElements.length === 1 && isCardElement(firstElement) ? firstElement : null;
 
   const text = normalizeSpeechText(
     selectedElements
@@ -135,5 +156,75 @@ export function getCanvasSpeechText(
   return {
     text,
     source: text ? 'element' : null,
+    title: firstCard?.title || (selectedElements.length === 1 ? '画布朗读' : `已选 ${selectedElements.length} 个元素`),
+    sourceId:
+      selectedElements.length === 1
+        ? `${selectedElements[0].type}:${selectedElements[0].id}`
+        : `selection:${selectedElements.map((element) => element.id).sort().join('|')}`,
+    origin: firstCard
+      ? {
+          kind: 'card',
+          id: firstCard.id,
+        }
+      : undefined,
   };
+}
+
+export function createCanvasReadingPlaybackSource(
+  result: CanvasSpeechTextResult
+): ReadingPlaybackSource | null {
+  if (!result.text || !result.sourceId) {
+    return null;
+  }
+
+  return createReadingPlaybackSource({
+    elementId: result.sourceId,
+    title: result.title,
+    content: result.text,
+    origin: result.origin || {
+      kind: 'card',
+      id: result.sourceId,
+    },
+  });
+}
+
+export function createCanvasReadingPlaybackQueue(
+  board: PlaitBoard,
+  currentResult: CanvasSpeechTextResult
+): ReadingPlaybackSource[] {
+  const currentSource = createCanvasReadingPlaybackSource(currentResult);
+  if (!currentSource) {
+    return [];
+  }
+
+  if (!board.children || !currentResult.origin || currentResult.origin.kind !== 'card') {
+    return [currentSource];
+  }
+
+  const cardElements = sortElementsByPosition(
+    board,
+    board.children.filter(isCardElement)
+  );
+
+  if (cardElements.length <= 1) {
+    return [currentSource];
+  }
+
+  return cardElements
+    .map((card) => {
+      if (card.id === currentResult.origin?.id) {
+        return currentSource;
+      }
+
+      return createReadingPlaybackSource({
+        elementId: `card:${card.id}`,
+        title: card.title || '卡片朗读',
+        content: [card.title, card.body].filter(Boolean).join('\n\n'),
+        origin: {
+          kind: 'card',
+          id: card.id,
+        },
+      });
+    })
+    .filter((item): item is ReadingPlaybackSource => Boolean(item));
 }
