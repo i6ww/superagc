@@ -34,6 +34,7 @@ import type {
 import { AssetType as AssetTypeEnum, AssetSource as AssetSourceEnum, DEFAULT_FILTER_STATE } from '../types/asset.types';
 import { TaskStatus, TaskType } from '../types/task.types';
 import { AssetContext } from './asset-context-instance';
+import { audioPlaylistService } from '../services/audio-playlist-service';
 
 
 /**
@@ -75,6 +76,7 @@ export function AssetProvider({ children }: AssetProviderProps) {
     const initService = async () => {
       try {
         await assetStorageService.initialize();
+        await audioPlaylistService.initialize();
       } catch (err) {
         console.error('Failed to initialize asset storage service:', err);
         const error = err as Error;
@@ -164,8 +166,12 @@ export function AssetProvider({ children }: AssetProviderProps) {
         const isAssetLibrary = pathname.startsWith('/asset-library/');
         
         if (!isAituCache && !isAssetLibrary) continue;
-        
+
         const filename = pathname.split('/').pop() || '';
+
+        // 跳过辅助缓存条目（如音频封面图 *-cover.png）
+        if (/-cover\.\w+$/i.test(filename)) continue;
+
         const isVideo = item.type === 'video' ||
                         pathname.includes('/video/') ||
                         /\.(mp4|webm|mov)$/i.test(pathname);
@@ -471,6 +477,10 @@ export function AssetProvider({ children }: AssetProviderProps) {
         await assetStorageService.removeAsset(id);
       }
 
+      await audioPlaylistService.removeAssetFromAllPlaylists(id).catch((playlistError) => {
+        console.error('[AssetContext] Failed to remove asset from playlists:', playlistError);
+      });
+
       // 更新状态
       setAssets((prev) => prev.filter((a) => a.id !== id));
 
@@ -546,6 +556,7 @@ export function AssetProvider({ children }: AssetProviderProps) {
           if (asset) {
             await unifiedCacheService.deleteCache(asset.url);
           }
+          await audioPlaylistService.removeAssetFromAllPlaylists(id);
           successIds.push(id);
         } catch (err) {
           console.error(`Failed to remove cache asset ${id}:`, err);
@@ -563,6 +574,7 @@ export function AssetProvider({ children }: AssetProviderProps) {
               console.debug('[AssetContext] AI asset cache delete skipped:', e);
             });
           }
+          await audioPlaylistService.removeAssetFromAllPlaylists(id);
           successIds.push(id);
         } catch (err) {
           console.error(`Failed to remove AI asset ${id}:`, err);
@@ -584,6 +596,16 @@ export function AssetProvider({ children }: AssetProviderProps) {
             errors.push({ id: localIds[index], error: result.reason as Error });
           }
         });
+
+        await Promise.all(
+          localIds
+            .filter((id) => successIds.includes(id))
+            .map((id) =>
+              audioPlaylistService.removeAssetFromAllPlaylists(id).catch((playlistError) => {
+                console.error('[AssetContext] Failed to remove asset from playlists:', playlistError);
+              })
+            )
+        );
       }
 
       // 更新状态 - 只移除成功删除的素材
