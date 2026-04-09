@@ -11,12 +11,12 @@ import { WinBoxWindow } from '../winbox';
 import { toolWindowService } from '../../services/tool-window-service';
 import { ToolDefinition, ToolWindowState } from '../../types/toolbox.types';
 import { useI18n } from '../../i18n';
-import { InternalToolComponents } from './InternalToolComponents';
 import { useDrawnix } from '../../hooks/use-drawnix';
 import { ToolTransforms } from '../../plugins/with-tool';
 import { DEFAULT_TOOL_CONFIG } from '../../constants/built-in-tools';
 import { processToolUrl } from '../../utils/url-template';
 import { useDeviceType } from '../../hooks/useDeviceType';
+import { toolRegistry } from '../../tools/registry';
 
 /**
  * 工具弹窗管理器组件
@@ -168,7 +168,7 @@ export const ToolWinBoxManager: React.FC = () => {
     <>
       {activeStates.map(state => {
         const { tool, status, position, size, autoMaximize } = state;
-        const InternalComponent = tool.component ? InternalToolComponents[tool.component] : null;
+        const InternalComponent = toolRegistry.resolveInternalComponent(tool.component);
         
         // 确定窗口是否可见
         const isVisible = status === 'open';

@@ -9,6 +9,8 @@ export interface CanvasAudioPlaybackSource {
   clipIds?: string[];
 }
 
+export type CanvasAudioQueueSource = 'canvas' | 'playlist';
+
 export interface CanvasAudioPlaybackState {
   activeElementId?: string;
   activeAudioUrl?: string;
@@ -17,6 +19,9 @@ export interface CanvasAudioPlaybackState {
   activePreviewImageUrl?: string;
   activeProviderTaskId?: string;
   activeClipIds?: string[];
+  queueSource: CanvasAudioQueueSource;
+  activePlaylistId?: string;
+  activePlaylistName?: string;
   queue: CanvasAudioPlaybackSource[];
   activeQueueIndex: number;
   playing: boolean;
@@ -48,6 +53,7 @@ export const EMPTY_AUDIO_WAVEFORM = Object.freeze(
 );
 
 const INITIAL_STATE: CanvasAudioPlaybackState = {
+  queueSource: 'canvas',
   queue: [],
   activeQueueIndex: -1,
   playing: false,
@@ -557,7 +563,14 @@ export class CanvasAudioPlaybackService {
     await this.startPlayback(source);
   }
 
-  setQueue(queue: CanvasAudioPlaybackSource[]): void {
+  setQueue(
+    queue: CanvasAudioPlaybackSource[],
+    options?: {
+      queueSource?: CanvasAudioQueueSource;
+      playlistId?: string;
+      playlistName?: string;
+    }
+  ): void {
     const normalizedQueue = this.normalizeQueue(queue);
     const activeQueueIndex = this.state.activeAudioUrl
       ? this.findQueueIndex(normalizedQueue, {
@@ -567,6 +580,9 @@ export class CanvasAudioPlaybackService {
       : -1;
 
     this.patchState({
+      queueSource: options?.queueSource || 'canvas',
+      activePlaylistId: options?.queueSource === 'playlist' ? options.playlistId : undefined,
+      activePlaylistName: options?.queueSource === 'playlist' ? options.playlistName : undefined,
       queue: normalizedQueue,
       activeQueueIndex,
     });
@@ -662,6 +678,9 @@ export class CanvasAudioPlaybackService {
       ...INITIAL_STATE,
       queue: this.state.queue,
       volume: this.state.volume,
+      queueSource: this.state.queueSource,
+      activePlaylistId: this.state.activePlaylistId,
+      activePlaylistName: this.state.activePlaylistName,
     });
   }
 }

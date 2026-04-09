@@ -171,6 +171,40 @@ describe('CanvasAudioPlaybackService', () => {
       activeElementId: 'audio-node-2',
       activeAudioUrl: 'https://example.com/audio-2.mp3',
       activeQueueIndex: 1,
+      queueSource: 'canvas',
+    });
+  });
+
+  it('tracks playlist queue metadata separately from canvas queue', async () => {
+    const audio = new MockAudioElement();
+    const service = new CanvasAudioPlaybackService(() => audio as unknown as HTMLAudioElement);
+
+    service.setQueue(
+      [
+        {
+          elementId: 'asset:1',
+          audioUrl: 'https://example.com/audio-1.mp3',
+          title: 'Track One',
+        },
+      ],
+      {
+        queueSource: 'playlist',
+        playlistId: 'favorites',
+        playlistName: '收藏',
+      }
+    );
+
+    await service.togglePlayback({
+      elementId: 'asset:1',
+      audioUrl: 'https://example.com/audio-1.mp3',
+      title: 'Track One',
+    });
+
+    expect(service.getState()).toMatchObject({
+      queueSource: 'playlist',
+      activePlaylistId: 'favorites',
+      activePlaylistName: '收藏',
+      activeQueueIndex: 0,
     });
   });
 

@@ -79,6 +79,7 @@ import { Board as WorkspaceBoard } from './types/workspace.types';
 import { toolTestHelper } from './utils/tool-test-helper';
 import { ViewNavigation } from './components/view-navigation';
 import { AssetProvider } from './contexts/AssetContext';
+import { AudioPlaylistProvider } from './contexts/AudioPlaylistContext';
 import { initializeAssetIntegration } from './services/asset-integration-service';
 import { ToolbarConfigProvider } from './hooks/use-toolbar-config';
 import { AIInputBar } from './components/ai-input-bar';
@@ -855,64 +856,66 @@ export const Drawnix: React.FC<DrawnixProps> = ({
     <I18nProvider>
       <RecentColorsProvider>
         <AssetProvider>
-          <ToolbarConfigProvider>
-            <CacheQuotaProvider onOpenMediaLibrary={handleOpenMediaLibrary}>
-              <ModelHealthProvider>
-                <GitHubSyncProvider>
-                  <ChatDrawerProvider>
-                    <WorkflowProvider>
-                      <DrawnixContext.Provider value={contextValue}>
-                      <DrawnixContent
-                      value={value}
-                      viewport={viewport}
-                      theme={theme}
-                      options={options}
-                      plugins={plugins}
-                      containerRef={containerRef}
-                      appState={appState}
-                      board={board}
-                      setBoard={setBoard}
-                      projectDrawerOpen={projectDrawerOpen}
-                      toolboxDrawerOpen={toolboxDrawerOpen}
-                      taskPanelExpanded={taskPanelExpanded}
-                      mediaLibraryOpen={mediaLibraryOpen}
-                      backupRestoreOpen={backupRestoreOpen}
-                      onChange={onChange}
-                      onSelectionChange={handleSelectionChange}
-                      onViewportChange={onViewportChange}
-                      onThemeChange={onThemeChange}
-                      onValueChange={onValueChange}
-                      afterInit={afterInit}
-                      onBoardSwitch={onBoardSwitch}
-                      onTabSyncNeeded={onTabSyncNeeded}
-                      handleProjectDrawerToggle={handleProjectDrawerToggle}
-                      handleToolboxDrawerToggle={handleToolboxDrawerToggle}
-                      handleKnowledgeBaseToggle={handleKnowledgeBaseToggle}
-                      handleTaskPanelToggle={handleTaskPanelToggle}
-                      setProjectDrawerOpen={setProjectDrawerOpen}
-                      setToolboxDrawerOpen={setToolboxDrawerOpen}
-                      setMediaLibraryOpen={setMediaLibraryOpen}
-                      setBackupRestoreOpen={setBackupRestoreOpen}
-                      cloudSyncOpen={cloudSyncOpen}
-                      setCloudSyncOpen={setCloudSyncOpen}
-                      handleBeforeSwitch={handleBeforeSwitch}
-                      isDataReady={isDataReady}
-                      onCreateProjectForMemory={handleCreateProjectForMemory}
-                      currentBoardId={currentBoardId}
-                    />
-                    <Suspense fallback={null}>
-                      <MediaLibraryModal
-                        isOpen={mediaLibraryOpen}
-                        onClose={() => setMediaLibraryOpen(false)}
+          <AudioPlaylistProvider>
+            <ToolbarConfigProvider>
+              <CacheQuotaProvider onOpenMediaLibrary={handleOpenMediaLibrary}>
+                <ModelHealthProvider>
+                  <GitHubSyncProvider>
+                    <ChatDrawerProvider>
+                      <WorkflowProvider>
+                        <DrawnixContext.Provider value={contextValue}>
+                        <DrawnixContent
+                        value={value}
+                        viewport={viewport}
+                        theme={theme}
+                        options={options}
+                        plugins={plugins}
+                        containerRef={containerRef}
+                        appState={appState}
+                        board={board}
+                        setBoard={setBoard}
+                        projectDrawerOpen={projectDrawerOpen}
+                        toolboxDrawerOpen={toolboxDrawerOpen}
+                        taskPanelExpanded={taskPanelExpanded}
+                        mediaLibraryOpen={mediaLibraryOpen}
+                        backupRestoreOpen={backupRestoreOpen}
+                        onChange={onChange}
+                        onSelectionChange={handleSelectionChange}
+                        onViewportChange={onViewportChange}
+                        onThemeChange={onThemeChange}
+                        onValueChange={onValueChange}
+                        afterInit={afterInit}
+                        onBoardSwitch={onBoardSwitch}
+                        onTabSyncNeeded={onTabSyncNeeded}
+                        handleProjectDrawerToggle={handleProjectDrawerToggle}
+                        handleToolboxDrawerToggle={handleToolboxDrawerToggle}
+                        handleKnowledgeBaseToggle={handleKnowledgeBaseToggle}
+                        handleTaskPanelToggle={handleTaskPanelToggle}
+                        setProjectDrawerOpen={setProjectDrawerOpen}
+                        setToolboxDrawerOpen={setToolboxDrawerOpen}
+                        setMediaLibraryOpen={setMediaLibraryOpen}
+                        setBackupRestoreOpen={setBackupRestoreOpen}
+                        cloudSyncOpen={cloudSyncOpen}
+                        setCloudSyncOpen={setCloudSyncOpen}
+                        handleBeforeSwitch={handleBeforeSwitch}
+                        isDataReady={isDataReady}
+                        onCreateProjectForMemory={handleCreateProjectForMemory}
+                        currentBoardId={currentBoardId}
                       />
-                    </Suspense>
-                      </DrawnixContext.Provider>
-                    </WorkflowProvider>
-                  </ChatDrawerProvider>
-                </GitHubSyncProvider>
-              </ModelHealthProvider>
-            </CacheQuotaProvider>
-          </ToolbarConfigProvider>
+                      <Suspense fallback={null}>
+                        <MediaLibraryModal
+                          isOpen={mediaLibraryOpen}
+                          onClose={() => setMediaLibraryOpen(false)}
+                        />
+                      </Suspense>
+                        </DrawnixContext.Provider>
+                      </WorkflowProvider>
+                    </ChatDrawerProvider>
+                  </GitHubSyncProvider>
+                </ModelHealthProvider>
+              </CacheQuotaProvider>
+            </ToolbarConfigProvider>
+          </AudioPlaylistProvider>
         </AssetProvider>
       </RecentColorsProvider>
     </I18nProvider>

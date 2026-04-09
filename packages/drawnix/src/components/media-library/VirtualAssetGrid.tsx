@@ -73,6 +73,9 @@ interface VirtualAssetGridProps {
   onSelectAsset: (assetId: string, event?: React.MouseEvent) => void;
   onDoubleClick?: (asset: Asset) => void;
   onPreview?: (asset: Asset) => void;
+  onContextMenu?: (asset: Asset, event: React.MouseEvent) => void;
+  isFavorite?: (assetId: string) => boolean;
+  onToggleFavorite?: (asset: Asset, event: React.MouseEvent) => void;
   syncedUrls?: Set<string>; // 已同步到 Gist 的 URL 集合
 }
 
@@ -86,6 +89,9 @@ export function VirtualAssetGrid({
   onSelectAsset,
   onDoubleClick,
   onPreview,
+  onContextMenu,
+  isFavorite,
+  onToggleFavorite,
   syncedUrls,
 }: VirtualAssetGridProps) {
   const parentRef = useRef<HTMLDivElement>(null);
@@ -196,13 +202,16 @@ export function VirtualAssetGrid({
             onSelect={onSelectAsset}
             onDoubleClick={onDoubleClick}
             onPreview={onPreview}
+            onContextMenu={onContextMenu}
             isInSelectionMode={isSelectionMode}
             isSynced={isSynced}
+            isFavorite={isFavorite?.(asset.id)}
+            onToggleFavorite={onToggleFavorite}
           />
         </div>
       );
     });
-  }, [assets, columns, viewMode, selectedAssetId, selectedAssetIds, isSelectionMode, onSelectAsset, onDoubleClick, onPreview, itemSize.height, syncedUrls]);
+  }, [assets, columns, viewMode, selectedAssetId, selectedAssetIds, isSelectionMode, onSelectAsset, onDoubleClick, onPreview, onContextMenu, isFavorite, onToggleFavorite, itemSize.height, syncedUrls]);
 
   const virtualItems = rowVirtualizer.getVirtualItems();
 

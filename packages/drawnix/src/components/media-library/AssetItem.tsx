@@ -5,7 +5,7 @@
  */
 
 import { memo, useCallback, useState } from 'react';
-import { Image as ImageIcon, Video as VideoIcon, Music, Plus, Cloud } from 'lucide-react';
+import { Image as ImageIcon, Video as VideoIcon, Music, Plus, Cloud, Heart } from 'lucide-react';
 import { Checkbox, Tooltip } from 'tdesign-react';
 import { formatDate, formatFileSize } from '../../utils/asset-utils';
 import { useAssetSize } from '../../hooks/useAssetSize';
@@ -21,12 +21,15 @@ export interface AssetItemProps {
   onSelect: (assetId: string, event?: React.MouseEvent) => void;
   onDoubleClick?: (asset: Asset) => void;
   onPreview?: (asset: Asset) => void;
+  onContextMenu?: (asset: Asset, event: React.MouseEvent) => void;
   isInSelectionMode?: boolean;
   isSynced?: boolean; // 是否已同步到 Gist
+  isFavorite?: boolean;
+  onToggleFavorite?: (asset: Asset, event: React.MouseEvent) => void;
 }
 
 export const AssetItem = memo<AssetItemProps>(
-  ({ asset, viewMode, isSelected, onSelect, onDoubleClick, onPreview, isInSelectionMode, isSynced }) => {
+  ({ asset, viewMode, isSelected, onSelect, onDoubleClick, onPreview, onContextMenu, isInSelectionMode, isSynced, isFavorite, onToggleFavorite }) => {
     // 获取实际文件大小（支持从缓存获取）
     const displaySize = useAssetSize(asset.id, asset.url, asset.size);
     const [isHovered, setIsHovered] = useState(false);
@@ -74,6 +77,16 @@ export const AssetItem = memo<AssetItemProps>(
       setIsHovered(false);
     }, []);
 
+    const handleContextMenu = useCallback((event: React.MouseEvent) => {
+      onContextMenu?.(asset, event);
+    }, [asset, onContextMenu]);
+
+    const handleFavoriteClick = useCallback((event: React.MouseEvent) => {
+      event.stopPropagation();
+      event.preventDefault();
+      onToggleFavorite?.(asset, event);
+    }, [asset, onToggleFavorite]);
+
     const itemClassName = [
       'asset-item',
       `asset-item--${viewMode}`,
@@ -91,6 +104,7 @@ export const AssetItem = memo<AssetItemProps>(
         onDoubleClick={handleDoubleClick}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
+        onContextMenu={handleContextMenu}
         role="button"
         tabIndex={0}
         data-track={`asset_item_click_${viewMode}`}
@@ -156,6 +170,17 @@ export const AssetItem = memo<AssetItemProps>(
             </div>
           )}
 
+          {asset.type === 'AUDIO' && !isInSelectionMode && (
+            <button
+              type="button"
+              className={`asset-item__favorite-btn ${isFavorite ? 'asset-item__favorite-btn--active' : ''}`}
+              onClick={handleFavoriteClick}
+              aria-label={isFavorite ? '取消收藏' : '加入收藏'}
+            >
+              <Heart size={14} fill={isFavorite ? 'currentColor' : 'none'} />
+            </button>
+          )}
+
           {/* 网格模式：选择复选框 */}
           {!isListMode && isInSelectionMode && (
             <div className="asset-item__checkbox asset-item__checkbox--overlay" onClick={handleCheckboxClick}>
@@ -210,6 +235,17 @@ export const AssetItem = memo<AssetItemProps>(
           </div>
         )}
 
+        {isListMode && asset.type === 'AUDIO' && !isInSelectionMode && (
+          <button
+            type="button"
+            className={`asset-item__favorite-btn asset-item__favorite-btn--list ${isFavorite ? 'asset-item__favorite-btn--active' : ''}`}
+            onClick={handleFavoriteClick}
+            aria-label={isFavorite ? '取消收藏' : '加入收藏'}
+          >
+            <Heart size={14} fill={isFavorite ? 'currentColor' : 'none'} />
+          </button>
+        )}
+
         {/* 列表模式：AI 标识 */}
         {isListMode && asset.source === 'AI_GENERATED' && (
           <div className="asset-item__ai-badge asset-item__ai-badge--list">AI</div>
@@ -248,7 +284,8 @@ export const AssetItem = memo<AssetItemProps>(
       prevProps.isSelected === nextProps.isSelected &&
       prevProps.isInSelectionMode === nextProps.isInSelectionMode &&
       prevProps.onDoubleClick === nextProps.onDoubleClick &&
-      prevProps.isSynced === nextProps.isSynced
+      prevProps.isSynced === nextProps.isSynced &&
+      prevProps.isFavorite === nextProps.isFavorite
     );
   },
 );

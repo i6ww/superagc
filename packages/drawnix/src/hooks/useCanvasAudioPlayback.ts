@@ -19,6 +19,15 @@ export function useCanvasAudioPlaybackControls() {
   return useMemo(() => ({
     setQueue: (queue: CanvasAudioPlaybackSource[]) =>
       canvasAudioPlaybackService.setQueue(queue),
+    setPlaylistQueue: (
+      queue: CanvasAudioPlaybackSource[],
+      playlist: { playlistId: string; playlistName: string }
+    ) =>
+      canvasAudioPlaybackService.setQueue(queue, {
+        queueSource: 'playlist',
+        playlistId: playlist.playlistId,
+        playlistName: playlist.playlistName,
+      }),
     togglePlayback: (source: CanvasAudioPlaybackSource) =>
       canvasAudioPlaybackService.togglePlayback(source),
     pausePlayback: () => canvasAudioPlaybackService.pausePlayback(),
