@@ -237,6 +237,7 @@ aitu/
 
 1. **API 错误字段类型安全**：`data.error` 可能是字符串或对象，必须用 `typeof` 区分后再传给 `new Error()`
 2. **数值范围转换**：回调链传递进度值时，0-1 和 0-100 范围容易混淆，每层输入/输出值域必须注释标注
+3. **AI 生成文本统一 Card 插入**：所有 AI 生成的文本内容（CHAT 结果、歌词等）插入画布时，必须通过 `InsertionItem.label` 传递标题（prompt 前 20 字符或领域标题），`insertTextToCanvas` 收到 title 后直接创建 Card（Markdown 渲染），不依赖 Markdown 特征检测；新增文本插入入口时需同步传 label
 
 ### 缓存规则
 
