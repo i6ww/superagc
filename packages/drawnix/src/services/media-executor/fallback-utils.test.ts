@@ -3,6 +3,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const cacheMediaFromBlob = vi.fn();
 const cachedUrls = new Set<string>();
 const isCached = vi.fn(async (url: string) => cachedUrls.has(url));
+const calculateBlobChecksum = vi.fn(async () => 'a'.repeat(64));
+
+vi.mock('@aitu/utils', async () => {
+  const actual = await vi.importActual<typeof import('@aitu/utils')>('@aitu/utils');
+  return {
+    ...actual,
+    calculateBlobChecksum,
+  };
+});
 
 vi.mock('../unified-cache-service', () => ({
   unifiedCacheService: {
@@ -15,6 +24,7 @@ describe('cacheRemoteUrl', () => {
   beforeEach(() => {
     cacheMediaFromBlob.mockReset();
     isCached.mockClear();
+    calculateBlobChecksum.mockClear();
     cachedUrls.clear();
     cacheMediaFromBlob.mockImplementation(async (url: string) => {
       cachedUrls.add(url);
@@ -76,6 +86,54 @@ describe('cacheRemoteUrl', () => {
 
     expect(first).toBe(second);
     expect(cacheMediaFromBlob).toHaveBeenCalledTimes(1);
+
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps remote https image urls unchanged without rewriting them to local cache paths', async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { cacheRemoteUrl } = await import('./fallback-utils');
+    const remoteUrl = 'https://cdn.example.com/generated/task-123.png?sig=abc';
+
+    const result = await cacheRemoteUrl(remoteUrl, 'task-http', 'image', 'png');
+
+    expect(result).toBe(remoteUrl);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(cacheMediaFromBlob).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps remote https audio urls unchanged as well', async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { cacheRemoteUrl } = await import('./fallback-utils');
+    const remoteUrl = 'https://cdn.example.com/audio/task-123.mp3';
+
+    const result = await cacheRemoteUrl(remoteUrl, 'task-audio', 'audio', 'mp3');
+
+    expect(result).toBe(remoteUrl);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(cacheMediaFromBlob).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps remote http urls unchanged as well', async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { cacheRemoteUrl } = await import('./fallback-utils');
+    const remoteUrl = 'http://cdn.example.com/video/task-123.mp4';
+
+    const result = await cacheRemoteUrl(remoteUrl, 'task-video', 'video', 'mp4');
+
+    expect(result).toBe(remoteUrl);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(cacheMediaFromBlob).not.toHaveBeenCalled();
 
     vi.unstubAllGlobals();
   });

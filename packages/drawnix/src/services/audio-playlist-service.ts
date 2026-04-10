@@ -42,7 +42,9 @@ class AudioPlaylistService {
 
   private async ensureFavoritesPlaylist(): Promise<void> {
     this.ensureInitialized();
-    const existing = await this.playlistStore!.getItem<AudioPlaylist>(AUDIO_PLAYLIST_FAVORITES_ID);
+    const existing = await this.playlistStore!.getItem<AudioPlaylist>(
+      AUDIO_PLAYLIST_FAVORITES_ID
+    );
     if (existing) {
       return;
     }
@@ -76,13 +78,20 @@ class AudioPlaylistService {
 
   async getPlaylistItems(playlistId: string): Promise<AudioPlaylistItem[]> {
     this.ensureInitialized();
-    return (await this.playlistItemsStore!.getItem<AudioPlaylistItem[]>(playlistId)) || [];
+    return (
+      (await this.playlistItemsStore!.getItem<AudioPlaylistItem[]>(
+        playlistId
+      )) || []
+    );
   }
 
   async listPlaylistItems(): Promise<Record<string, AudioPlaylistItem[]>> {
     const playlists = await this.listPlaylists();
     const pairs = await Promise.all(
-      playlists.map(async (playlist) => [playlist.id, await this.getPlaylistItems(playlist.id)] as const)
+      playlists.map(
+        async (playlist) =>
+          [playlist.id, await this.getPlaylistItems(playlist.id)] as const
+      )
     );
     return Object.fromEntries(pairs);
   }
@@ -111,7 +120,9 @@ class AudioPlaylistService {
 
   async renamePlaylist(playlistId: string, name: string): Promise<void> {
     this.ensureInitialized();
-    const playlist = await this.playlistStore!.getItem<AudioPlaylist>(playlistId);
+    const playlist = await this.playlistStore!.getItem<AudioPlaylist>(
+      playlistId
+    );
     if (!playlist) {
       throw new Error('播放列表不存在');
     }
@@ -123,7 +134,11 @@ class AudioPlaylistService {
       throw new Error('播放列表名称不能为空');
     }
     const existing = await this.listPlaylists();
-    if (existing.some((item) => item.id !== playlistId && item.name === trimmedName)) {
+    if (
+      existing.some(
+        (item) => item.id !== playlistId && item.name === trimmedName
+      )
+    ) {
       throw new Error('播放列表名称已存在');
     }
     await this.playlistStore!.setItem(playlistId, {
@@ -135,7 +150,9 @@ class AudioPlaylistService {
 
   async deletePlaylist(playlistId: string): Promise<void> {
     this.ensureInitialized();
-    const playlist = await this.playlistStore!.getItem<AudioPlaylist>(playlistId);
+    const playlist = await this.playlistStore!.getItem<AudioPlaylist>(
+      playlistId
+    );
     if (!playlist) {
       return;
     }
@@ -148,7 +165,9 @@ class AudioPlaylistService {
 
   async addAssetToPlaylist(assetId: string, playlistId: string): Promise<void> {
     this.ensureInitialized();
-    const playlist = await this.playlistStore!.getItem<AudioPlaylist>(playlistId);
+    const playlist = await this.playlistStore!.getItem<AudioPlaylist>(
+      playlistId
+    );
     if (!playlist) {
       throw new Error('播放列表不存在');
     }
@@ -171,9 +190,14 @@ class AudioPlaylistService {
     });
   }
 
-  async removeAssetFromPlaylist(assetId: string, playlistId: string): Promise<void> {
+  async removeAssetFromPlaylist(
+    assetId: string,
+    playlistId: string
+  ): Promise<void> {
     this.ensureInitialized();
-    const playlist = await this.playlistStore!.getItem<AudioPlaylist>(playlistId);
+    const playlist = await this.playlistStore!.getItem<AudioPlaylist>(
+      playlistId
+    );
     if (!playlist) {
       return;
     }
@@ -188,14 +212,21 @@ class AudioPlaylistService {
 
   async removeAssetFromAllPlaylists(assetId: string): Promise<void> {
     const playlists = await this.listPlaylists();
-    await Promise.all(playlists.map((playlist) => this.removeAssetFromPlaylist(assetId, playlist.id)));
+    await Promise.all(
+      playlists.map((playlist) =>
+        this.removeAssetFromPlaylist(assetId, playlist.id)
+      )
+    );
   }
 
   async toggleFavorite(assetId: string): Promise<boolean> {
     const items = await this.getPlaylistItems(AUDIO_PLAYLIST_FAVORITES_ID);
     const exists = items.some((item) => item.assetId === assetId);
     if (exists) {
-      await this.removeAssetFromPlaylist(assetId, AUDIO_PLAYLIST_FAVORITES_ID);
+      await this.removeAssetFromPlaylist(
+        assetId,
+        AUDIO_PLAYLIST_FAVORITES_ID
+      );
       return false;
     }
     await this.addAssetToPlaylist(assetId, AUDIO_PLAYLIST_FAVORITES_ID);

@@ -262,9 +262,9 @@ export async function generateAsyncImage(
 }
 
 /**
- * 将远程 URL 下载并缓存到本地 Cache Storage，返回虚拟路径。
- * 用于签名 URL（如 TOS）在浏览器中因 Referer 校验导致 403 的场景，
- * 也用于把模型直接返回的 base64/data URL 图片落到本地缓存，避免把超长 data URL 挂在任务结果里。
+ * 收敛任务结果里的媒体 URL。
+ * - data URL / 原始 base64：落到本地 Cache Storage，并返回 /__aitu_cache__/ 虚拟路径
+ * - http/https：保留原始远程 URL，交给既有 SW 请求拦截链路处理，避免把远程素材误判成本地素材
  */
 export async function cacheRemoteUrl(
   remoteUrl: string,
@@ -281,6 +281,11 @@ export async function cacheRemoteUrl(
     normalizedUrl.startsWith('/__aitu_cache__/') ||
     normalizedUrl.startsWith('/asset-library/')
   ) {
+    return normalizedUrl;
+  }
+
+  // 远程 URL 保留原始地址，避免把 AI 生成素材改写成本地缓存路径。
+  if (normalizedUrl.startsWith('http://') || normalizedUrl.startsWith('https://')) {
     return normalizedUrl;
   }
 
@@ -310,28 +315,7 @@ export async function cacheRemoteUrl(
       return contentAddressedUrl;
     }
 
-    // 先尝试 cors 模式
-    let response: Response;
-    try {
-      response = await fetch(normalizedUrl, { referrerPolicy: 'no-referrer' });
-    } catch {
-      // CORS 失败，降级到 no-cors（opaque response，无法读取状态码但 blob 可用）
-      response = await fetch(normalizedUrl, { mode: 'no-cors', referrerPolicy: 'no-referrer' });
-    }
-
-    // cors 模式下检查状态码；no-cors 模式下 response.type === 'opaque'，status 为 0
-    if (response.type !== 'opaque' && !response.ok) {
-      console.warn(`[cacheRemoteUrl] Failed to fetch ${normalizedUrl}: ${response.status}, using original URL`);
-      return normalizedUrl;
-    }
-
-    const blob = await response.blob();
-    if (blob.size === 0) {
-      console.warn('[cacheRemoteUrl] Empty blob, using original URL');
-      return normalizedUrl;
-    }
-    await unifiedCacheService.cacheMediaFromBlob(localUrl, blob, mediaType, { taskId });
-    return localUrl;
+    return normalizedUrl;
   } catch (error) {
     console.warn('[cacheRemoteUrl] Cache failed, using original URL:', error);
     return normalizedUrl;
