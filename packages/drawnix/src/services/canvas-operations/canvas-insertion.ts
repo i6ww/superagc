@@ -15,6 +15,8 @@ import {
   type AudioCardMetadata,
 } from '../../data/audio';
 import { scrollToPointIfNeeded } from '../../utils/selection-utils';
+import { parseMarkdownToCards } from '../../utils/markdown-to-cards';
+import { insertCardsToCanvas } from '../../utils/insert-cards';
 import type { MCPResult } from '../../mcp/types';
 
 /**
@@ -219,12 +221,37 @@ function groupItems(items: InsertionItem[]): InsertionItem[][] {
 
 /**
  * 插入单个文本项到画布
+ * - 有 title 时 → 直接以 Card 方式插入
+ * - 包含 Markdown 特征 → 解析为 Card 插入
+ * - 普通文本 → 直接插入文本元素
  */
 async function insertTextToCanvas(
   board: PlaitBoard,
   text: string,
-  point: Point
+  point: Point,
+  title?: string
 ): Promise<{ width: number; height: number }> {
+  // 有 title 时，直接以 Card 方式插入（跳过 Markdown 检测）
+  if (title) {
+    const cardWidth = Math.round(window.innerWidth * 0.5);
+    insertCardsToCanvas(board, [{ title, body: text }], point, cardWidth);
+    return { width: cardWidth, height: 120 };
+  }
+
+  // 尝试解析为 Markdown Card 块
+  const cardBlocks = parseMarkdownToCards(text);
+  if (cardBlocks && cardBlocks.length > 0) {
+    const cardWidth = Math.round(window.innerWidth * 0.5);
+    insertCardsToCanvas(board, cardBlocks, point, cardWidth);
+    const cols = Math.min(cardBlocks.length, 3);
+    const rows = Math.ceil(cardBlocks.length / 3);
+    return {
+      width: cols * (cardWidth + 20) - 20,
+      height: rows * (120 + 20) - 20,
+    };
+  }
+
+  // 普通文本 → 直接插入
   DrawTransforms.insertText(board, point, text);
   return estimateTextSize(text);
 }
@@ -422,7 +449,7 @@ export async function executeCanvasInsertion(params: CanvasInsertionParams): Pro
         const point: Point = [leftX, currentY];
 
         if (item.type === 'text') {
-          await insertTextToCanvas(board, item.content, point);
+          await insertTextToCanvas(board, item.content, point, item.label);
           currentY += itemSize.height + verticalGap;
         } else if (item.type === 'image') {
           const imgSize = await insertImageToCanvas(board, item.content, point, item.dimensions);
@@ -453,7 +480,7 @@ export async function executeCanvasInsertion(params: CanvasInsertionParams): Pro
           const point: Point = [currentX, currentY];
 
           if (item.type === 'text') {
-            const size = await insertTextToCanvas(board, item.content, point);
+            const size = await insertTextToCanvas(board, item.content, point, item.label);
             maxHeight = Math.max(maxHeight, size.height);
             currentX += size.width + horizontalGap;
           } else if (item.type === 'image') {

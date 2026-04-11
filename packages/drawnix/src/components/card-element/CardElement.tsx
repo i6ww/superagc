@@ -4,7 +4,7 @@
  * 复用 MarkdownEditor 进行 Markdown 内容展示（只读模式）
  * Card 在画布上仅作只读展示，编辑通过知识库进行
  */
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { MarkdownEditor } from '../MarkdownEditor';
 import {
   getTitleColor,
@@ -12,6 +12,52 @@ import {
   getCardDisplayTitle,
 } from '../../constants/card-colors';
 import type { PlaitCard } from '../../types/card.types';
+
+/**
+ * 将纯文本中的单个换行转为 Markdown 硬换行（行尾双空格），
+ * 保留已有的 Markdown 结构（代码块、空行、标题、列表等）不做处理。
+ */
+function preserveLineBreaks(text: string): string {
+  const lines = text.split('\n');
+  const result: string[] = [];
+  let inCodeBlock = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    // 跟踪代码块状态
+    if (line.trimStart().startsWith('```')) {
+      inCodeBlock = !inCodeBlock;
+      result.push(line);
+      continue;
+    }
+    // 代码块内不处理
+    if (inCodeBlock) {
+      result.push(line);
+      continue;
+    }
+    // 空行、标题、列表、引用、已有硬换行 → 不处理
+    const trimmed = line.trimEnd();
+    if (
+      trimmed === '' ||
+      /^#{1,6}\s/.test(trimmed) ||
+      /^[-*+]\s/.test(trimmed) ||
+      /^\d+\.\s/.test(trimmed) ||
+      /^\s*>/.test(trimmed) ||
+      trimmed.endsWith('  ')
+    ) {
+      result.push(line);
+      continue;
+    }
+    // 下一行非空且非 Markdown 块级元素 → 加双空格硬换行
+    const next = lines[i + 1];
+    if (next !== undefined && next.trim() !== '') {
+      result.push(trimmed + '  ');
+    } else {
+      result.push(line);
+    }
+  }
+  return result.join('\n');
+}
 
 const cardBodyElements = new Map<string, HTMLElement>();
 
@@ -47,6 +93,7 @@ export const CardElement: React.FC<CardElementProps> = ({ element }) => {
   const displayTitle = getCardDisplayTitle(element.title);
   const titleColor = getTitleColor(element.fillColor);
   const bodyColor = getBodyColor(element.fillColor);
+  const displayBody = useMemo(() => preserveLineBreaks(element.body), [element.body]);
 
   const handleWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
     const target = e.currentTarget;
@@ -109,7 +156,7 @@ export const CardElement: React.FC<CardElementProps> = ({ element }) => {
         onWheel={handleWheel}
       >
         <MarkdownEditor
-          markdown={element.body}
+          markdown={displayBody}
           readOnly={true}
           showModeSwitch={false}
           className="card-markdown-viewer"
