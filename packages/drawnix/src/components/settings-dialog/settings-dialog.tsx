@@ -6,6 +6,7 @@ import { MessagePlugin, Tooltip, Switch } from 'tdesign-react';
 import { InfoCircleIcon } from 'tdesign-icons-react';
 import {
   AlertTriangle,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Copy,
@@ -496,6 +497,21 @@ export const SettingsDialog = ({
     useState<CompactPanelMode>('catalog');
   const [compactPresetMode, setCompactPresetMode] =
     useState<CompactPanelMode>('catalog');
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<ModelType>>(
+    new Set()
+  );
+
+  const toggleGroupCollapse = (type: ModelType) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) {
+        next.delete(type);
+      } else {
+        next.add(type);
+      }
+      return next;
+    });
+  };
 
   const selectedProfile =
     profilesDraft.find((profile) => profile.id === selectedProfileId) ||
@@ -530,8 +546,12 @@ export const SettingsDialog = ({
   const enabledProfiles = profilesDraft.filter((profile) => profile.enabled);
   const isCompactLayout =
     isMobileDevice ||
-    viewportWidth <= SETTINGS_DIALOG_COMPACT_BREAKPOINT ||
-    (dialogWidth > 0 && dialogWidth <= SETTINGS_DIALOG_COMPACT_BREAKPOINT);
+    viewportWidth <= SETTINGS_DIALOG_COMPACT_BREAKPOINT;
+
+  const isSinglePanel =
+    isCompactLayout &&
+    (dialogWidth > 0 ? dialogWidth < 600 : viewportWidth < 600);
+
   const canManageModels = !!selectedProfile && !!selectedProfile.apiKey.trim();
   const currentDraftSignature = createSettingsDraftSignature({
     profiles: profilesDraft,
@@ -1742,47 +1762,6 @@ export const SettingsDialog = ({
             </div>
 
             <div className="settings-dialog__field settings-dialog__field--column settings-dialog__field--full">
-              <div className="settings-dialog__label-with-tooltip settings-dialog__label-with-tooltip--left">
-                <label className="settings-dialog__label settings-dialog__label--stacked">
-                  API Key
-                </label>
-                <Tooltip
-                  content={
-                    <div>
-                      您可以从以下地址获取 API Key:
-                      <br />
-                      <a
-                        href="https://api.tu-zi.com/token"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ color: '#F39C12', textDecoration: 'none' }}
-                      >
-                        api.tu-zi.com/token
-                      </a>
-                    </div>
-                  }
-                  placement="top"
-                  theme="light"
-                  showArrow={false}
-                >
-                  <InfoCircleIcon className="settings-dialog__tooltip-icon" />
-                </Tooltip>
-              </div>
-              <input
-                type="password"
-                className="settings-dialog__input"
-                value={selectedProfile.apiKey}
-                onChange={(event) =>
-                  updateProfile(selectedProfile.id, (profile) => ({
-                    ...profile,
-                    apiKey: event.target.value,
-                  }))
-                }
-                autoComplete="off"
-              />
-            </div>
-
-            <div className="settings-dialog__field settings-dialog__field--column settings-dialog__field--full">
               <label className="settings-dialog__label settings-dialog__label--stacked">
                 API 地址
               </label>
@@ -1800,26 +1779,113 @@ export const SettingsDialog = ({
               />
             </div>
 
-            <div className="settings-dialog__field settings-dialog__field--column">
-              <label className="settings-dialog__label settings-dialog__label--stacked">
-                鉴权方式
-              </label>
-              <select
-                className="settings-dialog__select"
-                value={selectedProfile.authType}
-                onChange={(event) =>
-                  updateProfile(selectedProfile.id, (profile) => ({
-                    ...profile,
-                    authType: event.target.value as ProviderProfile['authType'],
-                  }))
-                }
+            <div className="settings-dialog__field settings-dialog__field--column settings-dialog__field--full">
+              <div className="settings-dialog__label-with-tooltip settings-dialog__label-with-tooltip--left">
+                <label className="settings-dialog__label settings-dialog__label--stacked">
+                  API Key
+                </label>
+                <Tooltip
+                  content={
+                    <div style={{ maxWidth: 300 }}>
+                      您可以从以下地址获取 API Key:
+                      <br />
+                      <a
+                        href="https://api.tu-zi.com/token"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          color: '#F39C12',
+                          textDecoration: 'none',
+                          display: 'inline-block',
+                          marginBottom: 8,
+                        }}
+                      >
+                        api.tu-zi.com/token
+                      </a>
+                      <div
+                        style={{
+                          position: 'relative',
+                          width: '100%',
+                          paddingTop: '56.25%',
+                          marginTop: 8,
+                          borderRadius: 4,
+                          overflow: 'hidden',
+                          backgroundColor: '#000',
+                        }}
+                      >
+                        <iframe
+                          src="//player.bilibili.com/player.html?isOutside=true&aid=116171584049629&bvid=BV1k4PqzPEKz&cid=36455319822&p=1"
+                          scrolling="no"
+                          border="0"
+                          frameBorder="no"
+                          frameSpacing="0"
+                          allowFullScreen={true}
+                          style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            width: '100%',
+                            height: '100%',
+                          }}
+                        ></iframe>
+                      </div>
+                    </div>
+                  }
+                  placement="top"
+                  theme="light"
+                  showArrow={false}
+                >
+                  <InfoCircleIcon className="settings-dialog__tooltip-icon" />
+                </Tooltip>
+              </div>
+              <div
+                style={{
+                  display: 'flex',
+                  gap: '8px',
+                  alignItems: 'center',
+                  width: '100%',
+                  flexDirection: isCompactLayout ? 'column' : 'row',
+                }}
               >
-                {AUTH_TYPE_OPTIONS.map((authType) => (
-                  <option key={authType} value={authType}>
-                    {AUTH_TYPE_META[authType].label}
-                  </option>
-                ))}
-              </select>
+                <input
+                  type="password"
+                  className="settings-dialog__input"
+                  style={{ flex: isCompactLayout ? 'none' : 1, width: '100%' }}
+                  value={selectedProfile.apiKey}
+                  onChange={(event) =>
+                    updateProfile(selectedProfile.id, (profile) => ({
+                      ...profile,
+                      apiKey: event.target.value,
+                    }))
+                  }
+                  autoComplete="off"
+                />
+                <button
+                  type="button"
+                  className="settings-dialog__button settings-dialog__button--fetch"
+                  style={{
+                    whiteSpace: 'nowrap',
+                    height: isCompactLayout ? '42px' : '32px',
+                    width: isCompactLayout ? '100%' : 'auto',
+                  }}
+                  onClick={handleFetchModels}
+                  disabled={
+                    !canManageModels || runtimeState.status === 'loading'
+                  }
+                >
+                  {runtimeState.status === 'loading' ? (
+                    <>
+                      <Loader2
+                        size={15}
+                        className="settings-dialog__button-spinner"
+                      />
+                      同步中
+                    </>
+                  ) : (
+                    '获取模型'
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1960,151 +2026,155 @@ export const SettingsDialog = ({
                 </button>
               ) : null}
             </label>
-            <button
-              type="button"
-              className="settings-dialog__button settings-dialog__button--fetch"
-              onClick={handleFetchModels}
-              disabled={!canManageModels || runtimeState.status === 'loading'}
-            >
-              {runtimeState.status === 'loading' ? (
-                <>
-                  <Loader2
-                    size={15}
-                    className="settings-dialog__button-spinner"
-                  />
-                  同步中
-                </>
-              ) : (
-                '获取模型'
-              )}
-            </button>
           </div>
         ) : null}
 
         {modelGroups.length > 0 ? (
           <div className="settings-dialog__model-type-groups">
-            {modelGroups.map(({ type, models }) => (
-              <div key={type} className="settings-dialog__model-type-group">
-                <div className="settings-dialog__model-type-header">
-                  <div className="settings-dialog__model-type-meta">
-                    <span className="settings-dialog__model-type-title">
-                      {MODEL_GROUP_LABELS[type]}
-                    </span>
-                    <span className="settings-dialog__model-type-count">
-                      {models.length}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    className="settings-dialog__model-group-test"
-                    onClick={() => {
-                      if (!selectedProfile) return;
-                      handleLaunchModelBenchmark({
-                        profileId: selectedProfile.id,
-                        modality: type,
-                        compareMode: 'cross-model',
-                      });
-                    }}
-                    disabled={!canLaunchBenchmark}
-                    title={
-                      canLaunchBenchmark
-                        ? '测试当前供应商这一组模型'
-                        : '请先保存供应商配置并确保 API Key 可用'
-                    }
-                  >
-                    测试本组
-                  </button>
-                </div>
-                <div className="settings-dialog__model-type-list">
-                  {models.map((model) => {
-                    const palette = getModelVendorPalette(model.vendor);
+            {modelGroups.map(({ type, models }) => {
+              const isCollapsed = collapsedGroups.has(type);
 
-                    return (
-                      <div
-                        key={model.id}
-                        className="settings-dialog__model-type-item"
-                        style={
-                          {
-                            '--model-brand-accent': palette.accent,
-                            '--model-brand-surface': palette.surface,
-                            '--model-brand-border': palette.border,
-                          } as CSSProperties
-                        }
-                      >
-                        <span className="settings-dialog__model-type-item-logo">
-                          <ModelVendorMark vendor={model.vendor} size={16} />
-                        </span>
-                        <div className="settings-dialog__model-type-item-copy">
-                          <span className="settings-dialog__model-type-item-id">
-                            {model.id}
-                          </span>
-                          <span className="settings-dialog__model-type-item-vendor">
-                            {getDiscoveryVendorLabel(model.vendor)}
-                          </span>
-                        </div>
-                        <div className="settings-dialog__model-type-item-btns">
-                          {(() => {
-                            const st =
-                              modelBenchmarkService.getLatestEntryStatus(
-                                selectedProfile!.id,
-                                model.id
-                              );
-                            if (st === 'completed')
-                              return (
-                                <span
-                                  className="settings-dialog__model-status settings-dialog__model-status--ok"
-                                  title="上次测试成功"
-                                />
-                              );
-                            if (st === 'failed')
-                              return (
-                                <span
-                                  className="settings-dialog__model-status settings-dialog__model-status--fail"
-                                  title="上次测试失败"
-                                />
-                              );
-                            return null;
-                          })()}
-                          <button
-                            type="button"
-                            className="settings-dialog__model-icon-btn settings-dialog__model-icon-btn--test"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              if (!selectedProfile) return;
-                              handleLaunchModelBenchmark({
-                                profileId: selectedProfile.id,
-                                modality: type,
-                                modelId: model.id,
-                                compareMode: 'cross-provider',
-                              });
-                            }}
-                            disabled={!canLaunchBenchmark}
-                            title={
-                              canLaunchBenchmark
-                                ? '测试'
-                                : '请先保存供应商配置并确保 API Key 可用'
+              return (
+                <div key={type} className="settings-dialog__model-type-group">
+                  <div
+                    className="settings-dialog__model-type-header"
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => toggleGroupCollapse(type)}
+                  >
+                    <div className="settings-dialog__model-type-meta">
+                      {isCollapsed ? (
+                        <ChevronRight
+                          size={16}
+                          className="settings-dialog__model-type-toggle"
+                        />
+                      ) : (
+                        <ChevronDown
+                          size={16}
+                          className="settings-dialog__model-type-toggle"
+                        />
+                      )}
+                      <span className="settings-dialog__model-type-title">
+                        {MODEL_GROUP_LABELS[type]}
+                      </span>
+                      <span className="settings-dialog__model-type-count">
+                        {models.length}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="settings-dialog__model-group-test"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (!selectedProfile) return;
+                        handleLaunchModelBenchmark({
+                          profileId: selectedProfile.id,
+                          modality: type,
+                          compareMode: 'cross-model',
+                        });
+                      }}
+                      disabled={!canLaunchBenchmark}
+                      title={
+                        canLaunchBenchmark
+                          ? '测试当前供应商这一组模型'
+                          : '请先保存供应商配置并确保 API Key 可用'
+                      }
+                    >
+                      测试本组
+                    </button>
+                  </div>
+                  {!isCollapsed && (
+                    <div className="settings-dialog__model-type-list">
+                      {models.map((model) => {
+                        const palette = getModelVendorPalette(model.vendor);
+
+                        return (
+                          <div
+                            key={model.id}
+                            className="settings-dialog__model-type-item"
+                            style={
+                              {
+                                '--model-brand-accent': palette.accent,
+                                '--model-brand-surface': palette.surface,
+                                '--model-brand-border': palette.border,
+                              } as CSSProperties
                             }
                           >
-                            <FlaskConical size={14} />
-                          </button>
-                          <button
-                            type="button"
-                            className="settings-dialog__model-icon-btn settings-dialog__model-icon-btn--delete"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              handleRemoveModel(model.id);
-                            }}
-                            title="移除此模型"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
+                            <span className="settings-dialog__model-type-item-logo">
+                              <ModelVendorMark vendor={model.vendor} size={16} />
+                            </span>
+                            <div className="settings-dialog__model-type-item-copy">
+                              <span className="settings-dialog__model-type-item-id">
+                                {model.id}
+                              </span>
+                              <span className="settings-dialog__model-type-item-vendor">
+                                {getDiscoveryVendorLabel(model.vendor)}
+                              </span>
+                            </div>
+                            <div className="settings-dialog__model-type-item-btns">
+                              {(() => {
+                                const st =
+                                  modelBenchmarkService.getLatestEntryStatus(
+                                    selectedProfile!.id,
+                                    model.id
+                                  );
+                                if (st === 'completed')
+                                  return (
+                                    <span
+                                      className="settings-dialog__model-status settings-dialog__model-status--ok"
+                                      title="上次测试成功"
+                                    />
+                                  );
+                                if (st === 'failed')
+                                  return (
+                                    <span
+                                      className="settings-dialog__model-status settings-dialog__model-status--fail"
+                                      title="上次测试失败"
+                                    />
+                                  );
+                                return null;
+                              })()}
+                              <button
+                                type="button"
+                                className="settings-dialog__model-icon-btn settings-dialog__model-icon-btn--test"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  if (!selectedProfile) return;
+                                  handleLaunchModelBenchmark({
+                                    profileId: selectedProfile.id,
+                                    modality: type,
+                                    modelId: model.id,
+                                    compareMode: 'cross-provider',
+                                  });
+                                }}
+                                disabled={!canLaunchBenchmark}
+                                title={
+                                  canLaunchBenchmark
+                                    ? '测试'
+                                    : '请先保存供应商配置并确保 API Key 可用'
+                                }
+                              >
+                                <FlaskConical size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                className="settings-dialog__model-icon-btn settings-dialog__model-icon-btn--delete"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleRemoveModel(model.id);
+                                }}
+                                title="移除此模型"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : shouldShowEmptySearch ? (
           <div className="settings-dialog__model-empty">
@@ -2447,34 +2517,38 @@ export const SettingsDialog = ({
     }
 
     if (activeView === 'presets') {
-      if (isCompactLayout) {
+      if (isSinglePanel) {
         return compactPresetMode === 'catalog'
           ? renderCompactCatalog('presets-catalog', renderPresetList())
           : renderPresetManagement(true);
       }
 
       return (
-        <div className="settings-dialog__workspace">
-          <aside className="settings-dialog__sidebar">
-            {renderPresetList()}
-          </aside>
-          {renderPresetManagement()}
+        <div
+          className={`settings-dialog__workspace ${
+            isCompactLayout ? 'settings-dialog__workspace--show-sidebar' : ''
+          }`}
+        >
+          <aside className="settings-dialog__sidebar">{renderPresetList()}</aside>
+          {renderPresetManagement(false)}
         </div>
       );
     }
 
-    if (isCompactLayout) {
+    if (isSinglePanel) {
       return compactProviderMode === 'catalog'
         ? renderCompactCatalog('providers-catalog', renderProviderList())
         : renderProviderForm(true);
     }
 
     return (
-      <div className="settings-dialog__workspace">
-        <aside className="settings-dialog__sidebar">
-          {renderProviderList()}
-        </aside>
-        {renderProviderForm()}
+      <div
+        className={`settings-dialog__workspace ${
+          isCompactLayout ? 'settings-dialog__workspace--show-sidebar' : ''
+        }`}
+      >
+        <aside className="settings-dialog__sidebar">{renderProviderList()}</aside>
+        {renderProviderForm(false)}
       </div>
     );
   };

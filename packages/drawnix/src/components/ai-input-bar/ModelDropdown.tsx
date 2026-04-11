@@ -53,6 +53,7 @@ import {
   TUZI_ORIGINAL_PROVIDER_PROFILE_ID,
   createModelRef,
   type ModelRef,
+  type ProviderProfile,
 } from '../../utils/settings-manager';
 
 const SETTINGS_PROVIDER_NAV_EVENT = 'aitu:settings:provider-nav';
@@ -144,10 +145,16 @@ export interface ModelDropdownProps {
   variant?: 'minimal' | 'form';
   /** 占位符 (仅用于 variant="form") */
   placeholder?: string;
+  /** 是否允许在没有命中选项时直接提交输入值 */
+  allowCustomValue?: boolean;
   /** 受控的打开状态 */
   isOpen?: boolean;
   /** 打开状态变化回调 */
   onOpenChange?: (open: boolean) => void;
+  /** 覆盖默认的供应商列表（用于设置页草稿态） */
+  providerProfilesOverride?: ProviderProfile[];
+  /** 是否显示供应商管理入口 */
+  showProviderAction?: boolean;
 }
 
 /**
@@ -165,8 +172,11 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
   disabled = false,
   variant = 'minimal',
   placeholder,
+  allowCustomValue = true,
   isOpen: controlledIsOpen,
   onOpenChange,
+  providerProfilesOverride,
+  showProviderAction = true,
 }) => {
   const { setAppState } = useDrawnix();
   const { value: isOpen, setValue: setIsOpen } = useControllableState({
@@ -188,9 +198,14 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const providerProfiles = useProviderProfiles();
+  const effectiveProviderProfiles =
+    providerProfilesOverride || providerProfiles;
   const providerProfileMap = useMemo(
-    () => new Map(providerProfiles.map((profile) => [profile.id, profile])),
-    [providerProfiles]
+    () =>
+      new Map(
+        effectiveProviderProfiles.map((profile) => [profile.id, profile])
+      ),
+    [effectiveProviderProfiles]
   );
   const modelOrderMap = useMemo(
     () =>
@@ -215,8 +230,8 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
 
   // 三级分组：供应商 → 厂商分类 → 模型
   const providerGroups = useMemo(
-    () => groupModelsByProvider(models, providerProfiles),
-    [models, providerProfiles]
+    () => groupModelsByProvider(models, effectiveProviderProfiles),
+    [models, effectiveProviderProfiles]
   );
   const providerNameMap = useMemo(
     () =>
@@ -430,7 +445,7 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
   );
 
   const handleOpenProviderSettings = useCallback(() => {
-    const availableProfiles = providerProfiles.filter(
+    const availableProfiles = effectiveProviderProfiles.filter(
       (profile) => profile.id !== LEGACY_DEFAULT_PROVIDER_PROFILE_ID
     );
     const lastProfile =
@@ -462,7 +477,7 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
     );
     setIsOpen(false);
     setAppState((prev) => ({ ...prev, openSettings: true }));
-  }, [providerProfiles, providerModelCountMap, setAppState, setIsOpen]);
+  }, [effectiveProviderProfiles, providerModelCountMap, setAppState, setIsOpen]);
 
   // 当过滤结果变化时，高亮选中模型或重置到第一项
   useEffect(() => {
@@ -638,7 +653,7 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
           handleSelect(targetModel);
           return true;
         }
-        if (variant === 'form' && searchQuery.trim()) {
+        if (variant === 'form' && allowCustomValue && searchQuery.trim()) {
           // 如果是表单变体且有输入，但没有匹配的模型，则使用输入的内容
           onSelect(searchQuery.trim());
           setIsOpen(false);
@@ -653,6 +668,7 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
       highlightedIndex,
       handleSelect,
       variant,
+      allowCustomValue,
       currentModel,
       onSelect,
       searchQuery,
@@ -890,34 +906,23 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
               searchQuery={searchQuery}
               compact
               tabsFooter={
-                <button
-                  type="button"
-                  className="model-dropdown__provider-action"
-                  onClick={handleOpenProviderSettings}
-                  aria-label={
-                    language === 'zh'
-                      ? '新增供应商或打开供应商设置'
-                      : 'Add provider or open provider settings'
-                  }
-                >
-                  <Plus size={16} />
-                </button>
+                showProviderAction ? (
+                  <button
+                    type="button"
+                    className="model-dropdown__provider-action"
+                    onClick={handleOpenProviderSettings}
+                    aria-label={
+                      language === 'zh'
+                        ? '新增供应商或打开供应商设置'
+                        : 'Add provider or open provider settings'
+                    }
+                  >
+                    <Plus size={16} />
+                  </button>
+                ) : null
               }
             >
               <div className="model-dropdown__list-pane">
-                {!isSearching && activeCategory ? (
-                  <div className="model-dropdown__section-header">
-                    <span className="model-dropdown__section-header-label">
-                      <ModelVendorMark
-                        vendor={activeCategory.vendor}
-                        size={14}
-                      />
-                      {activeCategory.label}
-                    </span>
-                    <span>{activeCategory.models.length}</span>
-                  </div>
-                ) : null}
-
                 <div
                   className="model-dropdown__list"
                   ref={listRef}
@@ -959,7 +964,7 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
                                 />
                               </span>
                               <span className="model-dropdown__item-code">
-                                #{model.shortCode}
+                                #{model.shortCode || model.id}
                               </span>
                               <span className="model-dropdown__item-label">
                                 {model.shortLabel || model.label}
