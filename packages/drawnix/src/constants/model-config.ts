@@ -504,6 +504,26 @@ export const IMAGE_MODEL_MORE_OPTIONS: ModelConfig[] = [
     imageDefaults: IMAGE_2K_DEFAULT_PARAMS,
     tags: ['seedream'],
   },
+  {
+    id: 'gpt-image-1',
+    label: 'GPT Image 1',
+    shortCode: 'gpt1',
+    description: 'OpenAI GPT Image 1 图片生成',
+    type: 'image',
+    vendor: ModelVendor.GPT,
+    supportsTools: true,
+    imageDefaults: IMAGE_DEFAULT_PARAMS,
+  },
+  {
+    id: 'kling_image',
+    label: 'Kling Image',
+    shortCode: 'kimg',
+    description: 'Kling 文生图模型',
+    type: 'image',
+    vendor: ModelVendor.KLING,
+    supportsTools: false,
+    imageDefaults: IMAGE_DEFAULT_PARAMS,
+  },
 ];
 
 /** 异步图片模型 ID 列表 */
@@ -765,6 +785,60 @@ export const VIDEO_MODELS: ModelConfig[] = [
     vendor: ModelVendor.DOUBAO,
     videoDefaults: SEEDANCE_DEFAULT_PARAMS,
   },
+  {
+    id: 'veo3-fast',
+    label: 'Veo 3 Fast',
+    shortCode: 'v3f',
+    description: '8秒快速视频生成',
+    type: 'video',
+    vendor: ModelVendor.VEO,
+    supportsTools: true,
+    videoDefaults: VEO_DEFAULT_PARAMS,
+  },
+  {
+    id: 'veo3-pro-frames',
+    label: 'Veo 3 Pro Frames',
+    shortCode: 'v3pf',
+    description: '8秒高质量视频，支持帧控制',
+    type: 'video',
+    vendor: ModelVendor.VEO,
+    supportsTools: true,
+    videoDefaults: VEO_DEFAULT_PARAMS,
+  },
+  {
+    id: 'kling-video-o1',
+    label: 'Kling Video O1',
+    shortCode: 'kvo1',
+    description: 'Kling Video O1 智能视频生成',
+    type: 'video',
+    vendor: ModelVendor.KLING,
+    supportsTools: true,
+    videoDefaults: KLING_DEFAULT_PARAMS,
+  },
+  {
+    id: 'kling-video-o1-edit',
+    label: 'Kling Video O1 Edit',
+    shortCode: 'kvo1e',
+    description: 'Kling Video O1 视频编辑',
+    type: 'video',
+    vendor: ModelVendor.KLING,
+    supportsTools: true,
+    videoDefaults: KLING_DEFAULT_PARAMS,
+  },
+  {
+    id: 'sora-2-15s',
+    label: 'Sora 2 · 15s',
+    shortCode: 's215',
+    description: '15秒固定时长，模型名已包含时长',
+    type: 'video',
+    vendor: ModelVendor.SORA,
+    supportsTools: true,
+    videoDefaults: {
+      duration: '15',
+      size: '1280x720',
+      aspectRatio: '16:9',
+    },
+  },
 ];
 
 // ============================================
@@ -821,6 +895,54 @@ export const TEXT_MODELS: ModelConfig[] = [
     type: 'text',
     vendor: ModelVendor.GOOGLE,
     isVip: true,
+    supportsTools: true,
+  },
+  {
+    id: 'gpt-5.4',
+    label: 'GPT-5.4',
+    shortCode: 'g54',
+    description: 'OpenAI 最新旗舰模型',
+    type: 'text',
+    vendor: ModelVendor.GPT,
+    isVip: true,
+    supportsTools: true,
+  },
+  {
+    id: 'grok-4',
+    label: 'Grok 4',
+    shortCode: 'gk4',
+    description: 'xAI 最新旗舰模型',
+    type: 'text',
+    vendor: ModelVendor.GROK,
+    isVip: true,
+    supportsTools: true,
+  },
+  {
+    id: 'gemini-3.1-pro-preview',
+    label: 'Gemini 3.1 Pro Preview',
+    shortCode: 'g31pp',
+    description: 'Google Gemini 3.1 Pro 最新预览版',
+    type: 'text',
+    vendor: ModelVendor.GOOGLE,
+    isVip: true,
+    supportsTools: true,
+  },
+  {
+    id: 'qwen3-235b-a22b',
+    label: 'Qwen3 235B',
+    shortCode: 'qw3',
+    description: '通义千问 3 旗舰模型',
+    type: 'text',
+    vendor: ModelVendor.QWEN,
+    supportsTools: true,
+  },
+  {
+    id: 'doubao-seed-1-6-thinking-250715',
+    label: '豆包 Seed 1.6 Thinking',
+    shortCode: 'dbt',
+    description: '豆包最新思考模型',
+    type: 'text',
+    vendor: ModelVendor.DOUBAO,
     supportsTools: true,
   },
 ];
@@ -1132,6 +1254,8 @@ export function getDefaultAudioModel(): string {
 const VEO_MODEL_IDS = [
   'veo3',
   'veo3-pro',
+  'veo3-fast',
+  'veo3-pro-frames',
   'veo3.1',
   'veo3.1-pro',
   'veo3.1-components',
@@ -1150,7 +1274,7 @@ const SORA_2_MODEL_IDS = ['sora-2'];
 const SORA_2_PRO_MODEL_IDS = ['sora-2-pro'];
 
 /** Sora 2 固定时长模型（模型名已包含时长，不传 seconds） */
-const SORA_2_FIXED_MODEL_IDS = ['sora-2-4s', 'sora-2-8s', 'sora-2-12s'];
+const SORA_2_FIXED_MODEL_IDS = ['sora-2-4s', 'sora-2-8s', 'sora-2-12s', 'sora-2-15s'];
 
 /** Seedance 视频模型 ID */
 const SEEDANCE_MODEL_IDS = [

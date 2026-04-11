@@ -157,6 +157,7 @@
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-border); // 添加细边框增加精致感
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
   width: 100%;

@@ -195,8 +195,87 @@
   }
 }
 
+// Video preview (after file selected)
+.va-video-preview {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+
+  video {
+    display: block;
+    width: 100%;
+    max-height: 200px;
+    object-fit: contain;
+  }
+}
+
+.va-video-preview-close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+  transition: background 0.15s;
+
+  &:hover { background: rgba(0, 0, 0, 0.8); }
+}
+
+.va-video-preview-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #f9f9f9;
+  font-size: 11px;
+}
+
+.va-video-preview-name {
+  color: #333;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.va-video-preview-size {
+  color: #999;
+  flex-shrink: 0;
+}
+
+.va-compress-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(243, 156, 18, 0.12);
+  color: #E67E22;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .va-placeholder {
   color: #bbb;
+  text-align: center;
+  line-height: 1.6;
+}
+
+.va-placeholder-hint {
+  display: block;
+  font-size: 11px;
+  color: #E6A23C;
+  margin-top: 2px;
 }
 
 .va-filename {

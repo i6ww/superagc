@@ -17,11 +17,6 @@ import { mcpRegistry } from '../../mcp/registry';
 import { cleanLLMResponse } from '../../services/agent/tool-parser';
 
 /**
- * LLM 解析超时时间（毫秒）
- */
-const LLM_PARSE_TIMEOUT_MS = 15000;
-
-/**
  * 构建 LLM 解析的 System Prompt
  */
 function buildSystemPrompt(): string {
@@ -100,7 +95,7 @@ export class SkillLLMParser {
   static async parse(
     content: string,
     variables: SkillDSLVariables,
-    workflowIdPrefix: string = 'skill'
+    workflowIdPrefix = 'skill'
   ): Promise<SkillParseResult | null> {
     if (!content || !content.trim()) {
       return null;
@@ -127,13 +122,8 @@ export class SkillLLMParser {
         { role: 'user' as const, content: userMessage },
       ];
 
-      // 带超时的 LLM 调用
       let fullResponse = '';
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('LLM 解析超时')), LLM_PARSE_TIMEOUT_MS)
-      );
-
-      const chatPromise = defaultGeminiClient.sendChat(
+      const response = await defaultGeminiClient.sendChat(
         messages as any,
         (accumulatedContent) => {
           fullResponse = accumulatedContent;
@@ -141,8 +131,6 @@ export class SkillLLMParser {
         undefined,
         textModel
       );
-
-      const response = await Promise.race([chatPromise, timeoutPromise]);
 
       // 获取完整响应
       if (response.choices && response.choices.length > 0) {

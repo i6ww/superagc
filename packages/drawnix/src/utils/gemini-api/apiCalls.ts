@@ -12,7 +12,7 @@ import {
   GeminiResponse,
   VideoGenerationOptions,
 } from './types';
-import { DEFAULT_CONFIG, VIDEO_DEFAULT_CONFIG } from './config';
+import { VIDEO_DEFAULT_CONFIG } from './config';
 import { analytics } from '../posthog-analytics';
 
 type GoogleInlineData = {
@@ -47,7 +47,7 @@ function resolveBindingPath(
 ): string {
   const template = pathTemplate?.trim();
   if (!template) {
-    return `/v1beta/models/${model}:generateContent`;
+    return `/v1/models/${model}:generateContent`;
   }
 
   return template.replace(/\{model\}/g, model);
@@ -280,7 +280,7 @@ export function normalizeGoogleImageResponse(
         if (inlineData?.data) {
           return {
             b64_json: inlineData.data,
-            mime_type: inlineData.mime_type || inlineData.mimeType || 'image/png',
+            mime_type: inlineData.mime_type || inlineData.mimeType || 'video/mp4',
           };
         }
 
@@ -408,7 +408,7 @@ export async function callGoogleGenerateContentRaw(
     let lineBuffer = '';
 
     try {
-      while (true) {
+      for (;;) {
         const { done, value } = await reader.read();
         if (done) {
           break;
@@ -535,7 +535,6 @@ export async function callApiRaw(
       method: 'POST',
       headers,
       body: JSON.stringify(data),
-      signal: AbortSignal.timeout(config.timeout || DEFAULT_CONFIG.timeout!),
     });
 
     if (!response.ok) {
@@ -664,33 +663,14 @@ async function callApiStreamDirect(
     stream: true,
   };
 
-  // Handle signal merging (timeout + user cancel)
-  const controller = new AbortController();
-  const timeoutMs = config.timeout || DEFAULT_CONFIG.timeout!;
-  const timeoutId = setTimeout(() => controller.abort(new Error('Timeout')), timeoutMs);
-  
-  if (signal) {
-    if (signal.aborted) {
-      clearTimeout(timeoutId);
-      controller.abort(signal.reason);
-    } else {
-      signal.addEventListener('abort', () => {
-        clearTimeout(timeoutId);
-        controller.abort(signal.reason);
-      });
-    }
-  }
-
   try {
     const response = await providerTransport.send(buildProviderContext(config), {
       path: endpoint,
       method: 'POST',
       headers,
       body: JSON.stringify(data),
-      signal: controller.signal,
+      signal,
     });
-
-    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const duration = Date.now() - startTime;
@@ -879,7 +859,6 @@ export async function callVideoApiStreamRaw(
       method: 'POST',
       headers,
       body: JSON.stringify(data),
-      signal: AbortSignal.timeout(config.timeout || VIDEO_DEFAULT_CONFIG.timeout!),
     });
 
     if (!response.ok) {
@@ -925,7 +904,7 @@ export async function callVideoApiStreamRaw(
     let fullContent = '';
 
     try {
-      while (true) {
+      for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
 

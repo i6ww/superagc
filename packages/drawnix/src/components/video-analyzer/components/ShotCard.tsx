@@ -52,7 +52,14 @@ export const ShotCard: React.FC<ShotCardProps> = ({ shot, index, compact, action
     {!compact && (
       <>
         <p className="va-shot-desc">{shot.description}</p>
-        {shot.script && <p className="va-shot-script">"{shot.script}"</p>}
+        {(shot.narration || shot.script) && <p className="va-shot-script">旁白: "{shot.narration || shot.script}"</p>}
+        {shot.dialogue && <p className="va-shot-script">对白: "{shot.dialogue}"</p>}
+        {(shot.dialogue_speakers || shot.script_speaker) && (
+          <span className="va-shot-camera">对白角色: {shot.dialogue_speakers || shot.script_speaker}</span>
+        )}
+        {shot.speech_relation && (
+          <span className="va-shot-camera">语音关系: {shot.speech_relation}</span>
+        )}
         {shot.camera_movement && (
           <span className="va-shot-camera">运镜: {shot.camera_movement}</span>
         )}

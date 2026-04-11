@@ -2,7 +2,7 @@
  * 分析页 - 视频输入 + AI 分析 + 结果摘要
  */
 
-import React, { useState, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import type { AnalysisRecord, VideoAnalysisData } from '../types';
 import { formatShotsMarkdown } from '../types';
 import { videoAnalyzeTool } from '../../../mcp/tools/video-analyze';
@@ -25,6 +25,10 @@ type InputMode = 'upload' | 'youtube';
 const DEFAULT_ANALYSIS_MODEL = 'gemini-2.5-flash';
 const STORAGE_KEY_MODEL = 'video-analyzer:model';
 
+function formatSize(bytes: number): string {
+  return (bytes / 1024 / 1024).toFixed(1) + 'MB';
+}
+
 interface AnalyzePageProps {
   existingRecord?: AnalysisRecord | null;
   onComplete: (record: AnalysisRecord) => void;
@@ -38,19 +42,14 @@ export const AnalyzePage: React.FC<AnalyzePageProps> = ({
   onRecordsChange,
   onNext,
 }) => {
-  const [inputMode, setInputMode] = useState<InputMode>('upload');
+  const [inputMode, setInputMode] = useState<InputMode>('youtube');
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [selectedModel, setSelectedModelState] = useState(
-    () =>
-      existingRecord?.model ||
-      readStoredModelSelection(STORAGE_KEY_MODEL, DEFAULT_ANALYSIS_MODEL).modelId
+    () => existingRecord?.model || readStoredModelSelection(STORAGE_KEY_MODEL, DEFAULT_ANALYSIS_MODEL).modelId
   );
   const [selectedModelRef, setSelectedModelRef] = useState<ModelRef | null>(
-    () =>
-      existingRecord?.modelRef ||
-      readStoredModelSelection(STORAGE_KEY_MODEL, DEFAULT_ANALYSIS_MODEL)
-        .modelRef
+    () => existingRecord?.modelRef || readStoredModelSelection(STORAGE_KEY_MODEL, DEFAULT_ANALYSIS_MODEL).modelRef
   );
   const setSelectedModel = useCallback((model: string, modelRef?: ModelRef | null) => {
     setSelectedModelState(model);
@@ -64,6 +63,21 @@ export const AnalyzePage: React.FC<AnalyzePageProps> = ({
     existingRecord?.analysis || null
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const previewUrlRef = useRef<string | null>(null);
+
+  // 视频预览 URL
+  const videoPreviewUrl = useMemo(() => {
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    if (!videoFile) { previewUrlRef.current = null; return null; }
+    const url = URL.createObjectURL(videoFile);
+    previewUrlRef.current = url;
+    return url;
+  }, [videoFile]);
+
+  // 组件卸载时清理 URL
+  useEffect(() => () => {
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+  }, []);
   const allTextModels = useSelectableModels('text');
   const videoAnalysisModels = useMemo(
     () => allTextModels.filter(m => /^gemini/i.test(m.id)),
@@ -79,6 +93,13 @@ export const AnalyzePage: React.FC<AnalyzePageProps> = ({
     e.preventDefault();
     const file = e.dataTransfer.files[0];
     if (file?.type.startsWith('video/')) { setVideoFile(file); setError(''); setAnalysis(null); }
+  }, []);
+
+  const handleClearFile = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setVideoFile(null);
+    setError('');
+    if (fileInputRef.current) fileInputRef.current.value = '';
   }, []);
 
   const handleAnalyze = useCallback(async () => {
@@ -149,14 +170,31 @@ export const AnalyzePage: React.FC<AnalyzePageProps> = ({
       {!analysis && (
         <>
           <div className="va-tabs">
-            <button className={`va-tab ${inputMode === 'upload' ? 'active' : ''}`} onClick={() => setInputMode('upload')}>上传视频</button>
             <button className={`va-tab ${inputMode === 'youtube' ? 'active' : ''}`} onClick={() => setInputMode('youtube')}>YouTube URL</button>
+            <button className={`va-tab ${inputMode === 'upload' ? 'active' : ''}`} onClick={() => setInputMode('upload')}>上传视频</button>
           </div>
           {inputMode === 'upload' ? (
-            <div className="va-dropzone" onDrop={handleDrop} onDragOver={e => e.preventDefault()} onClick={() => fileInputRef.current?.click()}>
-              <input ref={fileInputRef} type="file" accept="video/*" onChange={handleFileSelect} style={{ display: 'none' }} />
-              {videoFile ? <span className="va-filename">{videoFile.name}</span> : <span className="va-placeholder">拖拽视频到此处 或 点击上传</span>}
-            </div>
+            videoFile ? (
+              <div className="va-video-preview">
+                {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                <video src={videoPreviewUrl!} controls muted playsInline />
+                <button className="va-video-preview-close" onClick={handleClearFile}>✕</button>
+                <div className="va-video-preview-info">
+                  <span className="va-video-preview-name">{videoFile.name}</span>
+                  <span className="va-video-preview-size">{formatSize(videoFile.size)}</span>
+                </div>
+                <input ref={fileInputRef} type="file" accept="video/*" onChange={handleFileSelect} style={{ display: 'none' }} />
+              </div>
+            ) : (
+              <div className="va-dropzone" onDrop={handleDrop} onDragOver={e => e.preventDefault()} onClick={() => fileInputRef.current?.click()}>
+                <input ref={fileInputRef} type="file" accept="video/*" onChange={handleFileSelect} style={{ display: 'none' }} />
+                <span className="va-placeholder">
+                  拖拽视频到此处 或 点击上传
+                  <br />
+                  <span className="va-placeholder-hint">建议视频在6M以内，可用推特或Youtube下载器下载最低分辨率视频</span>
+                </span>
+              </div>
+            )
           ) : (
             <input className="va-url-input" type="text" placeholder="https://www.youtube.com/watch?v=..." value={youtubeUrl} onChange={e => setYoutubeUrl(e.target.value)} />
           )}

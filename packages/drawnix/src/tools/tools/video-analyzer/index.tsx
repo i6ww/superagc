@@ -43,7 +43,7 @@ export const VideoAnalyzerToolComponent: React.FC<any> = (props) => (
 export const videoAnalyzerTool: ToolPluginModule = {
   manifest: {
     id: 'video-analyzer',
-    name: '视频拆解',
+    name: '爆款视频生成',
     description: 'AI 分析视频内容，提取镜头、脚本、风格等结构化数据',
     icon: '🎬',
     category: ToolCategory.AI_TOOLS,

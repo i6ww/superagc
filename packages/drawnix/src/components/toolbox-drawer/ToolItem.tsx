@@ -68,11 +68,21 @@ export const ToolItem: React.FC<ToolItemProps> = ({
     onOpenWindow?.(tool);
   }, [tool, onOpenWindow]);
 
+  /**
+   * 点击卡片整体，默认以弹窗方式打开
+   */
+  const handleCardClick = useCallback((e: React.MouseEvent) => {
+    // 如果点击的是操作按钮区域，不触发卡片点击
+    if ((e.target as HTMLElement).closest('.tool-item__actions')) return;
+    onOpenWindow?.(tool);
+  }, [tool, onOpenWindow]);
+
   return (
     <div
       className="tool-item"
       data-track="toolbox_click_tool"
       data-tool-id={tool.id}
+      onClick={handleCardClick}
     >
       <div className="tool-item__icon">{renderIcon(tool.icon)}</div>
       <div className="tool-item__content">

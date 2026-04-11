@@ -38,6 +38,11 @@ const VideoAnalyzer: React.FC = () => {
     setCurrentRecord(record);
   }, []);
 
+  const handleRestart = useCallback(() => {
+    setCurrentRecord(null);
+    setPage('analyze');
+  }, []);
+
   const handleNavigate = useCallback((target: PageId) => {
     if (target === 'history') {
       setShowStarred(false);
@@ -99,6 +104,7 @@ const VideoAnalyzer: React.FC = () => {
           record={currentRecord}
           onRecordUpdate={handleRecordUpdate}
           onRecordsChange={setRecords}
+          onRestart={handleRestart}
         />
       )}
       {page === 'history' && (

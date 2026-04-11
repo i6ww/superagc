@@ -178,7 +178,6 @@ export async function pollVideoUntilComplete(
     onProgress,
     signal,
     interval = 5000,
-    maxAttempts = 1080,
   } = options;
   const fetchFn = config.fetchImpl || fetch;
   const baseUrl = normalizeApiBase(config.baseUrl);
@@ -188,7 +187,7 @@ export async function pollVideoUntilComplete(
   let consecutiveErrors = 0;
   const maxConsecutiveErrors = 10;
 
-  while (attempts < maxAttempts) {
+  for (;;) {
     if (signal?.aborted) {
       throw new Error('Video generation cancelled');
     }
@@ -272,8 +271,6 @@ export async function pollVideoUntilComplete(
       attempts++;
     }
   }
-
-  throw new Error('Video generation timed out');
 }
 
 /**

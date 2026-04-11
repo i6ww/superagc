@@ -409,6 +409,104 @@ export const VIDEO_MODEL_CONFIGS: Record<string, VideoModelConfig> = {
       labels: ['首帧', '尾帧', '参考图1', '参考图2'],
     },
   },
+  'veo3-fast': {
+    id: 'veo3-fast',
+    label: 'Veo 3 Fast',
+    provider: 'veo',
+    description: '8秒快速视频生成',
+    durationOptions: [{ label: '8秒', value: '8' }],
+    defaultDuration: '8',
+    sizeOptions: [
+      { label: '横屏 16:9', value: '1280x720', aspectRatio: '16:9' },
+      { label: '竖屏 9:16', value: '720x1280', aspectRatio: '9:16' },
+    ],
+    defaultSize: '1280x720',
+    imageUpload: {
+      maxCount: 1,
+      mode: 'reference',
+      labels: ['参考图'],
+    },
+  },
+  'veo3-pro-frames': {
+    id: 'veo3-pro-frames',
+    label: 'Veo 3 Pro Frames',
+    provider: 'veo',
+    description: '8秒高质量视频，支持帧控制',
+    durationOptions: [{ label: '8秒', value: '8' }],
+    defaultDuration: '8',
+    sizeOptions: [
+      { label: '横屏 16:9', value: '1280x720', aspectRatio: '16:9' },
+      { label: '竖屏 9:16', value: '720x1280', aspectRatio: '9:16' },
+    ],
+    defaultSize: '1280x720',
+    imageUpload: {
+      maxCount: 2,
+      mode: 'frames',
+      labels: ['首帧', '尾帧'],
+    },
+  },
+  'kling-video-o1': {
+    id: 'kling-video-o1',
+    label: 'Kling Video O1',
+    provider: 'kling',
+    description: 'Kling Video O1 智能视频生成',
+    durationOptions: [
+      { label: '5秒', value: '5' },
+      { label: '10秒', value: '10' },
+    ],
+    defaultDuration: '5',
+    sizeOptions: [
+      { label: '横屏 16:9', value: '1280x720', aspectRatio: '16:9' },
+      { label: '竖屏 9:16', value: '720x1280', aspectRatio: '9:16' },
+      { label: '方形 1:1', value: '1024x1024', aspectRatio: '1:1' },
+    ],
+    defaultSize: '1280x720',
+    imageUpload: {
+      maxCount: 1,
+      mode: 'reference',
+      labels: ['参考图'],
+    },
+  },
+  'kling-video-o1-edit': {
+    id: 'kling-video-o1-edit',
+    label: 'Kling Video O1 Edit',
+    provider: 'kling',
+    description: 'Kling Video O1 视频编辑',
+    durationOptions: [
+      { label: '5秒', value: '5' },
+      { label: '10秒', value: '10' },
+    ],
+    defaultDuration: '5',
+    sizeOptions: [
+      { label: '横屏 16:9', value: '1280x720', aspectRatio: '16:9' },
+      { label: '竖屏 9:16', value: '720x1280', aspectRatio: '9:16' },
+      { label: '方形 1:1', value: '1024x1024', aspectRatio: '1:1' },
+    ],
+    defaultSize: '1280x720',
+    imageUpload: {
+      maxCount: 1,
+      mode: 'reference',
+      labels: ['参考图'],
+    },
+  },
+  'sora-2-15s': {
+    id: 'sora-2-15s',
+    label: 'Sora 2 · 15s',
+    provider: 'sora',
+    description: '15秒固定时长，模型名已包含时长，无需 seconds 参数',
+    durationOptions: [{ label: '15秒（固定）', value: '15' }],
+    defaultDuration: '15',
+    sizeOptions: [
+      { label: '横屏 16:9', value: '1280x720', aspectRatio: '16:9' },
+      { label: '竖屏 9:16', value: '720x1280', aspectRatio: '9:16' },
+    ],
+    defaultSize: '1280x720',
+    imageUpload: {
+      maxCount: 1,
+      mode: 'reference',
+      labels: ['参考图'],
+    },
+  },
 };
 
 /**

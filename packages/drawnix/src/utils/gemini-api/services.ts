@@ -346,9 +346,6 @@ async function generateImageDirect(
         method: 'POST',
         headers,
         body: JSON.stringify(data),
-        signal: AbortSignal.timeout(
-          validatedConfig.timeout || DEFAULT_CONFIG.timeout!
-        ),
       }
     );
 
@@ -606,7 +603,8 @@ export async function sendChatWithGemini(
     'ms'
   );
 
-  // Use stream if callback provided
+  // 只有显式需要流式回调的聊天链路才走流式；
+  // 结构化 JSON / 分析类场景应保持非流式以获得完整响应。
   if (onChunk) {
     console.log('[sendChatWithGemini] 使用流式调用 callApiStreamRaw');
     return await callApiStreamRaw(validatedConfig, messages, onChunk, signal);

@@ -1,22 +1,17 @@
 import { useDrawnix } from '../../hooks/use-drawnix';
 import { useDeviceType } from '../../hooks/useDeviceType';
 import './settings-dialog.scss';
-import {
-  useDeferredValue,
-  useEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-  type ReactNode,
-} from 'react';
+import { useCallback, useDeferredValue, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { MessagePlugin, Tooltip, Switch } from 'tdesign-react';
 import { InfoCircleIcon } from 'tdesign-icons-react';
 import {
   AlertTriangle,
   ChevronLeft,
   ChevronRight,
+  Copy,
   Loader2,
   Search,
+  Trash2,
   X,
 } from 'lucide-react';
 import { LS_KEYS } from '../../constants/storage-keys';
@@ -51,6 +46,7 @@ import {
   LEGACY_DEFAULT_PROVIDER_PROFILE_ID,
   providerCatalogsSettings,
   providerProfilesSettings,
+  TUZI_MIX_PROVIDER_PROFILE_ID,
   TUZI_ORIGINAL_PROVIDER_PROFILE_ID,
   TUZI_PROVIDER_DEFAULT_BASE_URL,
   type InvocationPreset,
@@ -64,6 +60,11 @@ import {
   getModelVendorPalette,
   ModelVendorMark,
 } from '../shared/ModelVendorBrand';
+import {
+  ContextMenu,
+  useContextMenuState,
+  type ContextMenuEntry,
+} from '../shared/ContextMenu';
 import { WinBoxWindow } from '../winbox';
 import { TtsSettingsPanel } from '../project-drawer/TtsSettingsPanel';
 
@@ -182,6 +183,22 @@ function matchesProviderModelQuery(model: ModelConfig, query: string) {
   ]
     .filter(Boolean)
     .some((value) => value?.toLowerCase().includes(normalized));
+}
+
+function dedupeModelsByTypeAndId(models: ModelConfig[]): ModelConfig[] {
+  const seen = new Set<string>();
+  const unique: ModelConfig[] = [];
+
+  models.forEach((model) => {
+    const dedupeKey = `${model.type}:${model.id}`;
+    if (seen.has(dedupeKey)) {
+      return;
+    }
+    seen.add(dedupeKey);
+    unique.push(model);
+  });
+
+  return unique;
 }
 
 function getConfiguredRouteCount(preset: InvocationPreset | null): number {
@@ -313,7 +330,8 @@ function inferAuthTypeForProviderType(
 function isManagedProviderProfile(profileId: string): boolean {
   return (
     profileId === LEGACY_DEFAULT_PROVIDER_PROFILE_ID ||
-    profileId === TUZI_ORIGINAL_PROVIDER_PROFILE_ID
+    profileId === TUZI_ORIGINAL_PROVIDER_PROFILE_ID ||
+    profileId === TUZI_MIX_PROVIDER_PROFILE_ID
   );
 }
 
@@ -945,6 +963,54 @@ export const SettingsDialog = ({
     }
   };
 
+  const handleCloneProfile = useCallback(
+    (profileId: string) => {
+      const source = profilesDraft.find((p) => p.id === profileId);
+      if (!source) return;
+      const cloned: ProviderProfile = {
+        ...cloneValue(source),
+        id: createId('profile'),
+        name: `${source.name} (副本)`,
+      };
+      setProfilesDraft((current) => [...current, cloned]);
+      setSelectedProfileId(cloned.id);
+      setActiveView('providers');
+      if (isCompactLayout) {
+        setCompactProviderMode('detail');
+      }
+    },
+    [profilesDraft, isCompactLayout]
+  );
+
+  const providerContextMenu = useContextMenuState<string>();
+
+  const providerContextMenuItems = useCallback(
+    (profileId: string): ContextMenuEntry<string>[] => {
+      const items: ContextMenuEntry<string>[] = [
+        {
+          key: 'clone',
+          label: '克隆',
+          icon: <Copy size={14} />,
+          onSelect: handleCloneProfile,
+        },
+      ];
+      if (!isManagedProviderProfile(profileId)) {
+        items.push(
+          { key: 'divider', type: 'divider' },
+          {
+            key: 'delete',
+            label: '删除',
+            icon: <Trash2 size={14} />,
+            danger: true,
+            onSelect: handleDeleteProfile,
+          }
+        );
+      }
+      return items;
+    },
+    [handleCloneProfile]
+  );
+
   const handleAddPreset = () => {
     const fallbackProfileId = enabledProfiles[0]?.id || null;
     const nextPreset = createPreset(fallbackProfileId, {
@@ -1340,6 +1406,10 @@ export const SettingsDialog = ({
               } ${
                 profile.enabled ? '' : 'settings-dialog__provider-row--disabled'
               }`}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                providerContextMenu.open(event, profile.id);
+              }}
             >
               <button
                 type="button"
@@ -1399,6 +1469,13 @@ export const SettingsDialog = ({
           );
         })}
       </div>
+
+      <ContextMenu
+        state={providerContextMenu.contextMenu}
+        items={providerContextMenuItems}
+        onClose={providerContextMenu.close}
+        zIndex={20000}
+      />
 
       {!isCompactLayout ? (
         <button
@@ -1758,12 +1835,13 @@ export const SettingsDialog = ({
   };
 
   const renderProviderModelSummary = () => {
-    // 仅默认分组(legacy-default)显示内置模型，原价分组有自己的运行时模型
     const isDefaultProvider =
       selectedProfile?.id === LEGACY_DEFAULT_PROVIDER_PROFILE_ID;
-    const displayModels = isDefaultProvider
-      ? [...ALL_MODELS, ...runtimeState.models]
-      : runtimeState.models;
+    const displayModels = dedupeModelsByTypeAndId(
+      isDefaultProvider
+        ? [...runtimeState.models, ...ALL_MODELS]
+        : runtimeState.models
+    );
     const vendorPriorityMap = new Map(
       DISCOVERY_VENDOR_ORDER.map((vendor, index) => [vendor, index])
     );

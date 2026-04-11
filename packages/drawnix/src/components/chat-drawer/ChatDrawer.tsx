@@ -765,32 +765,37 @@ export const ChatDrawer = forwardRef<ChatDrawerRef, ChatDrawerProps>(
     // Handle send with auto-create session
     const handleSendWrapper = useCallback(
       async (msg: Message) => {
-        analytics.track('chat_message_send', {
-          hasImages: msg.parts.some((p) => p.type === 'image_url'), // Message parts uses image_url usually
-        });
-        // Check if API key is configured
-        const settings = geminiSettings.get();
-        if (!settings?.apiKey) {
-          // Store message for sending after API key is configured
+        try {
+          analytics.track('chat_message_send', {
+            hasImages: msg.parts.some((p) => p.type === 'image_url'), // Message parts uses image_url usually
+          });
+          // Check if API key is configured
+          const settings = geminiSettings.get();
+          if (!settings?.apiKey) {
+            // Store message for sending after API key is configured
+            pendingMessageRef.current = msg;
+            // Open settings dialog to configure API key
+            setAppState({ ...appState, openSettings: true });
+            return;
+          }
+
+          // Clear pending message since we're processing it
+          pendingMessageRef.current = null;
+
+          if (!activeSessionId) {
+            const newSession = await chatStorageService.createSession();
+            setSessions((prev) => [newSession, ...prev]);
+            setActiveSessionId(newSession.id);
+            // Store message to send after session is created
+            pendingMessageRef.current = msg;
+            return;
+          }
+
+          await chatHandler.sendMessage(msg);
+        } catch (error) {
+          console.error('[ChatDrawer] send message failed:', error);
           pendingMessageRef.current = msg;
-          // Open settings dialog to configure API key
-          setAppState({ ...appState, openSettings: true });
-          return;
         }
-
-        // Clear pending message since we're processing it
-        pendingMessageRef.current = null;
-
-        if (!activeSessionId) {
-          const newSession = await chatStorageService.createSession();
-          setSessions((prev) => [newSession, ...prev]);
-          setActiveSessionId(newSession.id);
-          // Store message to send after session is created
-          pendingMessageRef.current = msg;
-          return;
-        }
-
-        await chatHandler.sendMessage(msg);
       },
       [activeSessionId, chatHandler, appState, setAppState]
     );

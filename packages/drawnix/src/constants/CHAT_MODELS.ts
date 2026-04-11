@@ -11,6 +11,9 @@ export enum ModelProvider {
   ANTHROPIC = 'ANTHROPIC',
   DEEPSEEK = 'DEEPSEEK',
   GOOGLE = 'GOOGLE',
+  GROK = 'GROK',
+  QWEN = 'QWEN',
+  DOUBAO = 'DOUBAO',
 }
 
 /** Model badge types */
@@ -33,6 +36,9 @@ export const PROVIDER_NAMES: Record<ModelProvider, string> = {
   [ModelProvider.ANTHROPIC]: 'Anthropic',
   [ModelProvider.DEEPSEEK]: 'DeepSeek',
   [ModelProvider.GOOGLE]: 'Google',
+  [ModelProvider.GROK]: 'Grok',
+  [ModelProvider.QWEN]: 'Qwen',
+  [ModelProvider.DOUBAO]: '即梦',
 };
 
 /** Predefined chat models */
@@ -68,6 +74,14 @@ export const CHAT_MODELS: ChatModel[] = [
     id: 'gpt-5.2-all',
     name: 'GPT-5.2 All',
     description: '全功能版本',
+    provider: ModelProvider.OPENAI,
+    badges: ['NEW'],
+    maxTokens: 128000,
+  },
+  {
+    id: 'gpt-5.4',
+    name: 'GPT-5.4',
+    description: 'OpenAI 最新旗舰模型',
     provider: ModelProvider.OPENAI,
     badges: ['NEW'],
     maxTokens: 128000,
@@ -139,6 +153,14 @@ export const CHAT_MODELS: ChatModel[] = [
     name: 'Gemini 3 Pro Preview Thinking',
     description: '推理增强版本',
     provider: ModelProvider.GOOGLE,
+    maxTokens: 2000000,
+  },
+  {
+    id: 'gemini-3.1-pro-preview',
+    name: 'Gemini 3.1 Pro Preview',
+    description: 'Google Gemini 3.1 Pro 最新预览版',
+    provider: ModelProvider.GOOGLE,
+    badges: ['NEW'],
     maxTokens: 2000000,
   },
   {
@@ -222,6 +244,33 @@ export const CHAT_MODELS: ChatModel[] = [
     provider: ModelProvider.ANTHROPIC,
     maxTokens: 200000,
   },
+  // Grok Models
+  {
+    id: 'grok-4',
+    name: 'Grok 4',
+    description: 'xAI 最新旗舰模型',
+    provider: ModelProvider.GROK,
+    badges: ['NEW'],
+    maxTokens: 128000,
+  },
+  // Qwen Models
+  {
+    id: 'qwen3-235b-a22b',
+    name: 'Qwen3 235B',
+    description: '通义千问 3 旗舰模型',
+    provider: ModelProvider.QWEN,
+    badges: ['NEW'],
+    maxTokens: 128000,
+  },
+  // Doubao Models
+  {
+    id: 'doubao-seed-1-6-thinking-250715',
+    name: '豆包 Seed 1.6 Thinking',
+    description: '豆包最新思考模型',
+    provider: ModelProvider.DOUBAO,
+    badges: ['NEW', 'Reasoning'],
+    maxTokens: 128000,
+  },
 ];
 
 /** Default model ID */
@@ -244,6 +293,9 @@ export function getModelsByProvider(): Record<ModelProvider, ChatModel[]> {
     [ModelProvider.ANTHROPIC]: [],
     [ModelProvider.DEEPSEEK]: [],
     [ModelProvider.GOOGLE]: [],
+    [ModelProvider.GROK]: [],
+    [ModelProvider.QWEN]: [],
+    [ModelProvider.DOUBAO]: [],
   };
 
   CHAT_MODELS.forEach((model) => {

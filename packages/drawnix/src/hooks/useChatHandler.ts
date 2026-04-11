@@ -171,6 +171,7 @@ export function useChatHandler(options: UseChatHandlerOptions): ChatHandler & {
       const userContent = extractMessageText(msg);
 
       let fullContent = '';
+      let streamErrorHandled = false;
 
       try {
         await chatService.sendChatMessage(
@@ -179,7 +180,7 @@ export function useChatHandler(options: UseChatHandlerOptions): ChatHandler & {
           ourMsg.attachments || [],
           (event) => {
             if (event.type === 'content' && event.content) {
-              fullContent += event.content;
+              fullContent = event.content;
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantMsgId
@@ -282,6 +283,7 @@ export function useChatHandler(options: UseChatHandlerOptions): ChatHandler & {
               // 重置发送锁
               isSendingRef.current = false;
             } else if (event.type === 'error' && event.error) {
+              streamErrorHandled = true;
               setStatus('error');
 
               // Display error message in chat
@@ -320,7 +322,7 @@ export function useChatHandler(options: UseChatHandlerOptions): ChatHandler & {
           systemPromptRef.current // 传递系统提示词
         );
       } catch (error: any) {
-        if (error.message !== 'Request cancelled') {
+        if (error.message !== 'Request cancelled' && !streamErrorHandled) {
           setStatus('error');
           console.error('[useChatHandler] Stream error:', error);
 
