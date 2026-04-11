@@ -160,6 +160,7 @@ function sanitizePreview(preview: ModelBenchmarkPreview): ModelBenchmarkPreview 
     format: preview.format,
     duration: preview.duration,
     title: sanitizeText(preview.title),
+    rawData: preview.rawData,
   };
 }
 
