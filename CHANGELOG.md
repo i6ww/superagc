@@ -1,3 +1,44 @@
+## 0.6.18 (2026-04-11)
+
+### 🚀 Features
+
+- 历史版本路径支持 + 未知元素类型容错 ([48a78cd4](https://github.com/ljquan/aitu/commit/48a78cd4))
+- 优化模型批测入口与模型结果导出 ([358e44ae](https://github.com/ljquan/aitu/commit/358e44ae))
+- 生成步骤交互优化 + 字段精简 ([c576d987](https://github.com/ljquan/aitu/commit/c576d987))
+- refine model benchmark batch selection ([e18ff27e](https://github.com/ljquan/aitu/commit/e18ff27e))
+- add model benchmark workbench ([d7b695b6](https://github.com/ljquan/aitu/commit/d7b695b6))
+- 视频上传预览 + 生成页重新分析 + UI 优化 ([5323a31d](https://github.com/ljquan/aitu/commit/5323a31d))
+- 脚本表单优化 + 生成链路增强 ([79ec5d77](https://github.com/ljquan/aitu/commit/79ec5d77))
+- 长视频分段拼接全套优化 ([002dc30d](https://github.com/ljquan/aitu/commit/002dc30d))
+- AI 文本生成结果统一以 Markdown Card 方式插入画布 ([c97fca2a](https://github.com/ljquan/aitu/commit/c97fca2a))
+- 新增视频分析工具 + 重构 MCP 队列逻辑为公共模块 ([ac0f7331](https://github.com/ljquan/aitu/commit/ac0f7331))
+
+### 🩹 Fixes
+
+- 补齐推荐模型选择与默认分组去重 ([1a496766](https://github.com/ljquan/aitu/commit/1a496766))
+- 收敛模型测试弹窗启动与状态同步 ([0529b331](https://github.com/ljquan/aitu/commit/0529b331))
+- 设置弹窗单模型测试带入当前模型 ([9aa52c23](https://github.com/ljquan/aitu/commit/9aa52c23))
+- 修复设置弹窗激活后仍被测试弹窗遮挡 ([99d0d0d4](https://github.com/ljquan/aitu/commit/99d0d0d4))
+- 修复多窗口最新激活未置顶 ([1f956f2d](https://github.com/ljquan/aitu/commit/1f956f2d))
+- ensure rawData is persisted and improve JSON display styling ([2aa967af](https://github.com/ljquan/aitu/commit/2aa967af))
+- 修复 generateContent 路由与超时问题 ([7299a706](https://github.com/ljquan/aitu/commit/7299a706))
+- 收紧 API key 错误判定，避免误开设置面板 ([21fffaa4](https://github.com/ljquan/aitu/commit/21fffaa4))
+- 修复 AI 文本插入为普通文本 + Card 换行丢失 + 选中带标题 ([8479ac79](https://github.com/ljquan/aitu/commit/8479ac79))
+- 修复模型搜索供应商展示与中文输入误选 ([2412e404](https://github.com/ljquan/aitu/commit/2412e404))
+- 保留远程媒体原始 URL 语义 ([8f9f828f](https://github.com/ljquan/aitu/commit/8f9f828f))
+- 深度用户页面加载内存溢出优化 ([71a0dfe2](https://github.com/ljquan/aitu/commit/71a0dfe2))
+
+### 🔧 Chores
+
+- refactor(winbox): 统一窗口 z-index 管理，修复多窗口遮挡与测试弹窗状态问题 ([6ec47b57](https://github.com/ljquan/aitu/commit/6ec47b57))
+- style(model-benchmark): comprehensive UI/UX beautification and functional refinement ([2fe7bb15](https://github.com/ljquan/aitu/commit/2fe7bb15))
+- docs: 补充 AI 文本插入必须传 label 走 Card 的编码规则 ([69bce1a9](https://github.com/ljquan/aitu/commit/69bce1a9))
+- 添加搜索 ([fe650d69](https://github.com/ljquan/aitu/commit/fe650d69))
+
+### ❤️  Thank You
+
+- liquid <ljquan@qq.com>
+
 ## 0.6.17 (2026-04-09)
 
 ### 🚀 Features

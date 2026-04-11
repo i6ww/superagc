@@ -1,6 +1,41 @@
 {
   "versions": [
     {
+      "version": "0.6.18",
+      "date": "2026-04-11",
+      "changes": {
+        "features": [
+          "历史版本路径支持 + 未知元素类型容错",
+          "优化模型批测入口与模型结果导出",
+          "生成步骤交互优化 + 字段精简",
+          "refine model benchmark batch selection",
+          "add model benchmark workbench",
+          "视频上传预览 + 生成页重新分析 + UI 优化",
+          "脚本表单优化 + 生成链路增强",
+          "长视频分段拼接全套优化",
+          "AI 文本生成结果统一以 Markdown Card 方式插入画布",
+          "新增视频分析工具 + 重构 MCP 队列逻辑为公共模块"
+        ],
+        "fixes": [
+          "补齐推荐模型选择与默认分组去重",
+          "收敛模型测试弹窗启动与状态同步",
+          "设置弹窗单模型测试带入当前模型",
+          "修复设置弹窗激活后仍被测试弹窗遮挡",
+          "修复多窗口最新激活未置顶",
+          "ensure rawData is persisted and improve JSON display styling",
+          "修复 generateContent 路由与超时问题",
+          "收紧 API key 错误判定，避免误开设置面板",
+          "修复 AI 文本插入为普通文本 + Card 换行丢失 + 选中带标题",
+          "修复模型搜索供应商展示与中文输入误选",
+          "保留远程媒体原始 URL 语义",
+          "深度用户页面加载内存溢出优化"
+        ],
+        "improvements": []
+      },
+      "type": "patch",
+      "highlights": "历史版本路径支持 + 未知元素类型容错"
+    },
+    {
       "version": "0.6.17",
       "date": "2026-04-09",
       "changes": {
