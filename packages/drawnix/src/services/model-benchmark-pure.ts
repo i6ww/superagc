@@ -22,6 +22,15 @@ export interface BenchmarkRankableEntry {
   userScore: number | null;
 }
 
+export interface ReconcileSelectionOptions {
+  fallback?: 'all' | 'none' | 'first';
+  limit?: number;
+}
+
+function uniqueSelection(items: string[]): string[] {
+  return Array.from(new Set(items));
+}
+
 export const BENCHMARK_PROMPT_PRESETS: BenchmarkPromptPreset[] = [
   {
     id: 'text-fast-json',
@@ -83,6 +92,63 @@ export function resolvePromptPreset(
     BENCHMARK_PROMPT_PRESETS.find((preset) => preset.id === presetId) ||
     getDefaultPromptPreset(modality)
   );
+}
+
+export function reconcileSelection(
+  current: string[],
+  available: string[],
+  options: ReconcileSelectionOptions = {}
+): string[] {
+  if (available.length === 0) {
+    return [];
+  }
+
+  const availableSet = new Set(available);
+  const kept = current.filter((item) => availableSet.has(item));
+  if (kept.length > 0) {
+    return kept;
+  }
+
+  const fallback = options.fallback || 'all';
+  if (fallback === 'none') {
+    return [];
+  }
+
+  if (fallback === 'first') {
+    const limit = Math.max(1, options.limit || 1);
+    return available.slice(0, limit);
+  }
+
+  const limit =
+    typeof options.limit === 'number' ? Math.max(1, options.limit) : undefined;
+  return limit ? available.slice(0, limit) : available;
+}
+
+export function applyShiftRangeSelection(
+  current: string[],
+  ordered: string[],
+  anchor: string | null | undefined,
+  target: string,
+  nextSelected: boolean
+): string[] {
+  const targetIndex = ordered.indexOf(target);
+  const anchorIndex = anchor ? ordered.indexOf(anchor) : -1;
+  if (targetIndex === -1 || anchorIndex === -1) {
+    return nextSelected
+      ? uniqueSelection([...current, target])
+      : current.filter((item) => item !== target);
+  }
+
+  const [start, end] =
+    anchorIndex < targetIndex
+      ? [anchorIndex, targetIndex]
+      : [targetIndex, anchorIndex];
+  const range = ordered.slice(start, end + 1);
+  if (nextSelected) {
+    return uniqueSelection([...current, ...range]);
+  }
+  const rangeSet = new Set(range);
+  return current.filter((item) => !rangeSet.has(item));
 }
 
 export function rankBenchmarkEntries<T extends BenchmarkRankableEntry>(

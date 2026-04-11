@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applyShiftRangeSelection,
   getDefaultPromptPreset,
+  reconcileSelection,
   rankBenchmarkEntries,
   type BenchmarkRankableEntry,
 } from '../model-benchmark-pure';
@@ -49,5 +51,28 @@ describe('model-benchmark-service', () => {
     );
 
     expect(ranked[0]?.id).toBe('cheap');
+  });
+
+  it('reconciles batch selections and defaults to all available targets', () => {
+    expect(reconcileSelection([], ['a', 'b', 'c'])).toEqual(['a', 'b', 'c']);
+    expect(reconcileSelection(['x', 'b'], ['a', 'b', 'c'])).toEqual(['b']);
+  });
+
+  it('supports first-n fallback for lightweight custom presets', () => {
+    expect(
+      reconcileSelection([], ['a', 'b', 'c'], {
+        fallback: 'first',
+        limit: 2,
+      })
+    ).toEqual(['a', 'b']);
+  });
+
+  it('supports shift range selection for batch picking', () => {
+    expect(
+      applyShiftRangeSelection(['a'], ['a', 'b', 'c', 'd'], 'a', 'c', true)
+    ).toEqual(['a', 'b', 'c']);
+    expect(
+      applyShiftRangeSelection(['a', 'b', 'c'], ['a', 'b', 'c', 'd'], 'a', 'c', false)
+    ).toEqual([]);
   });
 });
