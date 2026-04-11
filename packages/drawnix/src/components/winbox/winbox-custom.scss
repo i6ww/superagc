@@ -5,8 +5,9 @@
 
 // WinBox 容器全局 z-index
 // 由 CSS 变量驱动，最近激活的窗口会拿到更高层级
+// 需要 !important 覆盖 WinBox 库设置的内联 z-index
 .winbox {
-  z-index: var(--aitu-winbox-z-index, #{$z-dialog-ai-image});
+  z-index: var(--aitu-winbox-z-index, #{$z-dialog-ai-image}) !important;
 }
 
 .winbox-react {

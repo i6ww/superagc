@@ -1,8 +1,16 @@
+import { atom } from 'jotai';
+import { getDefaultStore } from 'jotai/vanilla';
 import { toolWindowService } from './tool-window-service';
 import { toolRegistry } from '../tools/registry';
 import { MODEL_BENCHMARK_TOOL_ID } from '../tools/tool-ids';
 import type { ToolDefinition } from '../types/toolbox.types';
 import type { ModelBenchmarkLaunchRequest } from './model-benchmark-service';
+
+/**
+ * 全局 atom：从设置等外部入口传递给 ModelBenchmarkWorkbench 的启动请求。
+ * 使用 jotai 绕过 componentProps → React props 的时序问题。
+ */
+export const benchmarkLaunchAtom = atom<ModelBenchmarkLaunchRequest | null>(null);
 
 function createFallbackTool(): ToolDefinition {
   return {
@@ -22,16 +30,15 @@ export function openModelBenchmarkTool(
 ): boolean {
   const tool =
     toolRegistry.getManifestById(MODEL_BENCHMARK_TOOL_ID) || createFallbackTool();
-  toolWindowService.openTool(tool, {
-    autoMaximize: true,
-    componentProps: initialRequest
-      ? {
-          initialRequest: {
-            ...initialRequest,
-            launchedAt: Date.now(),
-          },
-        }
-      : undefined,
-  });
+
+  // 写入全局 atom，Workbench 通过 useAtomValue 订阅
+  if (initialRequest) {
+    getDefaultStore().set(benchmarkLaunchAtom, {
+      ...initialRequest,
+      launchedAt: Date.now(),
+    });
+  }
+
+  toolWindowService.openTool(tool, { autoMaximize: true });
   return true;
 }

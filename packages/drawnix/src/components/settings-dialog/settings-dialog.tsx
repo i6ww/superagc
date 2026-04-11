@@ -9,6 +9,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Copy,
+  FlaskConical,
   Loader2,
   Search,
   Trash2,
@@ -65,9 +66,11 @@ import {
   useContextMenuState,
   type ContextMenuEntry,
 } from '../shared/ContextMenu';
+import { ModelDropdown } from '../ai-input-bar/ModelDropdown';
 import { WinBoxWindow } from '../winbox';
 import { TtsSettingsPanel } from '../project-drawer/TtsSettingsPanel';
 import { openModelBenchmarkTool } from '../../services/model-benchmark-launcher';
+import { modelBenchmarkService } from '../../services/model-benchmark-service';
 
 export { IMAGE_MODEL_GROUPED_SELECT_OPTIONS as IMAGE_MODEL_GROUPED_OPTIONS } from '../../constants/model-config';
 export { VIDEO_MODEL_SELECT_OPTIONS as VIDEO_MODEL_OPTIONS } from '../../constants/model-config';
@@ -438,24 +441,19 @@ function areEqual(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-function encodeModelRefValue(profileId: string, modelId: string): string {
-  return JSON.stringify({ profileId, modelId });
-}
-
-function parseModelRefValue(value: string): ModelRef | null {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(value) as {
-      profileId?: string;
-      modelId?: string;
-    };
-    return createModelRef(parsed.profileId || null, parsed.modelId || null);
-  } catch {
-    return null;
-  }
+function buildPresetRouteModels(
+  routeGroups: Array<{ profile: ProviderProfile; models: ModelConfig[] }>
+): ModelConfig[] {
+  return routeGroups.flatMap(({ profile, models }) =>
+    models.map((model) => ({
+      ...model,
+      sourceProfileId: profile.id,
+      sourceProfileName: profile.name,
+      selectionKey:
+        model.selectionKey ||
+        `${profile.id}::${model.id}`,
+    }))
+  );
 }
 
 export const SettingsDialog = ({
@@ -1055,12 +1053,14 @@ export const SettingsDialog = ({
     }
   };
 
-  const handleRouteModelChange = (routeType: ModelType, value: string) => {
+  const handleRouteModelChange = (
+    routeType: ModelType,
+    nextModelRef: ModelRef | null
+  ) => {
     if (!selectedPreset) {
       return;
     }
 
-    const nextModelRef = parseModelRefValue(value);
     const nextPresets = presetsDraft.map((preset) =>
       preset.id === selectedPreset.id
         ? updatePresetRoute(preset, routeType, {
@@ -1171,6 +1171,14 @@ export const SettingsDialog = ({
         : `已清空 ${selectedProfile.name} 的已添加模型`
     );
     setDiscoveryDialogOpen(false);
+  };
+
+  const handleRemoveModel = (modelId: string) => {
+    if (!selectedProfile) return;
+    const nextIds = runtimeState.selectedModelIds.filter(
+      (id) => id !== modelId
+    );
+    handleApplySelectedModels(nextIds);
   };
 
   const closeSettingsDialog = () => {
@@ -1853,7 +1861,7 @@ export const SettingsDialog = ({
         autoRun: true,
       });
     },
-    []
+    [setAppState]
   );
 
   const renderProviderModelSummary = () => {
@@ -2036,9 +2044,31 @@ export const SettingsDialog = ({
                           </span>
                         </div>
                         <div className="settings-dialog__model-type-item-btns">
+                          {(() => {
+                            const st =
+                              modelBenchmarkService.getLatestEntryStatus(
+                                selectedProfile!.id,
+                                model.id
+                              );
+                            if (st === 'completed')
+                              return (
+                                <span
+                                  className="settings-dialog__model-status settings-dialog__model-status--ok"
+                                  title="上次测试成功"
+                                />
+                              );
+                            if (st === 'failed')
+                              return (
+                                <span
+                                  className="settings-dialog__model-status settings-dialog__model-status--fail"
+                                  title="上次测试失败"
+                                />
+                              );
+                            return null;
+                          })()}
                           <button
                             type="button"
-                            className="settings-dialog__model-item-test"
+                            className="settings-dialog__model-icon-btn settings-dialog__model-icon-btn--test"
                             onClick={(event) => {
                               event.stopPropagation();
                               if (!selectedProfile) return;
@@ -2052,11 +2082,22 @@ export const SettingsDialog = ({
                             disabled={!canLaunchBenchmark}
                             title={
                               canLaunchBenchmark
-                                ? '测试这个模型在不同供应商下的表现'
+                                ? '测试'
                                 : '请先保存供应商配置并确保 API Key 可用'
                             }
                           >
-                            测试
+                            <FlaskConical size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            className="settings-dialog__model-icon-btn settings-dialog__model-icon-btn--delete"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleRemoveModel(model.id);
+                            }}
+                            title="移除此模型"
+                          >
+                            <Trash2 size={14} />
                           </button>
                         </div>
                       </div>
@@ -2154,6 +2195,11 @@ export const SettingsDialog = ({
     const selectedProfileName =
       profilesDraft.find((profile) => profile.id === selectedProfileId)?.name ||
       '未配置';
+    const selectableModels = buildPresetRouteModels(routeGroups);
+    const selectedSelectionKey =
+      selectedProfileId && selectedModelId
+        ? `${selectedProfileId}::${selectedModelId}`
+        : selectedModelId || undefined;
 
     return (
       <div
@@ -2169,36 +2215,35 @@ export const SettingsDialog = ({
             <label className="settings-dialog__label settings-dialog__label--stacked">
               默认模型
             </label>
-            <select
-              className="settings-dialog__select"
-              value={
-                selectedProfileId && selectedModelId
-                  ? encodeModelRefValue(selectedProfileId, selectedModelId)
-                  : ''
-              }
-              onChange={(event) =>
-                handleRouteModelChange(routeType, event.target.value)
-              }
-            >
-              <option value="">未配置</option>
-              {routeGroups.map(({ profile, models }) => (
-                <optgroup
-                  key={profile.id}
-                  label={`${profile.name}${
-                    profile.enabled ? '' : '（已停用）'
-                  }`}
+            <div className="settings-dialog__route-model-picker">
+              <ModelDropdown
+                variant="form"
+                selectedModel={selectedModelId || ''}
+                selectedSelectionKey={selectedSelectionKey}
+                models={selectableModels}
+                providerProfilesOverride={profilesDraft}
+                placement="down"
+                placeholder={`搜索${ROUTE_LABELS[routeType]}模型或供应商`}
+                allowCustomValue={false}
+                showProviderAction={false}
+                onSelect={(modelId, modelRef) => {
+                  handleRouteModelChange(
+                    routeType,
+                    modelRef || createModelRef(null, modelId)
+                  );
+                }}
+                disabled={selectableModels.length === 0}
+              />
+              {selectedModelId ? (
+                <button
+                  type="button"
+                  className="settings-dialog__route-clear"
+                  onClick={() => handleRouteModelChange(routeType, null)}
                 >
-                  {models.map((model) => (
-                    <option
-                      key={`${profile.id}-${model.id}`}
-                      value={encodeModelRefValue(profile.id, model.id)}
-                    >
-                      {model.shortLabel || model.label}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
+                  清空
+                </button>
+              ) : null}
+            </div>
           </div>
 
           <div className="settings-dialog__route-meta">
@@ -2438,6 +2483,7 @@ export const SettingsDialog = ({
   return (
     <>
       <WinBoxWindow
+        id="settings-dialog"
         visible={appState.openSettings}
         title="设置"
         onClose={handleWindowClose}
@@ -2484,6 +2530,18 @@ export const SettingsDialog = ({
         selectedModelIds={runtimeState.selectedModelIds}
         onClose={() => setDiscoveryDialogOpen(false)}
         onConfirm={handleApplySelectedModels}
+        onTestModel={(modelId) => {
+          if (!selectedProfile) return;
+          const model = runtimeState.discoveredModels.find(
+            (m) => m.id === modelId
+          );
+          handleLaunchModelBenchmark({
+            profileId: selectedProfile.id,
+            modelId,
+            modality: model?.type || 'image',
+            compareMode: 'cross-provider',
+          });
+        }}
       />
     </>
   );

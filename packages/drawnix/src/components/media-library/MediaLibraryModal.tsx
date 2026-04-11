@@ -266,6 +266,7 @@ export function MediaLibraryModal({
   return (
     <>
       <WinBoxWindow
+        id="media-library"
         visible={isOpen}
         title="素材库"
         onClose={onClose}

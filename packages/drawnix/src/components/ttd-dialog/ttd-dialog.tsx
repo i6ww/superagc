@@ -637,6 +637,7 @@ const TTDDialogComponent = ({
       </Dialog>
       {/* AI 图片生成窗口 - 使用 WinBox */}
       <WinBoxWindow
+        id="ai-image-dialog"
         visible={appState.openDialogTypes.has(DialogType.aiImageGeneration)}
         title={
           imageGenerationMode === 'batch'
@@ -741,6 +742,7 @@ const TTDDialogComponent = ({
       </WinBoxWindow>
       {/* AI 视频生成窗口 - 使用 WinBox */}
       <WinBoxWindow
+        id="ai-video-dialog"
         visible={appState.openDialogTypes.has(DialogType.aiVideoGeneration)}
         title={language === 'zh' ? 'AI 视频生成' : 'AI Video Generation'}
         onClose={handleVideoDialogClose}

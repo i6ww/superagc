@@ -3,6 +3,7 @@ import type { Subscription } from 'rxjs';
 import { Select, InputNumber, MessagePlugin } from 'tdesign-react';
 import { DeleteIcon } from 'tdesign-icons-react';
 import { downloadFromBlob } from '@aitu/utils';
+import { useAtomValue } from 'jotai';
 import {
   buildBenchmarkTarget,
   getDefaultPromptPreset,
@@ -12,13 +13,13 @@ import {
   type BenchmarkModality,
   type BenchmarkRankingMode,
   type ModelBenchmarkEntry,
-  type ModelBenchmarkLaunchRequest,
   type ModelBenchmarkSession,
 } from '../../services/model-benchmark-service';
 import {
   applyShiftRangeSelection,
   reconcileSelection,
 } from '../../services/model-benchmark-pure';
+import { benchmarkLaunchAtom } from '../../services/model-benchmark-launcher';
 import { runtimeModelDiscovery } from '../../utils/runtime-model-discovery';
 import {
   LEGACY_DEFAULT_PROVIDER_PROFILE_ID,
@@ -29,7 +30,7 @@ import type { ModelConfig } from '../../constants/model-config';
 import './model-benchmark-workbench.scss';
 
 interface ModelBenchmarkWorkbenchProps {
-  initialRequest?: ModelBenchmarkLaunchRequest;
+  // props reserved for future use
 }
 
 type CapabilityKey =
@@ -282,9 +283,8 @@ function getModelOptionLabel(model: Pick<ModelConfig, 'id' | 'label' | 'shortLab
     : `${displayName} · ${model.id}`;
 }
 
-function ModelBenchmarkWorkbench({
-  initialRequest,
-}: ModelBenchmarkWorkbenchProps) {
+function ModelBenchmarkWorkbench({}: ModelBenchmarkWorkbenchProps) {
+  const initialRequest = useAtomValue(benchmarkLaunchAtom);
   const profiles = useProviderProfilesState();
   const discoveryVersion = useDiscoveryVersion();
   const [storeState, setStoreState] = useState(() =>
@@ -308,6 +308,7 @@ function ModelBenchmarkWorkbench({
   const [isExportingExcel, setIsExportingExcel] = useState(false);
   const [rankingMode, setRankingMode] = useState<BenchmarkRankingMode>('speed');
   const launchSignatureRef = useRef<string>('');
+  const launchGuardRef = useRef(false);
   const pickerAnchorRef = useRef<string | null>(null);
   const pickerButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
@@ -366,6 +367,10 @@ function ModelBenchmarkWorkbench({
   }, [availableProfiles, discoveryVersion, modality]);
 
   useEffect(() => {
+    if (launchGuardRef.current) {
+      console.debug('[Benchmark] reconcile profile/prompt: skipped (launchGuard)');
+      return;
+    }
     if (!availableProfiles.length) {
       setSelectedProfileId('');
       return;
@@ -393,18 +398,30 @@ function ModelBenchmarkWorkbench({
   ]);
 
   useEffect(() => {
+    if (launchGuardRef.current) {
+      console.debug('[Benchmark] reconcile modelIds: skipped (launchGuard)');
+      return;
+    }
     const modelIds = activeProfileModels.map((model) => model.id);
     if (modelIds.length === 0) {
       setSelectedModelIds([]);
       return;
     }
 
-    setSelectedModelIds((current) =>
-      reconcileSelection(current, modelIds, { fallback: 'all' })
-    );
+    setSelectedModelIds((current) => {
+      const next = reconcileSelection(current, modelIds, { fallback: 'all' });
+      if (next !== current) {
+        console.debug('[Benchmark] reconcile modelIds: changed', { from: current, to: next });
+      }
+      return next;
+    });
   }, [activeProfileModels]);
 
   useEffect(() => {
+    if (launchGuardRef.current) {
+      console.debug('[Benchmark] reconcile selectedModelId: skipped (launchGuard)');
+      return;
+    }
     const modelIds = crossProviderModels.map((model) => model.id);
     if (modelIds.length === 0) {
       setSelectedModelId('');
@@ -431,6 +448,10 @@ function ModelBenchmarkWorkbench({
   }, [availableProfiles, modality, selectedModelId]);
 
   useEffect(() => {
+    if (launchGuardRef.current) {
+      console.debug('[Benchmark] reconcile providerIds: skipped (launchGuard)');
+      return;
+    }
     setSelectedProviderIds((current) =>
       reconcileSelection(
         current,
@@ -595,62 +616,141 @@ function ModelBenchmarkWorkbench({
 
   useEffect(() => {
     if (!initialRequest) {
+      console.debug('[Benchmark] useEffect: no initialRequest, skip');
       return;
     }
     const signature = JSON.stringify(initialRequest);
-    if (!storeState.ready || launchSignatureRef.current === signature) {
+    // 有 initialRequest 就立即设置 guard，阻止 reconcile useEffect 覆盖
+    launchGuardRef.current = true;
+    if (!storeState.ready) {
+      console.debug('[Benchmark] useEffect: storeState not ready, waiting...', { signature });
+      return;
+    }
+    if (launchSignatureRef.current === signature) {
+      console.debug('[Benchmark] useEffect: same signature, skip', { signature });
       return;
     }
     launchSignatureRef.current = signature;
 
     const nextModality = initialRequest.modality || 'text';
     const nextProfiles = getAvailableProfilesForModality(profiles, nextModality);
-    const nextCompareMode =
+
+    // 计算该模型在多少个供应商下存在
+    const requestedCompareMode =
       initialRequest.compareMode ||
       (initialRequest.modelId ? 'cross-provider' : 'cross-model');
+    let nextCompareMode = requestedCompareMode;
+    let matchingProviderIds: string[] = [];
+    if (
+      requestedCompareMode === 'cross-provider' &&
+      initialRequest.modelId
+    ) {
+      matchingProviderIds = nextProfiles
+        .filter((profile) =>
+          getProfileModels(profile.id, nextModality).some(
+            (item) => item.id === initialRequest.modelId
+          )
+        )
+        .map((profile) => profile.id);
+      // ≤1 个供应商有该模型，降级为 cross-model
+      if (matchingProviderIds.length <= 1) {
+        nextCompareMode = 'cross-model';
+        console.debug('[Benchmark] cross-provider → cross-model downgrade', {
+          modelId: initialRequest.modelId,
+          matchingProviderIds,
+        });
+      }
+    }
+
+    console.debug('[Benchmark] useEffect: applying initialRequest', {
+      nextModality,
+      nextCompareMode,
+      requestedCompareMode,
+      profileId: initialRequest.profileId,
+      modelId: initialRequest.modelId,
+      profileCount: nextProfiles.length,
+      matchingProviderIds,
+    });
+
     const defaultPreset = getDefaultPromptPreset(nextModality);
     setModality(nextModality);
     setCompareMode(nextCompareMode);
     setPromptPresetId(defaultPreset.id);
     setPrompt(defaultPreset.prompt);
-    if (initialRequest.profileId) {
-      setSelectedProfileId(initialRequest.profileId);
+
+    const effectiveProfileId =
+      initialRequest.profileId || matchingProviderIds[0] || nextProfiles[0]?.id || '';
+    if (effectiveProfileId) {
+      setSelectedProfileId(effectiveProfileId);
     }
-    if (initialRequest.modelId) {
+
+    if (nextCompareMode === 'cross-provider' && initialRequest.modelId) {
+      // 直接设置选中的模型和供应商，避免被 reconcile useEffect 覆盖
       setSelectedModelId(initialRequest.modelId);
+      setSelectedProviderIds(matchingProviderIds);
+    } else if (nextCompareMode === 'cross-model' && initialRequest.modelId) {
+      // cross-model：只选目标模型，不全选
+      setSelectedModelIds([initialRequest.modelId]);
     }
 
     const schedule = window.setTimeout(() => {
-      const profileId =
-        initialRequest.profileId ||
-        nextProfiles[0]?.id ||
-        selectedProfileId;
-      const targets =
-        nextCompareMode === 'cross-provider' && initialRequest.modelId
-          ? nextProfiles
-              .map((profile) => {
-                const model = getProfileModels(profile.id, nextModality).find(
-                  (item) => item.id === initialRequest.modelId
-                );
-                return model
-                  ? buildBenchmarkTarget(profile.id, profile.name, model)
-                  : null;
-              })
-              .filter(isNonNullTarget)
-          : profileId
-          ? getProfileModels(profileId, nextModality)
-              .map((model) => {
-                const profile = nextProfiles.find((item) => item.id === profileId);
-                return profile
-                  ? buildBenchmarkTarget(profile.id, profile.name, model)
-                  : null;
-              })
-              .filter(isNonNullTarget)
-          : [];
+      let targets: ReturnType<typeof buildBenchmarkTarget>[];
+
+      if (nextCompareMode === 'cross-provider' && initialRequest.modelId) {
+        targets = nextProfiles
+          .map((profile) => {
+            const model = getProfileModels(profile.id, nextModality).find(
+              (item) => item.id === initialRequest.modelId
+            );
+            return model
+              ? buildBenchmarkTarget(profile.id, profile.name, model)
+              : null;
+          })
+          .filter(isNonNullTarget);
+      } else if (nextCompareMode === 'cross-model' && initialRequest.modelId) {
+        // 降级场景：只选目标模型
+        const profile = nextProfiles.find(
+          (item) => item.id === effectiveProfileId
+        );
+        if (profile) {
+          const model = getProfileModels(profile.id, nextModality).find(
+            (item) => item.id === initialRequest.modelId
+          );
+          targets = model
+            ? [buildBenchmarkTarget(profile.id, profile.name, model)]
+            : [];
+        } else {
+          targets = [];
+        }
+      } else {
+        const profileId =
+          effectiveProfileId || selectedProfileId;
+        if (profileId) {
+          targets = getProfileModels(profileId, nextModality)
+            .map((model) => {
+              const profile = nextProfiles.find(
+                (item) => item.id === profileId
+              );
+              return profile
+                ? buildBenchmarkTarget(profile.id, profile.name, model)
+                : null;
+            })
+            .filter(isNonNullTarget);
+        } else {
+          targets = [];
+        }
+      }
 
       if (!targets.length) {
+        console.debug('[Benchmark] setTimeout: no targets built, abort');
         return;
       }
+
+      console.debug('[Benchmark] setTimeout: creating session', {
+        targetCount: targets.length,
+        targets: targets.map(t => `${t.profileName}/${t.modelId}`),
+        autoRun: initialRequest.autoRun,
+      });
 
       const session = modelBenchmarkService.createSession({
         modality: nextModality,
@@ -665,9 +765,21 @@ function ModelBenchmarkWorkbench({
       if (initialRequest.autoRun) {
         void modelBenchmarkService.runSession(session.id);
       }
+      // 延迟释放 guard：createSession 会更新 storeState → 触发重新渲染 →
+      // reconcile effects 需要在 guard 保护下跳过，否则会覆盖 initialRequest 设置的状态。
+      // 用 rAF + setTimeout 确保 React 完成所有同步渲染和 effects 后再释放。
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          launchGuardRef.current = false;
+          console.debug('[Benchmark] guard released');
+        }, 0);
+      });
     }, 120);
 
-    return () => window.clearTimeout(schedule);
+    return () => {
+      window.clearTimeout(schedule);
+      launchGuardRef.current = false;
+    };
   }, [
     initialRequest,
     profiles,

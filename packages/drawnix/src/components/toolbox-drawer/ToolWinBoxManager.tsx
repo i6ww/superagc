@@ -5,7 +5,7 @@
  * 支持最小化、常驻工具栏等功能
  */
 
-import React, { useEffect, useState, Suspense, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, Suspense, useCallback, useMemo, useRef } from 'react';
 import { PlaitBoard, getViewportOrigination } from '@plait/core';
 import { WinBoxWindow } from '../winbox';
 import { toolWindowService } from '../../services/tool-window-service';
@@ -16,7 +16,7 @@ import { ToolTransforms } from '../../plugins/with-tool';
 import { processToolUrl } from '../../utils/url-template';
 import { useDeviceType } from '../../hooks/useDeviceType';
 import { toolRegistry } from '../../tools/registry';
-import { Z_INDEX } from '../../constants/z-index';
+import { winboxManagerService } from '../../services/winbox-manager-service';
 
 /**
  * 工具弹窗管理器组件
@@ -93,6 +93,24 @@ export const ToolWinBoxManager: React.FC = () => {
   const handleActivate = useCallback((toolId: string) => {
     toolWindowService.markToolActivated(toolId);
   }, []);
+
+  // 当 toolStates 变化时（如外部调用 openTool），同步置顶到 WinBoxManager
+  const prevTopToolRef = useRef<string | null>(null);
+  useEffect(() => {
+    const openStates = toolStates.filter(s => s.status === 'open');
+    if (openStates.length === 0) {
+      prevTopToolRef.current = null;
+      return;
+    }
+    const topTool = openStates.reduce((a, b) =>
+      a.activationOrder >= b.activationOrder ? a : b
+    );
+    const topToolId = topTool.tool.id;
+    if (topToolId !== prevTopToolRef.current) {
+      prevTopToolRef.current = topToolId;
+      winboxManagerService.bringToFront(`tool-window-${topToolId}`);
+    }
+  }, [toolStates]);
 
   /**
    * 处理将工具插入到画布
@@ -175,16 +193,6 @@ export const ToolWinBoxManager: React.FC = () => {
     [activeStates]
   );
 
-  const openWindowZIndexMap = useMemo(() => {
-    const visibleStates = stackedStates.filter(state => state.status === 'open');
-    return new Map(
-      visibleStates.map((state, index) => [
-        state.tool.id,
-        Z_INDEX.DIALOG_AI_IMAGE + index,
-      ])
-    );
-  }, [stackedStates]);
-
   if (stackedStates.length === 0) {
     return null;
   }
@@ -224,7 +232,6 @@ export const ToolWinBoxManager: React.FC = () => {
             minimizeTargetSelector={`[data-minimize-target="${tool.id}"]`}
             className="winbox-ai-generation winbox-tool-window"
             background="#ffffff"
-            zIndex={openWindowZIndexMap.get(tool.id) ?? Z_INDEX.DIALOG_AI_IMAGE}
           >
             <div className="tool-window-content" style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
               {InternalComponent ? (
