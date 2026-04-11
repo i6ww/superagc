@@ -1833,6 +1833,7 @@ export const SettingsDialog = ({
                   placement="top"
                   theme="light"
                   showArrow={false}
+                  overlayStyle={{ maxWidth: 'none' }}
                 >
                   <InfoCircleIcon className="settings-dialog__tooltip-icon" />
                 </Tooltip>
