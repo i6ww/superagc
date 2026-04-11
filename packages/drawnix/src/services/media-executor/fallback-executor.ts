@@ -330,8 +330,8 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       );
 
       // 检测认证错误，触发设置弹窗
-      if (isAuthError(errorMessage)) {
-        dispatchApiAuthError({ message: errorMessage, source: 'image' });
+      if (isAuthError(error)) {
+        dispatchApiAuthError({ message: errorMessage, source: 'image', reason: 'invalid' });
       }
 
       // 如果日志还未更新为失败，更新它
@@ -457,8 +457,12 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       const errorMessage = error.message || 'Async image generation failed';
 
       // 检测认证错误，触发设置弹窗
-      if (isAuthError(errorMessage)) {
-        dispatchApiAuthError({ message: errorMessage, source: 'async-image' });
+      if (isAuthError(error)) {
+        dispatchApiAuthError({
+          message: errorMessage,
+          source: 'async-image',
+          reason: 'invalid',
+        });
       }
 
       failLLMApiLog(logId, {
@@ -672,8 +676,8 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       const errorMessage = error.message || 'Video generation failed';
 
       // 检测认证错误，触发设置弹窗
-      if (isAuthError(errorMessage)) {
-        dispatchApiAuthError({ message: errorMessage, source: 'video' });
+      if (isAuthError(error)) {
+        dispatchApiAuthError({ message: errorMessage, source: 'video', reason: 'invalid' });
       }
 
       failLLMApiLog(logId, {
@@ -834,8 +838,12 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       const errorMessage = error.message || 'AI analyze failed';
 
       // 检测认证错误，触发设置弹窗
-      if (isAuthError(errorMessage)) {
-        dispatchApiAuthError({ message: errorMessage, source: 'ai-analyze' });
+      if (isAuthError(error)) {
+        dispatchApiAuthError({
+          message: errorMessage,
+          source: 'ai-analyze',
+          reason: 'invalid',
+        });
       }
 
       failLLMApiLog(logId, {

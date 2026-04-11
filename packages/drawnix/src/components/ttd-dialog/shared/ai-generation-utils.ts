@@ -3,15 +3,10 @@ import { promptForApiKey } from '../../../utils/gemini-api';
 import { geminiSettings } from '../../../utils/settings-manager';
 import { CACHE_DURATION } from './size-constants';
 import { getSafeErrorMessage } from '@aitu/utils';
+import { classifyApiCredentialError } from '../../../utils/api-auth-error-event';
 
 export const isInvalidTokenError = (errorMessage: string): boolean => {
-  const message = errorMessage.toLowerCase();
-  return message.includes('invalid token') || 
-         message.includes('invalid api key') ||
-         message.includes('unauthorized') ||
-         message.includes('401') ||
-         // 检测 API 返回的 rix_api_error 类型的 token 错误
-         (message.includes('rix_api_error') && message.includes('invalid'));
+  return classifyApiCredentialError(errorMessage) === 'invalid';
 };
 
 export const notifyGenerationStateChange = (

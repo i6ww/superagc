@@ -116,8 +116,8 @@ export async function executeImageViaAdapter(
     const duration = Date.now() - logStartTime;
     const errorMessage = error.message || 'Image generation failed (adapter)';
 
-    if (isAuthError(errorMessage)) {
-      dispatchApiAuthError({ message: errorMessage, source: 'image' });
+    if (isAuthError(error)) {
+      dispatchApiAuthError({ message: errorMessage, source: 'image', reason: 'invalid' });
     }
 
     failLLMApiLog(logId, { duration, errorMessage });
@@ -237,8 +237,8 @@ export async function executeVideoViaAdapter(
     const duration = Date.now() - logStartTime;
     const errorMessage = error.message || 'Video generation failed (adapter)';
 
-    if (isAuthError(errorMessage)) {
-      dispatchApiAuthError({ message: errorMessage, source: 'video' });
+    if (isAuthError(error)) {
+      dispatchApiAuthError({ message: errorMessage, source: 'video', reason: 'invalid' });
     }
 
     failLLMApiLog(logId, { duration, errorMessage });

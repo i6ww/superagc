@@ -19,6 +19,7 @@ import { Task, TaskStatus, TaskType } from '../types/task.types';
 import { CharacterStatus } from '../types/character.types';
 import { isTaskTimeout } from '../utils/task-utils';
 import { isAsyncImageModel } from '../constants/model-config';
+import { classifyApiCredentialError } from '../utils/api-auth-error-event';
 
 /**
  * 从 API 错误体中提取原始错误消息
@@ -49,6 +50,7 @@ function getFriendlyErrorMessage(error: any): string {
   const message = error?.message || String(error);
   const apiErrorBody = error?.apiErrorBody || '';
   const httpStatus = error?.httpStatus;
+  const credentialErrorKind = classifyApiCredentialError(error);
 
   // 首先尝试从 API 错误体中提取原始错误消息
   const apiErrorMessage = extractApiErrorMessage(apiErrorBody);
@@ -111,9 +113,17 @@ function getFriendlyErrorMessage(error: any): string {
     return '请求过于频繁，请稍后重试';
   }
 
+  if (credentialErrorKind === 'invalid') {
+    return 'API Key 无效或已过期，请重新配置';
+  }
+
+  if (credentialErrorKind === 'missing') {
+    return '缺少 API Key，请先在设置中配置';
+  }
+
   // 认证错误
   if (message.includes('401') || httpStatus === 401) {
-    return 'API 认证失败，请检查 API Key 配置';
+    return '接口返回 401，请检查鉴权方式、账号权限或服务端策略';
   }
 
   // 权限错误（非额度问题）
