@@ -1647,6 +1647,12 @@ function ModelBenchmarkWorkbench({}: ModelBenchmarkWorkbenchProps) {
                       popupProps={{
                         overlayClassName: 'model-benchmark__select-popup',
                       }}
+                      panelTopContent={
+                        <div className="model-benchmark__select-actions">
+                          <button type="button" onClick={() => setSelectedProviderIds(crossProviderOptions.map((o) => o.value as string))}>全选</button>
+                          <button type="button" onClick={() => setSelectedProviderIds([])}>清除</button>
+                        </div>
+                      }
                       className="model-benchmark__multi-select"
                       label="参测供应商: "
                       value={selectedProviderIds}
@@ -1668,6 +1674,12 @@ function ModelBenchmarkWorkbench({}: ModelBenchmarkWorkbenchProps) {
                       popupProps={{
                         overlayClassName: 'model-benchmark__select-popup',
                       }}
+                      panelTopContent={
+                        <div className="model-benchmark__select-actions">
+                          <button type="button" onClick={() => setSelectedModelIds(activeProfileModels.map((m) => m.id))}>全选</button>
+                          <button type="button" onClick={() => setSelectedModelIds([])}>清除</button>
+                        </div>
+                      }
                       className="model-benchmark__multi-select"
                       label="参测模型: "
                       value={selectedModelIds}
@@ -1692,6 +1704,12 @@ function ModelBenchmarkWorkbench({}: ModelBenchmarkWorkbenchProps) {
                       popupProps={{
                         overlayClassName: 'model-benchmark__select-popup',
                       }}
+                      panelTopContent={
+                        <div className="model-benchmark__select-actions">
+                          <button type="button" onClick={() => setSelectedCustomKeys(customTargets.map((t) => t.selectionKey))}>全选</button>
+                          <button type="button" onClick={() => setSelectedCustomKeys([])}>清除</button>
+                        </div>
+                      }
                       className="model-benchmark__multi-select"
                       label="目标组合: "
                       value={selectedCustomKeys}

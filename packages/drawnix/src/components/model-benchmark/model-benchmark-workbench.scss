@@ -896,6 +896,29 @@
     }
   }
 
+  &__select-actions {
+    display: flex;
+    gap: 8px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--mb-line);
+
+    button {
+      padding: 2px 10px;
+      border: 1px solid var(--mb-line);
+      border-radius: 6px;
+      background: #ffffff;
+      font-size: 12px;
+      color: var(--mb-muted);
+      cursor: pointer;
+      transition: all 0.15s;
+
+      &:hover {
+        border-color: var(--mb-accent);
+        color: var(--mb-accent-deep);
+      }
+    }
+  }
+
   &__ghost-button--active,
   &__score-chip--active,
   &__preset-chip--active {
