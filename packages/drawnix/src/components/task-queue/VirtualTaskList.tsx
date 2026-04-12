@@ -7,7 +7,7 @@
 
 import React, { useRef, useState, useEffect } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Button } from 'tdesign-react';
+import { Button, Tooltip } from 'tdesign-react';
 import { ArrowUpIcon } from 'tdesign-icons-react';
 import { Task } from '../../types/task.types';
 import { TaskItem } from './TaskItem';
@@ -48,6 +48,10 @@ export interface VirtualTaskListProps {
   totalCount?: number;
   /** Loaded count of tasks */
   loadedCount?: number;
+  /** Optional custom text when all tasks are loaded */
+  allLoadedText?: string;
+  /** Optional hint when all tasks are loaded */
+  allLoadedHint?: React.ReactNode;
 }
 
 // Threshold for enabling virtualization
@@ -78,6 +82,8 @@ export const VirtualTaskList: React.FC<VirtualTaskListProps> = ({
   onLoadMore,
   totalCount,
   loadedCount,
+  allLoadedText,
+  allLoadedHint,
 }) => {
   const stableSelectedTaskIds = selectedTaskIds ?? EMPTY_SET;
   const parentRef = useRef<HTMLDivElement>(null);
@@ -285,7 +291,13 @@ export const VirtualTaskList: React.FC<VirtualTaskListProps> = ({
       {/* 没有更多数据提示 - 全部加载完成时显示 */}
       {!hasMore && tasks.length > 0 && totalCount !== undefined && totalCount > 50 && (
         <div className="virtual-task-list__no-more">
-          已加载全部 {totalCount} 个任务
+          {allLoadedHint ? (
+            <Tooltip content={allLoadedHint} theme="light">
+              <span>{allLoadedText || `已加载全部 ${totalCount} 个任务`}</span>
+            </Tooltip>
+          ) : (
+            allLoadedText || `已加载全部 ${totalCount} 个任务`
+          )}
         </div>
       )}
     </>

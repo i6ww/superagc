@@ -308,6 +308,44 @@ class TaskStorageReader extends BaseStorageReader<TaskCache> {
   }
 
   /**
+   * 获取已归档任务总数（用于历史标签数量展示）
+   */
+  async getArchivedTaskCount(): Promise<number> {
+    try {
+      const db = await this.getDB();
+      if (!db.objectStoreNames.contains(TASKS_STORE)) {
+        return 0;
+      }
+
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(TASKS_STORE, 'readonly');
+        const store = tx.objectStore(TASKS_STORE);
+        const index = store.index('createdAt');
+        let count = 0;
+        const cursorReq = index.openCursor();
+
+        cursorReq.onsuccess = () => {
+          const cursor = cursorReq.result;
+          if (!cursor) {
+            resolve(count);
+            return;
+          }
+
+          const task = cursor.value as SWTask;
+          if (task.archived) {
+            count++;
+          }
+          cursor.continue();
+        };
+
+        cursorReq.onerror = () => reject(cursorReq.error);
+      });
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
    * 获取单个任务（包括已归档的）
    */
   async getTask(taskId: string): Promise<Task | null> {

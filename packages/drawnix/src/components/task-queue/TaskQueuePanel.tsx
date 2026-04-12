@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Button, Tabs, Dialog, MessagePlugin, Input, Radio, Tooltip, Checkbox, Badge } from 'tdesign-react';
+import { Button, Tabs, Dialog, MessagePlugin, Input, Tooltip, Checkbox } from 'tdesign-react';
 import { DeleteIcon, SearchIcon, UserIcon, RefreshIcon, PauseCircleIcon, CheckDoubleIcon, ImageIcon, VideoIcon, FilterIcon } from 'tdesign-icons-react';
 import { Music4 } from 'lucide-react';
 import { VirtualTaskList } from './VirtualTaskList';
@@ -14,6 +14,7 @@ import { ArchivedTaskList } from './ArchivedTaskList';
 import { useTaskQueue } from '../../hooks/useTaskQueue';
 import { Task, TaskType, TaskStatus } from '../../types/task.types';
 import { unifiedCacheService } from '../../services/unified-cache-service';
+import { taskStorageReader } from '../../services/task-storage-reader';
 import { useDrawnix, DialogType } from '../../hooks/use-drawnix';
 import { insertImageFromUrl } from '../../data/image';
 import { insertVideoFromUrl } from '../../data/video';
@@ -39,7 +40,6 @@ import { formatLyricsForCanvas, getLyricsTags, getLyricsTitle, isLyricsTask } fr
 import './task-queue.scss';
 
 const { TabPanel } = Tabs;
-const RadioGroup = Radio.Group;
 
 // Storage key for drawer width
 export const TASK_DRAWER_WIDTH_KEY = 'task-queue-drawer-width';
@@ -112,6 +112,7 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const [showBatchDeleteConfirm, setShowBatchDeleteConfirm] = useState(false);
+  const [archivedCount, setArchivedCount] = useState<number | null>(null);
   
   // Sync state
   const { isConfigured } = useGitHubSync();
@@ -125,6 +126,28 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
   useEffect(() => {
     unifiedCacheService.initCacheStatus();
   }, []);
+
+  useEffect(() => {
+    if (!expanded) {
+      return;
+    }
+
+    let cancelled = false;
+
+    taskStorageReader.getArchivedTaskCount().then((count) => {
+      if (!cancelled) {
+        setArchivedCount(count);
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        setArchivedCount(0);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, activeTab]);
 
   // Filter and sort tasks
   const filteredTasks = useMemo(() => {
@@ -851,16 +874,27 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
   // 计算各 Tab 的显示数量（已加载数据中的分类 + 未加载的估算）
   // 全部数量使用 totalCount（来自 SW），其他分类使用已加载数据的数量
   const displayTotalCount = totalCount > 0 ? totalCount : tasks.length;
+  const taskRetentionHint = '这里只显示最近 100 个任务，更早的任务会自动移到“历史”中继续保留。';
+  const allTabLabel = (
+    <Tooltip content={taskRetentionHint} theme="light">
+      <span>全部 ({displayTotalCount})</span>
+    </Tooltip>
+  );
+  const archivedTabLabel = archivedCount === null ? '历史' : `历史 (${archivedCount})`;
+  const allLoadedText =
+    totalCount >= 100
+      ? `已加载最近 ${totalCount} 个任务，较早任务已移至“历史”`
+      : `已加载全部 ${totalCount} 个任务`;
 
   // Filter section with tabs and filters
   const filterSection = (
     <div className="task-queue-panel__filters-container">
       <Tabs value={activeTab} onChange={(value) => setActiveTab(value as string)}>
-        <TabPanel value="all" label={`全部 (${displayTotalCount})`} />
+        <TabPanel value="all" label={allTabLabel} />
         <TabPanel value="active" label={`生成中 (${activeTasks.length})`} />
         <TabPanel value="failed" label={`失败 (${failedTasks.length})`} />
         <TabPanel value="completed" label={`已完成 (${completedTasks.length})`} />
-        <TabPanel value="archived" label="历史" />
+        <TabPanel value="archived" label={archivedTabLabel} />
       </Tabs>
 
       {activeTab !== 'archived' && (
@@ -1102,6 +1136,8 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
             onLoadMore={loadMore}
             totalCount={totalCount}
             loadedCount={loadedCount}
+            allLoadedText={allLoadedText}
+            allLoadedHint={totalCount >= 100 ? taskRetentionHint : undefined}
             className="task-queue-panel__list"
             emptyContent={
               isLoading ? (
