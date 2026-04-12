@@ -2,8 +2,10 @@ import {
   DEFAULT_TTS_SETTINGS,
   resolveVoice,
 } from '../hooks/useTextToSpeech';
+import { getFileExtension } from '@aitu/utils';
 import { LS_KEYS } from '../constants/storage-keys';
 import { ttsSettings } from '../utils/settings-manager';
+import { cacheRemoteUrl } from './media-executor/fallback-utils';
 import type {
   ReadingPlaybackOrigin,
   ReadingPlaybackSource,
@@ -111,6 +113,14 @@ const ANALYSIS_SMOOTHING = 0.68;
 const WAVEFORM_SMOOTHING = 0.42;
 const PULSE_SMOOTHING = 0.52;
 const READING_PROGRESS_INTERVAL_MS = 250;
+
+function createAudioPlaybackHash(input: string): string {
+  let hash = 0;
+  for (let index = 0; index < input.length; index++) {
+    hash = (hash * 31 + input.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash).toString(36);
+}
 export const EMPTY_AUDIO_SPECTRUM = Object.freeze(
   Array.from({ length: ANALYSIS_BAND_COUNT }, () => 0)
 );
@@ -759,6 +769,7 @@ export class CanvasAudioPlaybackService {
   ): Promise<void> {
     this.stopReadingForAudio();
     const audio = this.ensureAudio();
+    const playbackUrl = await this.resolvePlaybackAudioUrl(source);
     const switchingTrack =
       restartFromBeginning
       || this.state.activeAudioUrl !== source.audioUrl
@@ -767,7 +778,7 @@ export class CanvasAudioPlaybackService {
 
     if (switchingTrack) {
       audio.pause();
-      audio.src = source.audioUrl;
+      audio.src = playbackUrl;
       audio.currentTime = 0;
 
       try {
@@ -809,6 +820,33 @@ export class CanvasAudioPlaybackService {
         error: getPlaybackErrorMessage(error),
       });
       throw error;
+    }
+  }
+
+  private async resolvePlaybackAudioUrl(
+    source: CanvasAudioPlaybackSource
+  ): Promise<string> {
+    const { audioUrl } = source;
+    if (!audioUrl.startsWith('http://') && !audioUrl.startsWith('https://')) {
+      return audioUrl;
+    }
+
+    try {
+      const ext = getFileExtension(audioUrl);
+      const cacheKey =
+        source.providerTaskId ||
+        source.clipId ||
+        source.elementId ||
+        `playback-${createAudioPlaybackHash(audioUrl)}`;
+      return await cacheRemoteUrl(
+        audioUrl,
+        cacheKey,
+        'audio',
+        ext !== 'bin' ? ext : 'mp3'
+      );
+    } catch (error) {
+      console.warn('[CanvasAudioPlayback] Failed to resolve local audio cache:', error);
+      return audioUrl;
     }
   }
 

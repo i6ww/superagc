@@ -6,18 +6,16 @@
 
 import { PlaitBoard, PlaitElement, CoreTransforms } from '@plait/core';
 import { PlaitDrawElement } from '@plait/draw';
-
-/** 素材库 URL 前缀 */
-const ASSET_URL_PREFIX = '/asset-library/';
-
-/** 缓存 URL 前缀（合并图片/视频） */
-const CACHE_URL_PREFIX = '/__aitu_cache__/';
+import {
+  ASSET_LIBRARY_URL_PREFIX,
+  isVirtualMediaUrl,
+} from './virtual-media-url';
 
 /**
  * 检查是否为虚拟URL（素材库本地URL）
  */
 export function isVirtualUrl(url: string): boolean {
-  return url.startsWith('/asset-library/') || url.startsWith('/__aitu_cache__/');
+  return isVirtualMediaUrl(url);
 }
 
 /**
@@ -33,12 +31,12 @@ export function isCacheUrl(url: string): boolean {
  * 例如: /asset-library/87501b99-6c6d-4053-8b38-37bfaabce9a3.png -> 87501b99-6c6d-4053-8b38-37bfaabce9a3
  */
 export function extractAssetIdFromUrl(url: string): string | null {
-  if (!url.startsWith(ASSET_URL_PREFIX)) {
+  if (!url.startsWith(ASSET_LIBRARY_URL_PREFIX)) {
     return null;
   }
   
   // 移除前缀和扩展名
-  const pathPart = url.slice(ASSET_URL_PREFIX.length);
+  const pathPart = url.slice(ASSET_LIBRARY_URL_PREFIX.length);
   const dotIndex = pathPart.lastIndexOf('.');
   if (dotIndex > 0) {
     return pathPart.slice(0, dotIndex);
@@ -50,7 +48,7 @@ export function extractAssetIdFromUrl(url: string): string | null {
  * 根据素材ID生成虚拟URL的匹配模式
  */
 export function getAssetUrlPattern(assetId: string): string {
-  return `${ASSET_URL_PREFIX}${assetId}`;
+  return `${ASSET_LIBRARY_URL_PREFIX}${assetId}`;
 }
 
 /**

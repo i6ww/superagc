@@ -106,8 +106,14 @@ describe('cacheRemoteUrl', () => {
     vi.unstubAllGlobals();
   });
 
-  it('keeps remote https audio urls unchanged as well', async () => {
-    const fetchMock = vi.fn<typeof fetch>();
+  it('caches remote https audio urls into stable local paths', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        new Response(new Blob(['audio-binary'], { type: 'audio/mpeg' }), {
+          status: 200,
+        })
+      );
     vi.stubGlobal('fetch', fetchMock);
 
     const { cacheRemoteUrl } = await import('./fallback-utils');
@@ -115,9 +121,21 @@ describe('cacheRemoteUrl', () => {
 
     const result = await cacheRemoteUrl(remoteUrl, 'task-audio', 'audio', 'mp3');
 
-    expect(result).toBe(remoteUrl);
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(cacheMediaFromBlob).not.toHaveBeenCalled();
+    expect(result).toBe('/__aitu_generated__/audio/task-audio.mp3');
+    expect(fetchMock).toHaveBeenCalledWith(remoteUrl, {
+      credentials: 'omit',
+      cache: 'no-store',
+      referrerPolicy: 'no-referrer',
+    });
+    expect(cacheMediaFromBlob).toHaveBeenCalledWith(
+      '/__aitu_generated__/audio/task-audio.mp3',
+      expect.any(Blob),
+      'audio',
+      {
+        taskId: 'task-audio',
+        source: 'AI_GENERATED',
+      }
+    );
 
     vi.unstubAllGlobals();
   });

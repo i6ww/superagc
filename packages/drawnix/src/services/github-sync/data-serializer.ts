@@ -16,6 +16,7 @@ import {
 } from '../prompt-storage-service';
 import { taskStorageReader } from '../task-storage-reader';
 import { taskQueueService } from '../task-queue';
+import { isVirtualMediaUrl } from '../../utils/virtual-media-url';
 import { logDebug, logWarning } from './sync-log-service';
 import { TaskStatus, TaskType, Task } from '../../types/task.types';
 import { DRAWNIX_DEVICE_ID_KEY } from '../../constants/storage';
@@ -1117,7 +1118,7 @@ class DataSerializer {
         // 标记需要从云端下载媒体的任务（保留原始 URL 不变）
         const processedTasks = tasksToRestore.map(task => {
           // 如果任务有本地缓存 URL，标记为需要下载媒体
-          if (task.result?.url?.startsWith('/__aitu_cache__/')) {
+          if (task.result?.url && isVirtualMediaUrl(task.result.url)) {
             return {
               ...task,
               result: {

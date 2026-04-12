@@ -40,6 +40,11 @@ import {
   getLocalAssetGroupKey,
   normalizeAssetUrl,
 } from '../utils/asset-dedupe';
+import {
+  isAIGeneratedAudioUrl,
+  isAssetLibraryUrl,
+  isLegacyCacheUrl,
+} from '../utils/virtual-media-url';
 
 
 /**
@@ -55,6 +60,30 @@ function getLocalDedupeKey(asset: Asset): string | undefined {
 
 function isUnifiedCacheAsset(asset: Asset): boolean {
   return asset.id.startsWith('unified-cache-');
+}
+
+interface CacheAssetTaskContext {
+  completedTaskIds: Set<string>;
+  completedTaskUrls: Set<string>;
+}
+
+function hasAIGeneratedCacheMetadata(item: {
+  metadata?: {
+    taskId?: string;
+    prompt?: string;
+    model?: string;
+    params?: unknown;
+    source?: string;
+  };
+}): boolean {
+  if (item.metadata?.source === AssetSourceEnum.AI_GENERATED) {
+    return true;
+  }
+
+  return Boolean(
+    item.metadata?.taskId &&
+    (item.metadata.prompt || item.metadata.model || item.metadata.params)
+  );
 }
 
 function mergeLocalAssets(assets: Asset[]): Asset[] {
@@ -234,7 +263,9 @@ export function AssetProvider({ children }: AssetProviderProps) {
    * 优化：不再逐个访问 Cache Storage，直接使用 IndexedDB 元数据
    * 这大幅提升了素材库的加载速度
    */
-  const getAssetsFromCacheStorage = useCallback(async (): Promise<Asset[]> => {
+  const getAssetsFromCacheStorage = useCallback(async (
+    taskContext?: CacheAssetTaskContext
+  ): Promise<Asset[]> => {
     try {
       // 直接从 IndexedDB 获取所有缓存媒体的元数据
       // 这比遍历 Cache Storage 快得多
@@ -252,11 +283,22 @@ export function AssetProvider({ children }: AssetProviderProps) {
           }
         })();
         
-        // 只处理 /__aitu_cache__/ 和 /asset-library/ 前缀的资源
-        const isAituCache = pathname.startsWith('/__aitu_cache__/');
-        const isAssetLibrary = pathname.startsWith('/asset-library/');
+        const isAituCache = isLegacyCacheUrl(pathname);
+        const isAssetLibrary = isAssetLibraryUrl(pathname);
+        const isAIGeneratedAudio = isAIGeneratedAudioUrl(pathname);
         
-        if (!isAituCache && !isAssetLibrary) continue;
+        if (!isAituCache && !isAssetLibrary && !isAIGeneratedAudio) continue;
+
+        const normalizedPathname = normalizeAssetUrl(pathname);
+        const isDuplicatedByCompletedTask = Boolean(
+          taskContext &&
+          (
+            taskContext.completedTaskUrls.has(normalizedPathname) ||
+            (item.metadata?.taskId && taskContext.completedTaskIds.has(item.metadata.taskId))
+          )
+        );
+
+        if (isDuplicatedByCompletedTask) continue;
 
         const filename = pathname.split('/').pop() || '';
 
@@ -267,8 +309,14 @@ export function AssetProvider({ children }: AssetProviderProps) {
                         pathname.includes('/video/') ||
                         /\.(mp4|webm|mov)$/i.test(pathname);
         const isAudio = item.type === 'audio' ||
+                        isAIGeneratedAudio ||
                         pathname.startsWith('/__aitu_cache__/audio/') ||
                         /\.(mp3|wav|ogg|aac|flac)$/i.test(pathname);
+
+        const assetSource =
+          isAIGeneratedAudio || hasAIGeneratedCacheMetadata(item)
+            ? AssetSourceEnum.AI_GENERATED
+            : AssetSourceEnum.LOCAL;
 
         const assetType = isAudio ? AssetTypeEnum.AUDIO
           : isVideo ? AssetTypeEnum.VIDEO
@@ -288,13 +336,13 @@ export function AssetProvider({ children }: AssetProviderProps) {
         assets.push({
           id: `unified-cache-${filename}`,
           type: assetType,
-          source: AssetSourceEnum.LOCAL,
-          url: pathname,
+          source: assetSource,
+          url: normalizedPathname,
           name: item.metadata?.name || filename,
           mimeType: item.mimeType,
           createdAt: item.cachedAt,
           size: item.size,
-          contentHash: item.contentHash || getAssetContentHash({ url: pathname }),
+          contentHash: item.contentHash || getAssetContentHash({ url: normalizedPathname }),
           ...(thumbnail && { thumbnail }),
         });
       }
@@ -328,18 +376,32 @@ export function AssetProvider({ children }: AssetProviderProps) {
           !!task.result?.url
         )
         .map(taskToAsset);
+      const aiAssetIds = new Set(aiAssets.map(asset => asset.id));
+      const aiAssetUrls = new Set(aiAssets.map(asset => normalizeAssetUrl(asset.url)));
 
       // 3. 从 Cache Storage 获取媒体（优先级最低，用于补充）
-      const cacheStorageAssets = await getAssetsFromCacheStorage();
+      const cacheStorageAssets = await getAssetsFromCacheStorage({
+        completedTaskIds: aiAssetIds,
+        completedTaskUrls: aiAssetUrls,
+      });
+      const localCacheAssets = cacheStorageAssets.filter(
+        asset => asset.source === AssetSourceEnum.LOCAL
+      );
+      const generatedCacheAssets = cacheStorageAssets.filter(
+        asset => asset.source === AssetSourceEnum.AI_GENERATED
+      );
 
       // 4. 本地来源按内容去重；AI 结果保持独立
       const groupedLocalAssets = mergeLocalAssets([
         ...localAssets,
-        ...cacheStorageAssets,
+        ...localCacheAssets,
       ]);
+      const supplementalGeneratedAssets = generatedCacheAssets.filter(
+        asset => !aiAssetUrls.has(normalizeAssetUrl(asset.url))
+      );
 
       // 5. 合并所有来源，按创建时间倒序排列
-      const allAssets = [...groupedLocalAssets, ...aiAssets].sort(
+      const allAssets = [...groupedLocalAssets, ...supplementalGeneratedAssets, ...aiAssets].sort(
         (a, b) => b.createdAt - a.createdAt
       );
 

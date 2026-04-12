@@ -17,6 +17,10 @@ import { getDataURL } from '../../data/blob';
 import { unifiedCacheService } from '../unified-cache-service';
 import { providerTransport } from '../provider-routing/provider-transport';
 import {
+  AI_GENERATED_AUDIO_URL_PREFIX,
+  isVirtualMediaUrl,
+} from '../../utils/virtual-media-url';
+import {
   downloadVideoContentToLocalUrl,
   extractInlineVideoUrl,
   shouldDownloadVideoContent,
@@ -263,8 +267,9 @@ export async function generateAsyncImage(
 
 /**
  * 收敛任务结果里的媒体 URL。
- * - data URL / 原始 base64：落到本地 Cache Storage，并返回 /__aitu_cache__/ 虚拟路径
- * - http/https：保留原始远程 URL，交给既有 SW 请求拦截链路处理，避免把远程素材误判成本地素材
+ * - data URL / 原始 base64：落到本地 Cache Storage，并返回稳定虚拟路径
+ * - 远程音频 URL：主动缓存到本地稳定路径，避免签名链接过期后无法播放
+ * - 其他 http/https：保留原始远程 URL，交给既有 SW 请求拦截链路处理，避免把远程素材误判成本地素材
  */
 export async function cacheRemoteUrl(
   remoteUrl: string,
@@ -277,22 +282,70 @@ export async function cacheRemoteUrl(
     mediaType === 'image' ? normalizeImageDataUrl(remoteUrl) : remoteUrl;
 
   // 已经是本地路径，无需缓存
-  if (
-    normalizedUrl.startsWith('/__aitu_cache__/') ||
-    normalizedUrl.startsWith('/asset-library/')
-  ) {
+  if (isVirtualMediaUrl(normalizedUrl)) {
     return normalizedUrl;
   }
 
-  // 远程 URL 保留原始地址，避免把 AI 生成素材改写成本地缓存路径。
   if (normalizedUrl.startsWith('http://') || normalizedUrl.startsWith('https://')) {
-    return normalizedUrl;
+    if (mediaType !== 'audio') {
+      return normalizedUrl;
+    }
+
+    try {
+      const hintedFormat = getFileExtension(normalizedUrl);
+      const guessedFormat = hintedFormat !== 'bin' ? hintedFormat : format;
+      const guessedSuffix = index !== undefined ? `_${index}` : '';
+      const guessedLocalUrl = `${AI_GENERATED_AUDIO_URL_PREFIX}${taskId}${guessedSuffix}.${guessedFormat}`;
+
+      if (await unifiedCacheService.isCached(guessedLocalUrl)) {
+        return guessedLocalUrl;
+      }
+
+      const response = await fetch(normalizedUrl, {
+        credentials: 'omit',
+        cache: 'no-store',
+        referrerPolicy: 'no-referrer',
+      });
+      if (!response.ok) {
+        return normalizedUrl;
+      }
+
+      const blob = await response.blob();
+      if (blob.size === 0) {
+        return normalizedUrl;
+      }
+
+      const mimeFormat = getFileExtension('', blob.type);
+      const finalFormat =
+        mimeFormat !== 'bin'
+          ? mimeFormat
+          : hintedFormat !== 'bin'
+          ? hintedFormat
+          : guessedFormat;
+      const localUrl = `${AI_GENERATED_AUDIO_URL_PREFIX}${taskId}${guessedSuffix}.${finalFormat}`;
+
+      if (await unifiedCacheService.isCached(localUrl)) {
+        return localUrl;
+      }
+
+      await unifiedCacheService.cacheMediaFromBlob(localUrl, blob, mediaType, {
+        taskId,
+        source: 'AI_GENERATED',
+      });
+      return localUrl;
+    } catch (error) {
+      console.warn('[cacheRemoteUrl] Remote audio cache failed, using original URL:', error);
+      return normalizedUrl;
+    }
   }
 
   const suffix = index !== undefined ? `_${index}` : '';
   const inferredFormat = getFileExtension(normalizedUrl);
   const finalFormat = inferredFormat !== 'bin' ? inferredFormat : format;
-  const localUrl = `/__aitu_cache__/${mediaType}/${taskId}${suffix}.${finalFormat}`;
+  const localUrl =
+    mediaType === 'audio'
+      ? `${AI_GENERATED_AUDIO_URL_PREFIX}${taskId}${suffix}.${finalFormat}`
+      : `/__aitu_cache__/${mediaType}/${taskId}${suffix}.${finalFormat}`;
 
   try {
     // data URL / 原始 base64：直接转 Blob 再缓存，避免把大串 base64 存进任务结果
@@ -305,13 +358,19 @@ export async function cacheRemoteUrl(
       }
       const contentHash = await calculateBlobChecksum(blob);
       const hashedFormat = getFileExtension('', blob.type);
-      const contentAddressedUrl = `/__aitu_cache__/${mediaType}/content-${contentHash}.${hashedFormat !== 'bin' ? hashedFormat : finalFormat}`;
+      const contentAddressedUrl =
+        mediaType === 'audio'
+          ? `${AI_GENERATED_AUDIO_URL_PREFIX}content-${contentHash}.${hashedFormat !== 'bin' ? hashedFormat : finalFormat}`
+          : `/__aitu_cache__/${mediaType}/content-${contentHash}.${hashedFormat !== 'bin' ? hashedFormat : finalFormat}`;
 
       if (await unifiedCacheService.isCached(contentAddressedUrl)) {
         return contentAddressedUrl;
       }
 
-      await unifiedCacheService.cacheMediaFromBlob(contentAddressedUrl, blob, mediaType, { taskId });
+      await unifiedCacheService.cacheMediaFromBlob(contentAddressedUrl, blob, mediaType, {
+        taskId,
+        ...(mediaType === 'audio' ? { source: 'AI_GENERATED' } : {}),
+      });
       return contentAddressedUrl;
     }
 

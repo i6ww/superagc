@@ -13,6 +13,10 @@ import {
 } from '@aitu/utils';
 import { getDataURL } from '../data/blob';
 import { swChannelClient } from './sw-channel/client';
+import {
+  AI_GENERATED_AUDIO_URL_PREFIX,
+  isVirtualMediaUrl,
+} from '../utils/virtual-media-url';
 
 // ==================== 常量定义 ====================
 
@@ -29,6 +33,48 @@ const LEGACY_DB_NAMES = {
 
 /** Service Worker 图片缓存名称 */
 const IMAGE_CACHE_NAME = 'drawnix-images';
+
+const VOLATILE_REMOTE_CACHE_QUERY_PARAMS = new Set([
+  '_t',
+  'cache_buster',
+  'v',
+  'timestamp',
+  'nocache',
+  '_cb',
+  't',
+  'retry',
+  '_retry',
+  'rand',
+  '_force',
+  'bypass_sw',
+  'direct_fetch',
+  'thumbnail',
+  'expires',
+  'signature',
+  'sig',
+  'token',
+  'policy',
+  'x-amz-algorithm',
+  'x-amz-credential',
+  'x-amz-date',
+  'x-amz-expires',
+  'x-amz-security-token',
+  'x-amz-signature',
+  'x-amz-signedheaders',
+  'x-goog-algorithm',
+  'x-goog-credential',
+  'x-goog-date',
+  'x-goog-expires',
+  'x-goog-signature',
+  'x-goog-signedheaders',
+  'ossaccesskeyid',
+  'x-oss-security-token',
+  'x-oss-signature-version',
+  'x-oss-credential',
+  'x-oss-date',
+  'x-oss-expires',
+  'x-oss-signature',
+]);
 
 /** 缓存策略常量 */
 export const CACHE_CONSTANTS = {
@@ -294,7 +340,29 @@ class UnifiedCacheService {
       : type === 'audio'
       ? 'mp3'
       : 'png';
+    if (type === 'audio') {
+      return `${AI_GENERATED_AUDIO_URL_PREFIX}content-${contentHash}.${resolvedExtension}`;
+    }
     return `/__aitu_cache__/${type}/content-${contentHash}.${resolvedExtension}`;
+  }
+
+  private normalizeRemoteCacheUrl(url: string): string {
+    if (!url || url.startsWith('/') || url.startsWith('blob:') || url.startsWith('data:')) {
+      return url;
+    }
+
+    try {
+      const parsed = new URL(url);
+      const keys = Array.from(parsed.searchParams.keys());
+      for (const key of keys) {
+        if (VOLATILE_REMOTE_CACHE_QUERY_PARAMS.has(key.toLowerCase())) {
+          parsed.searchParams.delete(key);
+        }
+      }
+      return parsed.toString();
+    } catch {
+      return url;
+    }
   }
 
   /**
@@ -418,11 +486,12 @@ class UnifiedCacheService {
     }
   ): Promise<void> {
     try {
-      const existing = await this.getItem(url);
+      const normalizedUrl = this.normalizeRemoteCacheUrl(url);
+      const existing = await this.getItem(normalizedUrl);
       const now = Date.now();
 
       const item: CachedMedia = {
-        url,
+        url: normalizedUrl,
         type: 'image',
         mimeType: existing?.mimeType || 'image/png',
         size: existing?.size || 0,
@@ -435,7 +504,7 @@ class UnifiedCacheService {
       };
 
       await this.putItem(item);
-      this.cachedUrls.add(url);
+      this.cachedUrls.add(normalizedUrl);
       this.notifyListeners();
 
       // console.log('[UnifiedCache] Image metadata registered:', { url, taskId: metadata.taskId });
@@ -469,7 +538,7 @@ class UnifiedCacheService {
 
       // 检查是否为虚拟 URL（素材库本地 URL）
       // 虚拟 URL 必须转换为 base64，因为大模型无法访问本地虚拟路径
-      const isVirtualUrl = url.startsWith('/asset-library/') || url.startsWith('/__aitu_cache__/');
+      const isVirtualUrl = isVirtualMediaUrl(url);
 
       // 1. 查询缓存信息
       const info = await this.getCacheInfo(url);
@@ -1031,7 +1100,7 @@ class UnifiedCacheService {
   async getCachedBlob(url: string): Promise<Blob | null> {
     try {
       // 检查是否为虚拟 URL（素材库本地 URL 或缓存 URL）
-      const isVirtualUrl = url.startsWith('/asset-library/') || url.startsWith('/__aitu_cache__/');
+      const isVirtualUrl = isVirtualMediaUrl(url);
 
       // 如果是 taskId（不是完整 URL）或虚拟 URL，直接从 Cache API 获取
       if (isVirtualUrl || (!url.startsWith('http') && !url.startsWith('blob:') && !url.startsWith('/'))) {

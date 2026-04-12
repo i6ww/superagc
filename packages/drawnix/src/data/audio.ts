@@ -3,6 +3,7 @@ import {
   Point,
   getRectangleByElements,
 } from '@plait/core';
+import { getFileExtension } from '@aitu/utils';
 import type { DataURL } from '../types';
 import {
   getInsertionPointForSelectedElements,
@@ -11,6 +12,7 @@ import {
 } from '../utils/selection-utils';
 import { analytics } from '../utils/posthog-analytics';
 import { cacheRemoteUrl } from '../services/media-executor/fallback-utils';
+import { isVirtualMediaUrl } from '../utils/virtual-media-url';
 import {
   AUDIO_NODE_DEFAULT_HEIGHT,
   AUDIO_NODE_DEFAULT_WIDTH,
@@ -385,6 +387,25 @@ export async function insertAudioFromUrl(
     throw new Error('Board is required for audio insertion');
   }
 
+  let resolvedAudioUrl = audioUrl;
+  if (audioUrl.startsWith('http://') || audioUrl.startsWith('https://')) {
+    try {
+      const cacheKeySeed =
+        metadata.providerTaskId ||
+        metadata.clipId ||
+        `audio-${createHash(audioUrl).toString(36)}`;
+      const ext = getFileExtension(audioUrl);
+      resolvedAudioUrl = await cacheRemoteUrl(
+        audioUrl,
+        cacheKeySeed,
+        'audio',
+        ext !== 'bin' ? ext : 'mp3'
+      );
+    } catch (error) {
+      console.warn('[audio] Failed to cache audio before insertion:', error);
+    }
+  }
+
   const width = metadata.width || AUDIO_CARD_DEFAULT_WIDTH;
   const height = metadata.height || AUDIO_CARD_DEFAULT_HEIGHT;
   let insertionPoint = startPoint;
@@ -407,7 +428,7 @@ export async function insertAudioFromUrl(
 
   const finalPoint = insertionPoint || [100, 100] as Point;
   AudioNodeTransforms.insertAudioNode(board, {
-    audioUrl,
+    audioUrl: resolvedAudioUrl,
     position: finalPoint,
     size: {
       width,
@@ -418,10 +439,7 @@ export async function insertAudioFromUrl(
 
   analytics.track('asset_insert_canvas', {
     type: 'audio',
-    source:
-      audioUrl.startsWith('/__aitu_cache__/') || audioUrl.startsWith('/asset-library/')
-        ? 'local'
-        : 'external',
+    source: isVirtualMediaUrl(resolvedAudioUrl) ? 'local' : 'external',
     width,
     height,
   });
