@@ -10,6 +10,13 @@ type ModelSortOptions = {
 
 type VersionVector = number[];
 
+const MODEL_NAME_IGNORED_TOKENS = new Set([
+  'vip',
+  'async',
+  'hd',
+  'uhd',
+]);
+
 function getModelSortKey(model: ModelConfig): string {
   return model.selectionKey || model.id;
 }
@@ -21,6 +28,12 @@ function getExplicitSortOrder(model: ModelConfig): number | null {
 
 function hasNewTag(model: ModelConfig): boolean {
   return model.tags?.includes('new') ?? false;
+}
+
+function getRecommendedScore(model: ModelConfig): number | null {
+  return Number.isFinite(model.recommendedScore)
+    ? Number(model.recommendedScore)
+    : null;
 }
 
 function extractVersionCandidates(text: string): VersionVector[] {
@@ -109,6 +122,38 @@ function getBestVersionVector(model: ModelConfig): VersionVector {
   );
 }
 
+function getModelNameOrderKey(model: ModelConfig): string {
+  const source = [model.shortLabel, model.label, model.id]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  const tokens = source.match(/[a-z0-9]+(?:\.[a-z0-9]+)?/g) || [];
+  const filteredTokens = tokens.filter((token) => {
+    if (MODEL_NAME_IGNORED_TOKENS.has(token)) {
+      return false;
+    }
+    if (/^\d+s$/.test(token)) {
+      return false;
+    }
+    if (/^\d+k$/.test(token)) {
+      return false;
+    }
+    if (/^\d{6,}$/.test(token)) {
+      return false;
+    }
+    if (/^v?\d+(?:\.\d+)+$/.test(token)) {
+      return false;
+    }
+    if (/^\d+$/.test(token)) {
+      return false;
+    }
+    return true;
+  });
+
+  return filteredTokens.join(' ').trim() || source.trim();
+}
+
 function getQualityWeight(model: ModelConfig): number {
   const source = [
     model.id,
@@ -161,10 +206,11 @@ export function compareModelsByDisplayPriority(
     }
   }
 
-  const leftIsNew = hasNewTag(left);
-  const rightIsNew = hasNewTag(right);
-  if (leftIsNew !== rightIsNew) {
-    return leftIsNew ? -1 : 1;
+  const leftNameKey = getModelNameOrderKey(left);
+  const rightNameKey = getModelNameOrderKey(right);
+  const nameKeyDiff = leftNameKey.localeCompare(rightNameKey, 'zh-Hans-CN');
+  if (nameKeyDiff !== 0) {
+    return nameKeyDiff;
   }
 
   const versionDiff = compareVersionVectorsDesc(
@@ -173,6 +219,25 @@ export function compareModelsByDisplayPriority(
   );
   if (versionDiff !== 0) {
     return versionDiff;
+  }
+
+  const leftRecommendedScore = getRecommendedScore(left);
+  const rightRecommendedScore = getRecommendedScore(right);
+  if (
+    leftRecommendedScore !== null ||
+    rightRecommendedScore !== null
+  ) {
+    if (leftRecommendedScore === null) return 1;
+    if (rightRecommendedScore === null) return -1;
+    if (leftRecommendedScore !== rightRecommendedScore) {
+      return rightRecommendedScore - leftRecommendedScore;
+    }
+  }
+
+  const leftIsNew = hasNewTag(left);
+  const rightIsNew = hasNewTag(right);
+  if (leftIsNew !== rightIsNew) {
+    return leftIsNew ? -1 : 1;
   }
 
   const tierDiff = getTierWeight(right) - getTierWeight(left);

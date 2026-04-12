@@ -24,6 +24,7 @@ import {
   type ProviderProfile,
 } from './settings-manager';
 import { applySunoAliasPresentation, isSunoLikeModelId } from './suno-model-aliases';
+import { sortModelsByDisplayPriority } from './model-sort';
 
 const LEGACY_CACHE_KEY = 'drawnix-runtime-model-discovery';
 
@@ -1154,11 +1155,10 @@ class RuntimeModelDiscoveryStore {
         ...state.models.filter((model) => model.type === type)
       );
     }
-
-    return [
+    return sortModelsByDisplayPriority([
       ...runtimeModels,
       ...decorateStaticModels(getStaticModelsByType(type)),
-    ];
+    ]);
   }
 
   getPinnedSelectableModel(

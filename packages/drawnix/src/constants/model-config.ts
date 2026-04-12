@@ -163,12 +163,98 @@ export interface ModelConfig {
   videoDefaults?: VideoModelDefaults;
   /** 模型标签（用于参数兼容匹配的非硬编码方式） */
   tags?: string[];
+  /** 内置模型的人工推荐分，用于展示排序 */
+  recommendedScore?: number;
   /** 运行时来源供应商 ID（仅动态模型选择场景使用） */
   sourceProfileId?: string | null;
   /** 运行时来源供应商名称（仅动态模型选择场景使用） */
   sourceProfileName?: string | null;
   /** 选择器中用于区分同名模型来源的唯一键 */
   selectionKey?: string;
+}
+
+const BUILT_IN_MODEL_RECOMMENDATION_SCORES: Readonly<Record<string, number>> = {
+  'claude-opus-4-6': 98,
+  'gpt-5.4': 97,
+  'gpt-5-pro': 96,
+  'grok-4': 95,
+  'deepseek-v3.2': 94,
+  'deepseek-v3': 93,
+  'grok-4.2': 92,
+  'doubao-seed-1-6-thinking-250715': 91,
+  'gpt-5.2': 90,
+  'gpt-5.1': 89,
+  'gpt-5-chat-latest': 88,
+  'gemini-2.5-pro-all': 87,
+  'claude-sonnet-4-5-20250929-thinking': 86,
+  'gemini-3.1-pro-preview-thinking': 85,
+  'claude-opus-4-5-20251101': 84,
+  'gpt-5.4-mini': 83,
+  'gemini-3.1-pro-preview': 82,
+  'gemini-3-pro-preview-thinking': 81,
+  'deepseek-v3.2-thinking': 80,
+  'gemini-3-pro-preview': 79,
+  'claude-sonnet-4-5-20250929': 78,
+  'deepseek-r1': 77,
+  'claude-sonnet-4-6': 76,
+
+  'gemini-3-pro-image-preview-async': 98,
+  'gemini-3-pro-image-preview-2k-async': 97,
+  'gemini-2.5-flash-image-vip': 96,
+  'gemini-2.5-flash-image': 95,
+  'doubao-seedream-4-0-250828': 94,
+  'gemini-3.1-flash-image-preview': 93,
+  'gemini-3-pro-image-preview': 92,
+  'gpt-image-1.5': 91,
+  'gemini-3-pro-image-preview-vip': 90,
+  'gemini-3-pro-image-preview-2k-vip': 89,
+  'gpt-4o-image': 88,
+  'gpt-image-1': 87,
+  'qwen-image-2.0': 86,
+  'gemini-3-pro-image-preview-2k': 85,
+  'gemini-3-pro-image-preview-4k-vip': 84,
+  'gemini-3.1-flash-image-preview-4k': 83,
+  'gemini-3.1-flash-image-preview-2k': 82,
+  'gemini-3-pro-image-preview-4k-async': 45,
+  'doubao-seedream-4-5-251128': 44,
+  'seedream-v4': 43,
+  'kling_image': 42,
+  'gemini-3-pro-image-preview-4k': 41,
+
+  'kling_video': 98,
+  'veo3.1': 97,
+  'veo3-fast-frames': 96,
+  'veo3-pro': 95,
+  'veo3': 84,
+  'veo3-fast': 83,
+  'veo3.1-4k': 82,
+  'sora-2': 60,
+  'sora-2-pro': 59,
+  'sora-2-4s': 58,
+  'sora-2-8s': 57,
+  'sora-2-12s': 56,
+  'sora-2-15s': 55,
+  'kling-video-o1': 54,
+  'kling-video-o1-edit': 53,
+  'veo3-pro-frames': 52,
+  'veo3-frames': 51,
+  'veo3.1-pro': 50,
+  'veo3.1-pro-4k': 49,
+  'veo3.1-components': 48,
+  'veo3.1-components-4k': 47,
+};
+
+function applyBuiltInRecommendedScores(models: ModelConfig[]): ModelConfig[] {
+  return models.map((model) => {
+    const recommendedScore = BUILT_IN_MODEL_RECOMMENDATION_SCORES[model.id];
+    if (recommendedScore === undefined) {
+      return model;
+    }
+    return {
+      ...model,
+      recommendedScore,
+    };
+  });
 }
 
 // ============================================
@@ -555,10 +641,10 @@ export function isAsyncImageModel(modelId?: string): boolean {
 /**
  * 所有图片模型
  */
-export const IMAGE_MODELS: ModelConfig[] = [
+export const IMAGE_MODELS: ModelConfig[] = applyBuiltInRecommendedScores([
   ...IMAGE_MODEL_VIP_OPTIONS,
   ...IMAGE_MODEL_MORE_OPTIONS,
-];
+]);
 
 // ============================================
 // 视频模型配置
@@ -602,7 +688,7 @@ const SEEDANCE_DEFAULT_PARAMS: VideoModelDefaults = {
 /**
  * 视频模型配置
  */
-export const VIDEO_MODELS: ModelConfig[] = [
+export const VIDEO_MODELS: ModelConfig[] = applyBuiltInRecommendedScores([
   {
     id: 'kling_video',
     label: 'Kling',
@@ -873,7 +959,7 @@ export const VIDEO_MODELS: ModelConfig[] = [
       aspectRatio: '16:9',
     },
   },
-];
+]);
 
 // ============================================
 // 文本模型配置
@@ -882,7 +968,7 @@ export const VIDEO_MODELS: ModelConfig[] = [
 /**
  * 文本/Agent 模型配置
  */
-export const TEXT_MODELS: ModelConfig[] = [
+export const TEXT_MODELS: ModelConfig[] = applyBuiltInRecommendedScores([
   {
     id: 'deepseek-v3.2',
     label: 'DeepSeek V3.2',
@@ -1116,7 +1202,7 @@ export const TEXT_MODELS: ModelConfig[] = [
     vendor: ModelVendor.DOUBAO,
     supportsTools: true,
   },
-];
+]);
 
 /**
  * 音频模型
@@ -1124,7 +1210,7 @@ export const TEXT_MODELS: ModelConfig[] = [
  * 注意：Suno 实际执行使用 submit/fetch 规则与 mv 字段，
  * 这里保留的是可供路由与默认预设选择的逻辑音频入口。
  */
-export const AUDIO_MODELS: ModelConfig[] = [
+export const AUDIO_MODELS: ModelConfig[] = applyBuiltInRecommendedScores([
   {
     id: 'suno_music',
     label: 'Suno Music',
@@ -1135,7 +1221,7 @@ export const AUDIO_MODELS: ModelConfig[] = [
     vendor: ModelVendor.SUNO,
     tags: ['audio', 'music', 'suno'],
   },
-];
+]);
 
 // ============================================
 // 所有模型
