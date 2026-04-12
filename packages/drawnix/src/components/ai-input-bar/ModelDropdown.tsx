@@ -652,7 +652,7 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
         items.push({
           key: 'model-desc',
           label: (
-            <span style={{ fontSize: 11, color: 'var(--td-text-color-placeholder)', whiteSpace: 'normal', lineHeight: 1.4, display: 'block', maxWidth: 260 }}>
+            <span style={{ fontSize: 11, color: 'var(--td-text-color-secondary)', whiteSpace: 'normal', lineHeight: 1.4, display: 'block', maxWidth: 260 }}>
               {desc.length > 80 ? desc.slice(0, 80) + '…' : desc}
             </span>
           ),
