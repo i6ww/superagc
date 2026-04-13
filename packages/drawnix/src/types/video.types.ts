@@ -4,13 +4,14 @@
  * Defines types for video generation models and their parameters.
  */
 
-// Video generation models
-export type VideoModel =
+// Known built-in video generation models
+export type KnownVideoModel =
   | 'sora-2'
   | 'sora-2-pro'
   | 'sora-2-4s'
   | 'sora-2-8s'
   | 'sora-2-12s'
+  | 'kling_video'
   | 'kling-v1-6'
   | 'veo3'
   | 'veo3-pro'
@@ -24,6 +25,9 @@ export type VideoModel =
   | 'seedance-1.0-pro'
   | 'seedance-1.0-pro-fast'
   | 'seedance-1.0-lite';
+
+// Video generation models also allow runtime-discovered ids.
+export type VideoModel = KnownVideoModel | string;
 
 // Video model provider
 export type VideoProvider = 'sora' | 'veo' | 'kling' | 'seedance';

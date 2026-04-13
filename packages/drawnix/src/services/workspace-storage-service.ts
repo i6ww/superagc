@@ -350,7 +350,13 @@ class WorkspaceStorageService {
 
   async loadBoard(id: string): Promise<Board | null> {
     await this.ensureInitialized();
-    const board = await this.getBoardsStore().getItem<Board>(id);
+    let board: Board | null;
+    try {
+      board = await this.getBoardsStore().getItem<Board>(id);
+    } catch (error) {
+      console.error(`[Storage] Failed to load board ${id} from IndexedDB:`, error);
+      return null;
+    }
     if (board && board.elements) {
       // 迁移 fill 数据格式，确保渐变填充不会显示为黑色
       board.elements = migrateElementsFillData(board.elements);

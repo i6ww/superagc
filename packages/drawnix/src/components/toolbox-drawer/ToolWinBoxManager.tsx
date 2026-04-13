@@ -5,18 +5,18 @@
  * 支持最小化、常驻工具栏等功能
  */
 
-import React, { useEffect, useState, Suspense, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, Suspense, useCallback, useMemo, useRef } from 'react';
 import { PlaitBoard, getViewportOrigination } from '@plait/core';
 import { WinBoxWindow } from '../winbox';
 import { toolWindowService } from '../../services/tool-window-service';
 import { ToolDefinition, ToolWindowState } from '../../types/toolbox.types';
 import { useI18n } from '../../i18n';
-import { InternalToolComponents } from './InternalToolComponents';
 import { useDrawnix } from '../../hooks/use-drawnix';
 import { ToolTransforms } from '../../plugins/with-tool';
-import { DEFAULT_TOOL_CONFIG } from '../../constants/built-in-tools';
 import { processToolUrl } from '../../utils/url-template';
 import { useDeviceType } from '../../hooks/useDeviceType';
+import { toolRegistry } from '../../tools/registry';
+import { winboxManagerService } from '../../services/winbox-manager-service';
 
 /**
  * 工具弹窗管理器组件
@@ -90,6 +90,28 @@ export const ToolWinBoxManager: React.FC = () => {
     }
   }, []);
 
+  const handleActivate = useCallback((toolId: string) => {
+    toolWindowService.markToolActivated(toolId);
+  }, []);
+
+  // 当 toolStates 变化时（如外部调用 openTool），同步置顶到 WinBoxManager
+  const prevTopToolRef = useRef<string | null>(null);
+  useEffect(() => {
+    const openStates = toolStates.filter(s => s.status === 'open');
+    if (openStates.length === 0) {
+      prevTopToolRef.current = null;
+      return;
+    }
+    const topTool = openStates.reduce((a, b) =>
+      a.activationOrder >= b.activationOrder ? a : b
+    );
+    const topToolId = topTool.tool.id;
+    if (topToolId !== prevTopToolRef.current) {
+      prevTopToolRef.current = topToolId;
+      winboxManagerService.bringToFront(`tool-window-${topToolId}`);
+    }
+  }, [toolStates]);
+
   /**
    * 处理将工具插入到画布
    * @param tool 工具定义
@@ -160,15 +182,26 @@ export const ToolWinBoxManager: React.FC = () => {
     state => state.status === 'open' || state.status === 'minimized'
   );
 
-  if (activeStates.length === 0) {
+  const stackedStates = useMemo(
+    () =>
+      [...activeStates].sort((a, b) => {
+        if (a.activationOrder !== b.activationOrder) {
+          return a.activationOrder - b.activationOrder;
+        }
+        return a.tool.id.localeCompare(b.tool.id);
+      }),
+    [activeStates]
+  );
+
+  if (stackedStates.length === 0) {
     return null;
   }
 
   return (
     <>
-      {activeStates.map(state => {
+      {stackedStates.map(state => {
         const { tool, status, position, size, autoMaximize } = state;
-        const InternalComponent = tool.component ? InternalToolComponents[tool.component] : null;
+        const InternalComponent = toolRegistry.resolveInternalComponent(tool.component);
         
         // 确定窗口是否可见
         const isVisible = status === 'open';
@@ -194,6 +227,7 @@ export const ToolWinBoxManager: React.FC = () => {
             onMaximize={() => handleMaximize(tool.id)}
             onMove={(x, y) => handleMove(tool.id, x, y)}
             onResize={(w, h) => handleResize(tool.id, w, h)}
+            onActivate={() => handleActivate(tool.id)}
             onInsertToCanvas={(rect) => handleInsertToCanvas(tool, rect)}
             minimizeTargetSelector={`[data-minimize-target="${tool.id}"]`}
             className="winbox-ai-generation winbox-tool-window"

@@ -35,6 +35,12 @@ export const LS_KEYS = {
   AI_IMAGE_AUTO_INSERT: 'aitu_image_auto_insert_canvas',
   /** 视频生成后是否自动插入画布 */
   AI_VIDEO_AUTO_INSERT: 'aitu_video_auto_insert_canvas',
+  /** 底部 AI 输入栏参数偏好 */
+  AI_INPUT_PREFERENCES: 'aitu_ai_input_preferences',
+  /** AI 图片工具参数偏好 */
+  AI_IMAGE_TOOL_PREFERENCES: 'aitu_ai_image_tool_preferences',
+  /** AI 视频工具参数偏好 */
+  AI_VIDEO_TOOL_PREFERENCES: 'aitu_ai_video_tool_preferences',
   /** 是否显示画布上的 WorkZone 进度卡片 */
   WORKZONE_CARD_VISIBLE: 'aitu_workzone_card_visible',
 
@@ -63,6 +69,16 @@ export const LS_KEYS = {
   ASSET_MIGRATION_V3: 'drawnix_asset_migration_v3',
   /** LocalStorage 到 IndexedDB 迁移完成标记 */
   LS_TO_IDB_MIGRATION_DONE: 'aitu_ls_to_idb_migration_v1',
+
+  // ---- 音频播放器 UI ----
+  /** 画布音频播放器位置 */
+  AUDIO_PLAYER_POSITION: 'aitu:audio-player-position',
+  /** 画布音频播放器布局模式 */
+  AUDIO_PLAYER_LAYOUT: 'aitu:audio-player-layout',
+  /** 音频播放器播放模式 */
+  AUDIO_PLAYER_PLAYBACK_MODE: 'aitu:audio-player-playback-mode',
+  /** 音频播放器音频速率 */
+  AUDIO_PLAYER_AUDIO_PLAYBACK_RATE: 'aitu:audio-player-audio-playback-rate',
 
   // ---- 废弃键（仅用于迁移读取后删除） ----
   /** @deprecated 旧版本本地数据，迁移后删除 */

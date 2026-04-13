@@ -229,9 +229,12 @@ const CACHE_NAME = `drawnix-v${APP_VERSION}`;
 const IMAGE_CACHE_NAME = `drawnix-images`;
 const STATIC_CACHE_NAME = `drawnix-static-v${APP_VERSION}`;
 const FONT_CACHE_NAME = `drawnix-fonts`;
+const SW_CACHE_DATE_HEADER = 'sw-cache-date';
+const SW_CACHE_CREATED_AT_HEADER = 'sw-cache-created-at';
 
 // 缓存 URL 前缀 - 用于合并视频、图片等本地缓存资源
 const CACHE_URL_PREFIX = '/__aitu_cache__/';
+const AI_GENERATED_AUDIO_CACHE_PREFIX = '/__aitu_generated__/audio/';
 
 // 素材库 URL 前缀 - 用于素材库媒体资源
 const ASSET_LIBRARY_PREFIX = '/asset-library/';
@@ -273,6 +276,60 @@ const IMAGE_EXTENSIONS_REGEX = /\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)$/i;
 
 // 视频文件扩展名匹配
 const VIDEO_EXTENSIONS_REGEX = /\.(mp4|webm|ogg|mov|avi|mkv|flv|wmv|m4v)$/i;
+const AUDIO_EXTENSIONS_REGEX = /\.(mp3|wav|ogg|oga|m4a|aac|flac|opus)$/i;
+
+const VOLATILE_CACHE_QUERY_PARAMS = new Set([
+  '_t',
+  'cache_buster',
+  'v',
+  'timestamp',
+  'nocache',
+  '_cb',
+  't',
+  'retry',
+  '_retry',
+  'rand',
+  '_force',
+  'bypass_sw',
+  'direct_fetch',
+  'thumbnail',
+  'expires',
+  'signature',
+  'sig',
+  'token',
+  'policy',
+  'x-amz-algorithm',
+  'x-amz-credential',
+  'x-amz-date',
+  'x-amz-expires',
+  'x-amz-security-token',
+  'x-amz-signature',
+  'x-amz-signedheaders',
+  'x-goog-algorithm',
+  'x-goog-credential',
+  'x-goog-date',
+  'x-goog-expires',
+  'x-goog-signature',
+  'x-goog-signedheaders',
+  'ossaccesskeyid',
+  'x-oss-security-token',
+  'x-oss-signature-version',
+  'x-oss-credential',
+  'x-oss-date',
+  'x-oss-expires',
+  'x-oss-signature',
+]);
+
+function buildNormalizedCacheUrl(input: string | URL): URL {
+  const url = new URL(typeof input === 'string' ? input : input.toString());
+  const keys = Array.from(url.searchParams.keys());
+  for (const key of keys) {
+    if (VOLATILE_CACHE_QUERY_PARAMS.has(key.toLowerCase())) {
+      url.searchParams.delete(key);
+    }
+  }
+  return url;
+}
 
 interface PendingRequestEntry {
   promise: Promise<Response>;
@@ -365,7 +422,7 @@ interface DebugLogEntry {
   type: 'fetch' | 'cache' | 'message' | 'error' | 'console';
   url?: string;
   method?: string;
-  requestType?: string; // 'image' | 'video' | 'font' | 'static' | 'cache-url' | 'asset-library' | 'other'
+  requestType?: string; // 'image' | 'video' | 'audio' | 'font' | 'static' | 'cache-url' | 'asset-library' | 'other'
   status?: number;
   statusText?: string;
   responseType?: string;
@@ -796,6 +853,14 @@ function isVideoRequest(url: URL, request: Request): boolean {
   );
 }
 
+function isAudioRequest(url: URL, request: Request): boolean {
+  return (
+    AUDIO_EXTENSIONS_REGEX.test(url.pathname) ||
+    request.destination === 'audio' ||
+    url.pathname.includes('/audio/')
+  );
+}
+
 // 检查是否为字体请求
 function isFontRequest(url: URL, request: Request): boolean {
   // Google Fonts CSS 文件
@@ -809,6 +874,14 @@ function isFontRequest(url: URL, request: Request): boolean {
   // 通用字体文件扩展名
   const fontExtensions = /\.(woff|woff2|ttf|otf|eot)$/i;
   return fontExtensions.test(url.pathname) || request.destination === 'font';
+}
+
+// 检查是否为 Gemini generateContent 系列请求
+function isGenerateContentRequest(url: URL): boolean {
+  return (
+    url.pathname.includes(':generateContent') ||
+    url.pathname.includes(':streamGenerateContent')
+  );
 }
 
 // 从IndexedDB恢复失败域名列表
@@ -923,7 +996,7 @@ async function cleanOldCacheEntries(cache: Cache) {
       try {
         const response = await cache.match(request);
         if (response) {
-          const cacheDate = response.headers.get('sw-cache-date');
+          const cacheDate = response.headers.get(SW_CACHE_DATE_HEADER);
           const imageSize = response.headers.get('sw-image-size');
           entries.push({
             request,
@@ -1233,6 +1306,11 @@ sw.addEventListener('activate', (event: ExtendableEvent) => {
       // 清理过期的控制台日志（7 天前）
       cleanupExpiredConsoleLogs().catch((err) => {
         console.warn('Failed to cleanup expired console logs:', err);
+      });
+
+      // 归档超出保留限制的旧任务（不删除，标记 archived）
+      taskQueueStorage.archiveOldTasks(100).catch((err) => {
+        console.warn('Failed to archive old tasks:', err);
       });
 
 
@@ -2122,7 +2200,10 @@ sw.addEventListener('fetch', (event: FetchEvent) => {
   }
 
   // 拦截缓存 URL 请求 (/__aitu_cache__/{type}/{taskId}.{ext})
-  if (url.pathname.startsWith(CACHE_URL_PREFIX)) {
+  if (
+    url.pathname.startsWith(CACHE_URL_PREFIX) ||
+    url.pathname.startsWith(AI_GENERATED_AUDIO_CACHE_PREFIX)
+  ) {
     // console.log('Service Worker: Intercepting cache URL request:', event.request.url);
     const debugId = addDebugLog({
       type: 'fetch',
@@ -2270,6 +2351,48 @@ sw.addEventListener('fetch', (event: FetchEvent) => {
   // SW 拦截会导致每次都显示两个请求条目，且可能影响主线程缓存
   if (url.hostname === 'api.github.com') {
     return; // 静默放行，让浏览器直接处理
+  }
+
+  if (url.origin !== location.origin && isAudioRequest(url, event.request)) {
+    const startTime = Date.now();
+    const rangeHeader = event.request.headers.get('range');
+    const debugId = addDebugLog({
+      type: 'fetch',
+      url: event.request.url,
+      method: event.request.method,
+      requestType: 'audio',
+      headers: rangeHeader ? { range: rangeHeader } : undefined,
+      details: rangeHeader
+        ? `Audio Range request: ${rangeHeader}`
+        : 'External audio request',
+    });
+
+    event.respondWith(
+      handleAudioRequest(event.request)
+        .then((response) => {
+          updateDebugLog(debugId, {
+            status: response.status,
+            statusText: response.statusText,
+            responseType: response.type,
+            duration: Date.now() - startTime,
+            cached: response.headers.has(SW_CACHE_DATE_HEADER),
+            responseHeaders: {
+              'content-type': response.headers.get('content-type') || '',
+              'content-length': response.headers.get('content-length') || '',
+              'content-range': response.headers.get('content-range') || '',
+            },
+          });
+          return response;
+        })
+        .catch((error) => {
+          updateDebugLog(debugId, {
+            error: String(error),
+            duration: Date.now() - startTime,
+          });
+          throw error;
+        })
+    );
+    return;
   }
 
   // 拦截视频请求以支持 Range 请求
@@ -2454,6 +2577,20 @@ sw.addEventListener('fetch', (event: FetchEvent) => {
   // 对于其他请求（如 XHR/API 请求），在调试模式下拦截以记录日志
   // 非调试模式下让浏览器直接处理
   if (debugModeEnabled) {
+    // generateContent 长请求可能持续数分钟，调试模式下不应由 SW 读取请求/响应体，
+    // 否则会放大长请求和流式请求的失败风险。
+    if (isGenerateContentRequest(url)) {
+      addDebugLog({
+        type: 'fetch',
+        url: event.request.url,
+        method: event.request.method,
+        requestType: 'xhr',
+        details: `Skipped SW debug interception for generateContent request (${event.request.method})`,
+        duration: 0,
+      });
+      return;
+    }
+
     const debugId = addDebugLog({
       type: 'fetch',
       url: event.request.url,
@@ -2601,7 +2738,9 @@ async function handleFontRequest(request: Request): Promise<Response> {
 
       // 添加自定义头部标记缓存时间
       const headers = new Headers(responseToCache.headers);
-      headers.set('sw-cache-date', Date.now().toString());
+      const now = Date.now().toString();
+      headers.set(SW_CACHE_DATE_HEADER, now);
+      headers.set(SW_CACHE_CREATED_AT_HEADER, now);
 
       const cachedResponse = new Response(responseToCache.body, {
         status: responseToCache.status,
@@ -2657,11 +2796,14 @@ async function handleCacheUrlRequest(request: Request): Promise<Response> {
   const requestId = Math.random().toString(36).substring(2, 10);
   const url = new URL(request.url);
   const rangeHeader = request.headers.get('range');
+  const isAudio =
+    url.pathname.includes('/audio/') ||
+    AUDIO_EXTENSIONS_REGEX.test(url.pathname);
 
   // 通过路径或扩展名判断是否为视频
   const isVideo =
     url.pathname.includes('/video/') ||
-    /\.(mp4|webm|ogg|mov)$/i.test(url.pathname);
+    /\.(mp4|webm|mov)$/i.test(url.pathname);
 
   // 参数优先级：bypass_sw > _retry > thumbnail
   const bypassCache =
@@ -2724,6 +2866,10 @@ async function handleCacheUrlRequest(request: Request): Promise<Response> {
       if (isVideo) {
         // 视频请求支持 Range
         return createVideoResponse(blob, rangeHeader, requestId);
+      }
+
+      if (isAudio) {
+        return createAudioResponse(blob, rangeHeader, requestId);
       }
 
       // 图片请求 - 直接返回完整响应
@@ -2815,8 +2961,9 @@ async function handleAssetLibraryRequest(request: Request): Promise<Response> {
       // console.log(`Service Worker [Asset-${requestId}]: Found cached asset:`, cacheKey);
       const blob = await cachedResponse.blob();
 
-      // 检查是否是视频请求
-      const isVideo = url.pathname.match(/\.(mp4|webm|ogg|mov)$/i);
+      // 检查是否是视频/音频请求
+      const isVideo = url.pathname.match(/\.(mp4|webm|mov)$/i);
+      const isAudio = AUDIO_EXTENSIONS_REGEX.test(url.pathname);
 
       // 如果是预览图请求且预览图不存在，异步生成预览图（不阻塞响应）
       if (isThumbnailRequest && !isVideo) {
@@ -2827,6 +2974,10 @@ async function handleAssetLibraryRequest(request: Request): Promise<Response> {
       if (isVideo && rangeHeader) {
         // 视频请求支持 Range
         return createVideoResponse(blob, rangeHeader, requestId);
+      }
+
+      if (isAudio) {
+        return createAudioResponse(blob, rangeHeader, requestId);
       }
 
       // 图片或完整视频请求
@@ -2870,6 +3021,102 @@ async function handleAssetLibraryRequest(request: Request): Promise<Response> {
   }
 }
 
+async function handleAudioRequest(request: Request): Promise<Response> {
+  const url = new URL(request.url);
+  const requestId = Math.random().toString(36).substring(2, 10);
+  const rangeHeader = request.headers.get('range');
+  const dedupeUrl = buildNormalizedCacheUrl(url);
+  const dedupeKey = dedupeUrl.toString();
+
+  try {
+    const cache = await caches.open(IMAGE_CACHE_NAME);
+    let cachedResponse = await cache.match(dedupeKey);
+    if (!cachedResponse && dedupeKey !== request.url) {
+      cachedResponse = await cache.match(request.url);
+    }
+
+    if (cachedResponse) {
+      try {
+        const cachedBlob = await cachedResponse.clone().blob();
+        return createAudioResponse(cachedBlob, rangeHeader, requestId);
+      } catch {
+        return cachedResponse;
+      }
+    }
+
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.delete('range');
+    const response = await fetch(dedupeKey, {
+      method: 'GET',
+      headers: requestHeaders,
+      mode: request.mode,
+      credentials: request.credentials,
+      cache: 'no-store',
+      referrerPolicy: request.referrerPolicy || 'no-referrer',
+    });
+
+    if (!response.ok) {
+      return response;
+    }
+
+    if (response.type === 'opaque') {
+      cache.put(dedupeKey, response.clone()).catch((error) => {
+        console.warn(`Service Worker [Audio-${requestId}]: Failed to cache opaque audio response:`, error);
+      });
+      return response;
+    }
+
+    const blob = await response.blob();
+    const mimeType =
+      response.headers.get('Content-Type') ||
+      blob.type ||
+      'audio/mpeg';
+    const now = Date.now().toString();
+    const cacheResponse = new Response(blob, {
+      status: 200,
+      statusText: 'OK',
+      headers: {
+        'Content-Type': mimeType,
+        'Content-Length': blob.size.toString(),
+        'Accept-Ranges': 'bytes',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Expose-Headers':
+          'Content-Range, Accept-Ranges, Content-Length',
+        [SW_CACHE_DATE_HEADER]: now,
+        [SW_CACHE_CREATED_AT_HEADER]: now,
+        'sw-image-size': blob.size.toString(),
+      },
+    });
+
+    await cache.put(dedupeKey, cacheResponse.clone());
+
+    return createAudioResponse(blob, rangeHeader, requestId, mimeType);
+  } catch (error) {
+    console.error(`Service Worker [Audio-${requestId}]: Audio loading failed:`, error);
+    const cache = await caches.open(IMAGE_CACHE_NAME);
+    let cachedResponse = await cache.match(dedupeKey);
+    if (!cachedResponse && dedupeKey !== request.url) {
+      cachedResponse = await cache.match(request.url);
+    }
+    if (cachedResponse) {
+      try {
+        const cachedBlob = await cachedResponse.clone().blob();
+        return createAudioResponse(cachedBlob, rangeHeader, requestId);
+      } catch {
+        return cachedResponse;
+      }
+    }
+
+    return new Response('Audio loading error', {
+      status: 500,
+      statusText: 'Internal Server Error',
+      headers: {
+        'Content-Type': 'text/plain',
+      },
+    });
+  }
+}
+
 // Sentinel：视频下载失败时返回此值，避免 throw 导致 Uncaught (in promise)
 const VIDEO_LOAD_ERROR = Symbol('VIDEO_LOAD_ERROR');
 
@@ -2897,25 +3144,7 @@ async function handleVideoRequest(request: Request): Promise<Response> {
       !isRetryRequest;
 
     // 创建去重键（移除缓存破坏参数）
-    const dedupeUrl = new URL(url);
-    const cacheBreakingParams = [
-      '_t',
-      'cache_buster',
-      'v',
-      'timestamp',
-      'nocache',
-      '_cb',
-      't',
-      'retry',
-      '_retry',
-      'rand',
-      'bypass_sw',
-      'direct_fetch',
-      'thumbnail', // 也移除 thumbnail 参数，用于构建缓存key
-    ];
-    cacheBreakingParams.forEach((param) =>
-      dedupeUrl.searchParams.delete(param)
-    );
+    const dedupeUrl = buildNormalizedCacheUrl(url);
     const dedupeKey = dedupeUrl.toString();
     
     // 如果是预览图请求（没有 bypass_sw 和 _retry），查找预览图
@@ -3069,7 +3298,8 @@ async function handleVideoRequest(request: Request): Promise<Response> {
               headers: {
                 'Content-Type': videoBlob.type || 'video/mp4',
                 'Content-Length': videoBlob.size.toString(),
-                'sw-cache-date': Date.now().toString(),
+                [SW_CACHE_DATE_HEADER]: Date.now().toString(),
+                [SW_CACHE_CREATED_AT_HEADER]: Date.now().toString(),
                 'sw-video-size': videoBlob.size.toString(),
               },
             });
@@ -3148,17 +3378,44 @@ function createVideoResponse(
   rangeHeader: string | null,
   requestId: string
 ): Response {
-  const videoSize = videoBlob.size;
+  return createBufferedMediaResponse(
+    videoBlob,
+    rangeHeader,
+    requestId,
+    videoBlob.type || 'video/mp4'
+  );
+}
 
-  // 如果没有Range请求，返回完整视频
+function createAudioResponse(
+  audioBlob: Blob,
+  rangeHeader: string | null,
+  requestId: string,
+  mimeType?: string
+): Response {
+  return createBufferedMediaResponse(
+    audioBlob,
+    rangeHeader,
+    requestId,
+    mimeType || audioBlob.type || 'audio/mpeg'
+  );
+}
+
+function createBufferedMediaResponse(
+  mediaBlob: Blob,
+  rangeHeader: string | null,
+  _requestId: string,
+  mimeType: string
+): Response {
+  const mediaSize = mediaBlob.size;
+
+  // 如果没有Range请求，返回完整媒体
   if (!rangeHeader) {
-    // console.log(`Service Worker [Video-${requestId}]: 返回完整视频 (大小: ${(videoSize / 1024 / 1024).toFixed(2)}MB)`);
-    return new Response(videoBlob, {
+    return new Response(mediaBlob, {
       status: 200,
       statusText: 'OK',
       headers: {
-        'Content-Type': 'video/mp4',
-        'Content-Length': videoSize.toString(),
+        'Content-Type': mimeType,
+        'Content-Length': mediaSize.toString(),
         'Accept-Ranges': 'bytes',
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Expose-Headers':
@@ -3170,23 +3427,21 @@ function createVideoResponse(
   // 解析Range header (格式: "bytes=start-end")
   const rangeMatch = rangeHeader.match(/bytes=(\d+)-(\d*)/);
   if (!rangeMatch) {
-    return new Response(videoBlob, {
+    return new Response(mediaBlob, {
       status: 200,
       statusText: 'OK',
       headers: {
-        'Content-Type': 'video/mp4',
+        'Content-Type': mimeType,
         'Accept-Ranges': 'bytes',
       },
     });
   }
 
   const start = parseInt(rangeMatch[1], 10);
-  const end = rangeMatch[2] ? parseInt(rangeMatch[2], 10) : videoSize - 1;
-
-  // console.log(`Service Worker [Video-${requestId}]: Range请求: ${start}-${end} / ${videoSize} (${((end - start + 1) / 1024).toFixed(2)}KB)`);
+  const end = rangeMatch[2] ? parseInt(rangeMatch[2], 10) : mediaSize - 1;
 
   // 提取指定范围的数据
-  const slicedBlob = videoBlob.slice(start, end + 1);
+  const slicedBlob = mediaBlob.slice(start, end + 1);
   const contentLength = end - start + 1;
 
   // 构建206 Partial Content响应
@@ -3194,8 +3449,8 @@ function createVideoResponse(
     status: 206,
     statusText: 'Partial Content',
     headers: {
-      'Content-Type': 'video/mp4',
-      'Content-Range': `bytes ${start}-${end}/${videoSize}`,
+      'Content-Type': mimeType,
+      'Content-Range': `bytes ${start}-${end}/${mediaSize}`,
       'Content-Length': contentLength.toString(),
       'Accept-Ranges': 'bytes',
       'Access-Control-Allow-Origin': '*',
@@ -3537,7 +3792,7 @@ function createOfflinePage(): Response {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>离线 - OpenTu</title>
+  <title>离线 - Opentu</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -3570,7 +3825,7 @@ function createOfflinePage(): Response {
 </head>
 <body>
   <h1>📡 无法连接到服务器</h1>
-  <p>请检查您的网络连接，或稍后再试。</p>
+  <p>Opentu 是一个以画布工作区为底座的 AI 应用平台，当前无法访问时请检查网络或稍后再试。</p>
   <button onclick="location.reload()">重试</button>
 </body>
 </html>`,
@@ -3704,33 +3959,14 @@ async function handleImageRequest(request: Request): Promise<Response> {
       ? (originalUrl.searchParams.get('thumbnail') || 'small')
       : 'small';
     
-    const cacheBreakingParams = [
-      '_t',
-      'cache_buster',
-      'v',
-      'timestamp',
-      'nocache',
-      '_cb',
-      't',
-      'retry',
-      '_retry',
-      'rand',
-      '_force',
-      'bypass_sw',
-      'direct_fetch',
-      'thumbnail', // 也移除 thumbnail 参数，用于构建缓存key
-    ];
-    cacheBreakingParams.forEach((param) =>
-      originalUrl.searchParams.delete(param)
-    );
-    const originalRequest = new Request(originalUrl.toString(), {
+    const normalizedCacheUrl = buildNormalizedCacheUrl(originalUrl);
+    const originalRequest = new Request(normalizedCacheUrl.toString(), {
       method: request.method,
       headers: request.headers,
       mode: request.mode,
       credentials: request.credentials,
     });
-
-    const dedupeKey = originalUrl.toString();
+    const dedupeKey = normalizedCacheUrl.toString();
     
     // 如果是预览图请求（没有 bypass_sw 和 _retry），在移除参数后查找预览图
     if (isThumbnailRequest) {
@@ -3740,7 +3976,7 @@ async function handleImageRequest(request: Request): Promise<Response> {
       const result = await findThumbnailWithFallback(
         dedupeKey,
         thumbnailSize as 'small' | 'large',
-        [originalRequest.url] // 备用 key：原始请求 URL
+        [request.url, originalRequest.url] // 备用 key：兼容历史签名 URL 与 canonical key
       );
       
       if (result) {
@@ -3924,6 +4160,11 @@ async function handleImageRequestInternal(
       if (!cachedResponse) {
         cachedResponse = await cache.match(originalRequest.url);
       }
+
+      // 兼容历史上按完整签名 URL 落缓存的旧条目
+      if (!cachedResponse && requestUrl !== originalRequest.url) {
+        cachedResponse = await cache.match(requestUrl);
+      }
       
       // 如果还没找到，尝试使用 dedupeKey 匹配
       if (!cachedResponse) {
@@ -3950,9 +4191,11 @@ async function handleImageRequestInternal(
             generateThumbnailAsync(blob, originalRequest.url, 'image');
           }
           
-          const cacheDate = cachedResponse.headers.get('sw-cache-date');
+          const cacheDate = cachedResponse.headers.get(SW_CACHE_DATE_HEADER);
           if (cacheDate) {
             const now = Date.now();
+            const cacheCreatedAt =
+              cachedResponse.headers.get(SW_CACHE_CREATED_AT_HEADER) || cacheDate;
 
             // 再次访问时延长缓存时间 - 创建新的响应并更新缓存
             const refreshedResponse = new Response(blob, {
@@ -3962,13 +4205,17 @@ async function handleImageRequestInternal(
                 ...Object.fromEntries(
                   (cachedResponse.headers as any).entries()
                 ),
-                'sw-cache-date': now.toString(), // 更新访问时间为当前时间
+                [SW_CACHE_DATE_HEADER]: now.toString(), // 更新访问时间为当前时间
+                [SW_CACHE_CREATED_AT_HEADER]: cacheCreatedAt, // 保持首次缓存时间不变
               },
             });
 
-            // 用新时间戳重新缓存（使用原始URL作为键）
+            // 用新时间戳重新缓存（使用 canonical key 作为键）
             if (originalRequest.url.startsWith('http')) {
-              await cache.put(originalRequest, refreshedResponse.clone());
+              await cache.put(dedupeKey, refreshedResponse.clone());
+              if (requestUrl !== dedupeKey) {
+                await cache.delete(requestUrl);
+              }
             }
             return refreshedResponse;
           } else {
@@ -3981,12 +4228,16 @@ async function handleImageRequestInternal(
                 ...Object.fromEntries(
                   (cachedResponse.headers as any).entries()
                 ),
-                'sw-cache-date': Date.now().toString(),
+                [SW_CACHE_DATE_HEADER]: Date.now().toString(),
+                [SW_CACHE_CREATED_AT_HEADER]: Date.now().toString(),
               },
             });
 
             if (originalRequest.url.startsWith('http')) {
-              await cache.put(originalRequest, refreshedResponse.clone());
+              await cache.put(dedupeKey, refreshedResponse.clone());
+              if (requestUrl !== dedupeKey) {
+                await cache.delete(requestUrl);
+              }
             }
             return refreshedResponse;
           }
@@ -4285,7 +4536,8 @@ async function handleImageRequestInternal(
           'Access-Control-Allow-Methods': 'GET',
           'Access-Control-Allow-Headers': '*',
           'Cache-Control': 'max-age=3153600000', // 100年
-          'sw-cache-date': Date.now().toString(), // 添加缓存时间戳
+          [SW_CACHE_DATE_HEADER]: Date.now().toString(), // 最后访问时间
+          [SW_CACHE_CREATED_AT_HEADER]: Date.now().toString(), // 首次缓存生成时间
           'sw-image-size': blob.size.toString(), // 添加图片大小信息
         },
       });
@@ -4293,17 +4545,20 @@ async function handleImageRequestInternal(
       // 尝试缓存响应，处理存储限制错误
       try {
         if (originalRequest.url.startsWith('http')) {
-          await cache.put(originalRequest, corsResponse.clone());
+          await cache.put(dedupeKey, corsResponse.clone());
+          if (requestUrl !== dedupeKey) {
+            await cache.delete(requestUrl);
+          }
           // console.log(`Service Worker: Normal response cached (${imageSizeMB.toFixed(2)}MB) with 30-day expiry and timestamp`);
           // 通知主线程图片已缓存
-          await notifyImageCached(requestUrl, blob.size, blob.type);
+          await notifyImageCached(dedupeKey, blob.size, blob.type);
           // 检查存储配额
           await checkStorageQuota();
           
           // 异步生成预览图（不阻塞主流程）
-          // 使用与缓存key一致的URL（originalRequest.url）作为预览图key
+          // 使用 canonical key 作为预览图 key，避免同图因签名参数变化生成多套缩略图
           const { generateThumbnailAsync } = await import('./task-queue/utils/thumbnail-utils');
-          generateThumbnailAsync(blob, originalRequest.url, 'image');
+          generateThumbnailAsync(blob, dedupeKey, 'image');
         }
       } catch (cacheError) {
         console.warn(
@@ -4316,14 +4571,17 @@ async function handleImageRequestInternal(
         await cleanOldCacheEntries(cache);
         try {
           if (originalRequest.url.startsWith('http')) {
-            await cache.put(originalRequest, corsResponse.clone());
+            await cache.put(dedupeKey, corsResponse.clone());
+            if (requestUrl !== dedupeKey) {
+              await cache.delete(requestUrl);
+            }
             // console.log(`Service Worker: Normal response cached after cleanup (${imageSizeMB.toFixed(2)}MB)`);
             // 通知主线程图片已缓存
-            await notifyImageCached(requestUrl, blob.size, blob.type);
+            await notifyImageCached(dedupeKey, blob.size, blob.type);
             
             // 异步生成预览图（不阻塞主流程）
             const { generateThumbnailAsync } = await import('./task-queue/utils/thumbnail-utils');
-            generateThumbnailAsync(blob, originalRequest.url, 'image');
+            generateThumbnailAsync(blob, dedupeKey, 'image');
           }
         } catch (retryError) {
           console.error(

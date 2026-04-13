@@ -15,7 +15,7 @@ import { usePromptHistory } from '../../hooks/usePromptHistory';
 
 interface EnhancedChatInputProps {
   selectedContent: SelectedContentItem[];
-  onSend: (message: Message) => void;
+  onSend: (message: Message) => void | Promise<void>;
   disabled?: boolean;
   placeholder?: string;
 }
@@ -102,7 +102,9 @@ export const EnhancedChatInput = forwardRef<EnhancedChatInputRef, EnhancedChatIn
       addPromptHistory(trimmedInput, hasSelection, 'agent');
     }
 
-    onSend(message);
+    void Promise.resolve(onSend(message)).catch((error) => {
+      console.error('[EnhancedChatInput] send failed:', error);
+    });
     setInput('');
   }, [input, selectedContent, onSend, addPromptHistory, hasSelection]);
 

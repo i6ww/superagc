@@ -5,13 +5,42 @@
  * This configuration drives the UI for video generation.
  */
 
-import type { VideoModel, VideoModelConfig } from '../types/video.types';
+import type {
+  DurationOption,
+  ImageUploadConfig,
+  SizeOption,
+  VideoModel,
+  VideoModelConfig,
+} from '../types/video.types';
+import { getModelConfig, ModelVendor } from './model-config';
 
 /**
  * Video model configurations
  * Each model has specific duration, size, and image upload options
  */
-export const VIDEO_MODEL_CONFIGS: Record<VideoModel, VideoModelConfig> = {
+export const VIDEO_MODEL_CONFIGS: Record<string, VideoModelConfig> = {
+  kling_video: {
+    id: 'kling_video',
+    label: 'Kling',
+    provider: 'kling',
+    description: 'Kling 标准视频能力，版本通过 model_name 选择',
+    durationOptions: [
+      { label: '5秒', value: '5' },
+      { label: '10秒', value: '10' },
+    ],
+    defaultDuration: '5',
+    sizeOptions: [
+      { label: '横屏 16:9', value: '1280x720', aspectRatio: '16:9' },
+      { label: '竖屏 9:16', value: '720x1280', aspectRatio: '9:16' },
+      { label: '方形 1:1', value: '1024x1024', aspectRatio: '1:1' },
+    ],
+    defaultSize: '1280x720',
+    imageUpload: {
+      maxCount: 1,
+      mode: 'reference',
+      labels: ['参考图'],
+    },
+  },
   'kling-v1-6': {
     id: 'kling-v1-6',
     label: 'Kling V1.6',
@@ -380,21 +409,194 @@ export const VIDEO_MODEL_CONFIGS: Record<VideoModel, VideoModelConfig> = {
       labels: ['首帧', '尾帧', '参考图1', '参考图2'],
     },
   },
+  'veo3-fast': {
+    id: 'veo3-fast',
+    label: 'Veo 3 Fast',
+    provider: 'veo',
+    description: '8秒快速视频生成',
+    durationOptions: [{ label: '8秒', value: '8' }],
+    defaultDuration: '8',
+    sizeOptions: [
+      { label: '横屏 16:9', value: '1280x720', aspectRatio: '16:9' },
+      { label: '竖屏 9:16', value: '720x1280', aspectRatio: '9:16' },
+    ],
+    defaultSize: '1280x720',
+    imageUpload: {
+      maxCount: 1,
+      mode: 'reference',
+      labels: ['参考图'],
+    },
+  },
+  'veo3-pro-frames': {
+    id: 'veo3-pro-frames',
+    label: 'Veo 3 Pro Frames',
+    provider: 'veo',
+    description: '8秒高质量视频，支持帧控制',
+    durationOptions: [{ label: '8秒', value: '8' }],
+    defaultDuration: '8',
+    sizeOptions: [
+      { label: '横屏 16:9', value: '1280x720', aspectRatio: '16:9' },
+      { label: '竖屏 9:16', value: '720x1280', aspectRatio: '9:16' },
+    ],
+    defaultSize: '1280x720',
+    imageUpload: {
+      maxCount: 2,
+      mode: 'frames',
+      labels: ['首帧', '尾帧'],
+    },
+  },
+  'kling-video-o1': {
+    id: 'kling-video-o1',
+    label: 'Kling Video O1',
+    provider: 'kling',
+    description: 'Kling Video O1 智能视频生成',
+    durationOptions: [
+      { label: '5秒', value: '5' },
+      { label: '10秒', value: '10' },
+    ],
+    defaultDuration: '5',
+    sizeOptions: [
+      { label: '横屏 16:9', value: '1280x720', aspectRatio: '16:9' },
+      { label: '竖屏 9:16', value: '720x1280', aspectRatio: '9:16' },
+      { label: '方形 1:1', value: '1024x1024', aspectRatio: '1:1' },
+    ],
+    defaultSize: '1280x720',
+    imageUpload: {
+      maxCount: 1,
+      mode: 'reference',
+      labels: ['参考图'],
+    },
+  },
+  'kling-video-o1-edit': {
+    id: 'kling-video-o1-edit',
+    label: 'Kling Video O1 Edit',
+    provider: 'kling',
+    description: 'Kling Video O1 视频编辑',
+    durationOptions: [
+      { label: '5秒', value: '5' },
+      { label: '10秒', value: '10' },
+    ],
+    defaultDuration: '5',
+    sizeOptions: [
+      { label: '横屏 16:9', value: '1280x720', aspectRatio: '16:9' },
+      { label: '竖屏 9:16', value: '720x1280', aspectRatio: '9:16' },
+      { label: '方形 1:1', value: '1024x1024', aspectRatio: '1:1' },
+    ],
+    defaultSize: '1280x720',
+    imageUpload: {
+      maxCount: 1,
+      mode: 'reference',
+      labels: ['参考图'],
+    },
+  },
+  'sora-2-15s': {
+    id: 'sora-2-15s',
+    label: 'Sora 2 · 15s',
+    provider: 'sora',
+    description: '15秒固定时长，模型名已包含时长，无需 seconds 参数',
+    durationOptions: [{ label: '15秒（固定）', value: '15' }],
+    defaultDuration: '15',
+    sizeOptions: [
+      { label: '横屏 16:9', value: '1280x720', aspectRatio: '16:9' },
+      { label: '竖屏 9:16', value: '720x1280', aspectRatio: '9:16' },
+    ],
+    defaultSize: '1280x720',
+    imageUpload: {
+      maxCount: 1,
+      mode: 'reference',
+      labels: ['参考图'],
+    },
+  },
 };
 
 /**
  * Normalize model name to a known config key; fallback to默认模型（veo3）避免崩溃。
  */
 export function normalizeVideoModel(model?: string | null): VideoModel {
-  if (model && (VIDEO_MODEL_CONFIGS as any)[model]) {
-    return model as VideoModel;
+  if (model) {
+    return model;
   }
   return 'veo3';
 }
 
+function isStandardKlingVideoModel(modelId: string): boolean {
+  const lowerId = modelId.toLowerCase();
+  return lowerId === 'kling_video' || /^kling-v\d(?:[-.]\d+)?$/.test(lowerId);
+}
+
+function buildStandardKlingVideoConfig(
+  modelId: string,
+  runtimeConfig?: ReturnType<typeof getModelConfig>
+): VideoModelConfig {
+  const capabilityConfig = VIDEO_MODEL_CONFIGS.kling_video;
+  const isCapabilityModel = modelId.toLowerCase() === 'kling_video';
+
+  return {
+    ...capabilityConfig,
+    id: modelId,
+    label: runtimeConfig?.shortLabel || runtimeConfig?.label || capabilityConfig.label,
+    description: isCapabilityModel
+      ? runtimeConfig?.description || capabilityConfig.description
+      : runtimeConfig?.description || 'Kling 标准视频版本，支持文生视频和图生视频',
+  };
+}
+
 function getConfigOrDefault(model?: string | null): VideoModelConfig {
   const normalized = normalizeVideoModel(model);
-  return VIDEO_MODEL_CONFIGS[normalized];
+  const builtInConfig = VIDEO_MODEL_CONFIGS[normalized];
+  if (builtInConfig) {
+    return builtInConfig;
+  }
+
+  const runtimeConfig = getModelConfig(normalized);
+  if (isStandardKlingVideoModel(normalized)) {
+    return buildStandardKlingVideoConfig(normalized, runtimeConfig);
+  }
+
+  const defaultSize = runtimeConfig?.videoDefaults?.size || '1280x720';
+  const defaultAspectRatio = runtimeConfig?.videoDefaults?.aspectRatio || '16:9';
+  const defaultDuration = runtimeConfig?.videoDefaults?.duration || '8';
+  const lowerId = normalized.toLowerCase();
+
+  const sizeOptions: SizeOption[] = [
+    { label: defaultAspectRatio, value: defaultSize, aspectRatio: defaultAspectRatio },
+  ];
+
+  if (defaultSize !== '1280x720') {
+    sizeOptions.push({ label: '横屏 16:9', value: '1280x720', aspectRatio: '16:9' });
+  }
+  if (defaultSize !== '720x1280') {
+    sizeOptions.push({ label: '竖屏 9:16', value: '720x1280', aspectRatio: '9:16' });
+  }
+
+  const durationOptions: DurationOption[] = [{ label: `${defaultDuration}秒`, value: defaultDuration }];
+  const imageUpload: ImageUploadConfig =
+    lowerId.includes('components')
+      ? { maxCount: 3, mode: 'components', labels: ['参考图1', '参考图2', '参考图3'] }
+      : lowerId.includes('frame')
+        ? { maxCount: 2, mode: 'frames', labels: ['首帧', '尾帧'] }
+        : { maxCount: 1, mode: 'reference', labels: ['参考图'] };
+
+  const provider =
+    runtimeConfig?.vendor === ModelVendor.SORA
+      ? 'sora'
+      : runtimeConfig?.vendor === ModelVendor.KLING
+        ? 'kling'
+        : lowerId.includes('seedance')
+          ? 'seedance'
+          : 'veo';
+
+  return {
+    id: normalized,
+    label: runtimeConfig?.shortLabel || runtimeConfig?.label || normalized,
+    provider,
+    description: runtimeConfig?.description || '运行时发现的视频模型',
+    durationOptions,
+    defaultDuration,
+    sizeOptions,
+    defaultSize,
+    imageUpload,
+  };
 }
 
 /**

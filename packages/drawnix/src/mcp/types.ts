@@ -16,6 +16,8 @@ export {
   getModelIds,
   supportsTools,
 } from '../constants/model-config';
+import type { ModelRef } from '../utils/settings-manager';
+import type { GeminiMessagePart } from '../utils/gemini-api/types';
 
 /**
  * JSON Schema 类型定义
@@ -153,7 +155,7 @@ export interface MCPResult {
   /** 错误信息 */
   error?: string;
   /** 结果类型标识 */
-  type?: 'image' | 'video' | 'text' | 'canvas' | 'error';
+  type?: 'image' | 'video' | 'audio' | 'text' | 'canvas' | 'error';
 }
 
 /**
@@ -229,8 +231,8 @@ export interface AgentExecutionContext {
   model: {
     /** 模型 ID */
     id: string;
-    /** 生成类型: text = agent 模式, image = 图片模式, video = 视频模式 */
-    type: 'text' | 'image' | 'video';
+    /** 生成类型: text = agent 模式, image = 图片模式, video = 视频模式, audio = 音频模式 */
+    type: 'text' | 'image' | 'video' | 'audio';
     /** 是否为用户显式选择 */
     isExplicit: boolean;
   };
@@ -241,6 +243,8 @@ export interface AgentExecutionContext {
     image: string;
     /** 默认视频模型 */
     video: string;
+    /** 默认音频模型 */
+    audio?: string;
   };
 
   /** 参数配置 */
@@ -277,6 +281,8 @@ export interface AgentExecutionContext {
 export interface AgentExecuteOptions {
   /** 指定使用的模型 */
   model?: string;
+  /** 指定使用的供应商模型来源 */
+  modelRef?: ModelRef | null;
   /** 流式输出回调 */
   onChunk?: (content: string) => void;
   /** 工具调用回调 */
@@ -294,6 +300,6 @@ export interface AgentExecuteOptions {
    */
   messages?: Array<{
     role: 'system' | 'user' | 'assistant';
-    content: string | Array<{ type: string; text?: string }>;
+    content: string | GeminiMessagePart[];
   }>;
 }

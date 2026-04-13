@@ -29,8 +29,8 @@ export interface PromptHistoryItem {
   hasSelection?: boolean;
   /** 是否置顶 */
   pinned?: boolean;
-  /** 生成类型：image(直接生图)、video(直接生视频)、agent(需要Agent分析) */
-  modelType?: 'image' | 'video' | 'agent';
+  /** 生成类型：image/video/audio/text/agent */
+  modelType?: 'image' | 'video' | 'audio' | 'text' | 'agent';
 }
 
 /**
@@ -200,12 +200,12 @@ export function getPromptHistory(): PromptHistoryItem[] {
  * 注意：如果相同内容已被置顶，只更新时间戳，不会创建新记录
  * @param content 提示词内容
  * @param hasSelection 是否在有选中元素时输入的
- * @param modelType 生成类型：image、video 或 agent
+ * @param modelType 生成类型：image、video、audio、text 或 agent
  */
 export function addPromptHistory(
   content: string,
   hasSelection?: boolean,
-  modelType?: 'image' | 'video' | 'agent'
+  modelType?: 'image' | 'video' | 'audio' | 'text' | 'agent'
 ): void {
   if (!content || !content.trim()) return;
 

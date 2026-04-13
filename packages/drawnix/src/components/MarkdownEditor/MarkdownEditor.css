@@ -66,6 +66,106 @@
   cursor: default;
 }
 
+/* ===== asset-embed 插件样式 ===== */
+
+.collimind-asset-embed {
+  margin: 8px 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.collimind-asset-embed__image {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  border-radius: 10px;
+}
+
+.collimind-asset-embed__video-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.collimind-asset-embed__video {
+  width: 100%;
+  max-width: 100%;
+  border-radius: 10px;
+}
+
+.collimind-asset-embed__caption {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #64748b;
+}
+
+.collimind-asset-embed__missing {
+  padding: 10px 12px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.collimind-asset-embed__loading {
+  height: 48px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+  background-size: 200% 100%;
+  animation: asset-embed-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes asset-embed-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.collimind-asset-embed .collimind-markdown-audio-card {
+  width: 100%;
+  max-width: 560px;
+  height: 128px;
+}
+
+/* audio-node 内部组件宽度约束 */
+.collimind-asset-embed .audio-node {
+  max-width: 560px;
+  height: 100%;
+}
+
+.collimind-markdown-image-library-overlay {
+  position: absolute;
+  top: 8px;
+  z-index: 11;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid rgba(251, 146, 60, 0.35);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255, 247, 237, 0.98), rgba(255, 237, 213, 0.98));
+  color: #c2410c;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 8px 20px rgba(194, 65, 12, 0.12);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+
+.collimind-markdown-image-library-overlay:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(194, 65, 12, 0.16);
+  background: linear-gradient(180deg, rgba(255, 237, 213, 1), rgba(254, 215, 170, 0.98));
+}
+
+.collimind-markdown-image-library-overlay svg {
+  width: 14px;
+  height: 14px;
+}
+
 
 /* 模式切换按钮 */
 .collimind-markdown-editor-mode-switch {
@@ -147,12 +247,18 @@
 
 /* ===== Card 标签贴内嵌 MarkdownEditor 样式 ===== */
 
-/* Card 内嵌 MarkdownEditor：去掉边框和背景，紧凑布局 */
+/* Card 内嵌 MarkdownEditor：去掉边框和背景，紧凑布局，高度由内容撑开，滚动由外层容器控制 */
 .collimind-markdown-editor.card-markdown-viewer {
   border: none;
   border-radius: 0;
   background: transparent;
-  height: 100%;
+  height: auto;
+  overflow-y: visible;
+}
+
+/* Card 模式下 milkdown 不需要 flex 拉伸，跟随内容高度 */
+.collimind-markdown-editor.card-markdown-viewer .milkdown {
+  flex: none;
 }
 
 /* Card 内容区 ProseMirror：减小内边距 */
@@ -162,6 +268,51 @@
   line-height: 1.6;
 }
 
+.collimind-markdown-editor.card-markdown-viewer .ProseMirror h1,
+.collimind-markdown-editor.card-markdown-viewer .ProseMirror h2,
+.collimind-markdown-editor.card-markdown-viewer .ProseMirror h3,
+.collimind-markdown-editor.card-markdown-viewer .ProseMirror h4 {
+  line-height: 1.28;
+  margin: 0.45em 0 0.3em;
+  letter-spacing: -0.01em;
+}
+
+.collimind-markdown-editor.card-markdown-viewer .ProseMirror h1 {
+  font-size: 1.9em;
+  font-weight: 700;
+}
+
+.collimind-markdown-editor.card-markdown-viewer .ProseMirror h2 {
+  font-size: 1.5em;
+  font-weight: 700;
+}
+
+.collimind-markdown-editor.card-markdown-viewer .ProseMirror h3 {
+  font-size: 1.22em;
+  font-weight: 650;
+}
+
+.collimind-markdown-editor.card-markdown-viewer .ProseMirror h4 {
+  font-size: 1.08em;
+  font-weight: 650;
+}
+
+.collimind-markdown-editor.card-markdown-viewer .ProseMirror > :first-child {
+  margin-top: 0;
+}
+
+.collimind-markdown-editor.card-markdown-viewer .ProseMirror p,
+.collimind-markdown-editor.card-markdown-viewer .ProseMirror ul,
+.collimind-markdown-editor.card-markdown-viewer .ProseMirror ol,
+.collimind-markdown-editor.card-markdown-viewer .ProseMirror blockquote,
+.collimind-markdown-editor.card-markdown-viewer .ProseMirror pre {
+  margin: 0.3em 0;
+}
+
+.collimind-markdown-editor.card-markdown-viewer .ProseMirror li + li {
+  margin-top: 0.12em;
+}
+
 /* ---- 只读模式：隐藏工具栏，禁用交互 ---- */
 .collimind-markdown-editor.card-markdown-viewer[data-readonly="true"] .milkdown-block-handle,
 .collimind-markdown-editor.card-markdown-viewer[data-readonly="true"] .crepe-toolbar,
@@ -169,7 +320,7 @@
   display: none !important;
 }
 
-.collimind-markdown-editor.card-markdown-viewer[data-readonly="true"] .milkdown {
+.collimind-markdown-editor.card-markdown-viewer[data-readonly="true"][data-asset-embeds="false"] .milkdown {
   pointer-events: none;
   user-select: none;
 }

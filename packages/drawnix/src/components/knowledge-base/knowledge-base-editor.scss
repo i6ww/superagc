@@ -254,6 +254,57 @@
     .markdown-editor {
       height: 100%;
     }
+
+    .collimind-markdown-editor.kb-note-markdown .ProseMirror {
+      font-size: 13px;
+      line-height: 1.68;
+      padding: 18px 24px 20px 44px;
+    }
+
+    .collimind-markdown-editor.kb-note-markdown .ProseMirror h1,
+    .collimind-markdown-editor.kb-note-markdown .ProseMirror h2,
+    .collimind-markdown-editor.kb-note-markdown .ProseMirror h3,
+    .collimind-markdown-editor.kb-note-markdown .ProseMirror h4 {
+      line-height: 1.3;
+      letter-spacing: -0.015em;
+      margin: 0.7em 0 0.4em;
+    }
+
+    .collimind-markdown-editor.kb-note-markdown .ProseMirror h1 {
+      font-size: 1.9em;
+      font-weight: 750;
+    }
+
+    .collimind-markdown-editor.kb-note-markdown .ProseMirror h2 {
+      font-size: 1.5em;
+      font-weight: 700;
+    }
+
+    .collimind-markdown-editor.kb-note-markdown .ProseMirror h3 {
+      font-size: 1.24em;
+      font-weight: 650;
+    }
+
+    .collimind-markdown-editor.kb-note-markdown .ProseMirror h4 {
+      font-size: 1.06em;
+      font-weight: 650;
+    }
+
+    .collimind-markdown-editor.kb-note-markdown .ProseMirror > :first-child {
+      margin-top: 0;
+    }
+
+    .collimind-markdown-editor.kb-note-markdown .ProseMirror p,
+    .collimind-markdown-editor.kb-note-markdown .ProseMirror ul,
+    .collimind-markdown-editor.kb-note-markdown .ProseMirror ol,
+    .collimind-markdown-editor.kb-note-markdown .ProseMirror blockquote,
+    .collimind-markdown-editor.kb-note-markdown .ProseMirror pre {
+      margin: 0.5em 0;
+    }
+
+    .collimind-markdown-editor.kb-note-markdown .ProseMirror li + li {
+      margin-top: 0.16em;
+    }
   }
 
   // 只读模式（系统内置 Skill 笔记）

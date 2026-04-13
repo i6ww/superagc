@@ -6,9 +6,25 @@
  */
 
 import type { VideoAPIConfig, GeminiConfig } from './types';
-import { compressImageBlob } from '@aitu/utils';
+import {
+  calculateBlobChecksum,
+  compressImageBlob,
+  getFileExtension,
+  isDataURL,
+  normalizeImageDataUrl,
+} from '@aitu/utils';
 import { getDataURL } from '../../data/blob';
 import { unifiedCacheService } from '../unified-cache-service';
+import { providerTransport } from '../provider-routing/provider-transport';
+import {
+  AI_GENERATED_AUDIO_URL_PREFIX,
+  isVirtualMediaUrl,
+} from '../../utils/virtual-media-url';
+import {
+  downloadVideoContentToLocalUrl,
+  extractInlineVideoUrl,
+  shouldDownloadVideoContent,
+} from '../video-binding-utils';
 
 /** 参考图转 base64 时最大体积（1MB），避免请求体过大 */
 export const MAX_REFERENCE_IMAGE_BYTES = 1 * 1024 * 1024;
@@ -91,12 +107,23 @@ export async function pollVideoStatus(
 
     let data: any;
     try {
-      const response = await fetch(`${config.baseUrl}/v1/videos/${videoId}`, {
-        headers: {
-          Authorization: `Bearer ${config.apiKey}`,
+      const response = await providerTransport.send(
+        config.provider || {
+          profileId: 'runtime',
+          profileName: 'Runtime',
+          providerType: config.providerType || 'custom',
+          baseUrl: config.baseUrl,
+          apiKey: config.apiKey,
+          authType: config.authType || 'bearer',
+          extraHeaders: config.extraHeaders,
         },
-        signal,
-      });
+        {
+          path: '/videos/' + videoId,
+          baseUrlStrategy: config.binding?.baseUrlStrategy,
+          method: 'GET',
+          signal,
+        }
+      );
 
       if (!response.ok) {
         consecutiveErrors++;
@@ -136,7 +163,27 @@ export async function pollVideoStatus(
     onProgress(progress / 100);
 
     if (status === 'completed' || status === 'succeeded') {
-      const url = data.video_url || data.url || data.output?.url;
+      const inlineUrl = extractInlineVideoUrl(data);
+      const url =
+        inlineUrl ||
+        (shouldDownloadVideoContent(data.model || config.model, config.binding, data)
+          ? await downloadVideoContentToLocalUrl({
+              videoId,
+              provider:
+                config.provider || {
+                  profileId: 'runtime',
+                  profileName: 'Runtime',
+                  providerType: config.providerType || 'custom',
+                  baseUrl: config.baseUrl,
+                  apiKey: config.apiKey,
+                  authType: config.authType || 'bearer',
+                  extraHeaders: config.extraHeaders,
+                },
+              binding: config.binding,
+              modelId: data.model || config.model,
+              cacheKey: videoId,
+            })
+          : undefined);
       if (!url) {
         throw new Error('No video URL in completed response');
       }
@@ -200,6 +247,10 @@ export async function generateAsyncImage(
       apiKey: config.apiKey,
       baseUrl: config.baseUrl,
       defaultModel: params.model,
+      authType: config.authType,
+      providerType: config.providerType,
+      extraHeaders: config.extraHeaders,
+      provider: config.provider,
     },
     {
       onProgress: options.onProgress,
@@ -215,55 +266,133 @@ export async function generateAsyncImage(
 }
 
 /**
- * 将远程 URL 下载并缓存到本地 Cache Storage，返回虚拟路径。
- * 用于签名 URL（如 TOS）在浏览器中因 Referer 校验导致 403 的场景。
- * 已经是虚拟路径或 data URL 的直接返回。
+ * 收敛任务结果里的媒体 URL。
+ * - data URL / 原始 base64：落到本地 Cache Storage，并返回稳定虚拟路径
+ * - 远程音频 URL：主动缓存到本地稳定路径，避免签名链接过期后无法播放
+ * - 其他 http/https：保留原始远程 URL，交给既有 SW 请求拦截链路处理，避免把远程素材误判成本地素材
  */
 export async function cacheRemoteUrl(
   remoteUrl: string,
   taskId: string,
-  mediaType: 'image' | 'video',
+  mediaType: 'image' | 'video' | 'audio',
   format: string,
-  index?: number
+  index?: number,
+  options?: {
+    source?: 'AI_GENERATED' | 'PLAYBACK_CACHE';
+    forceRemoteCache?: boolean;
+  }
 ): Promise<string> {
-  // 已经是本地路径或 data URL，无需缓存
-  if (
-    remoteUrl.startsWith('/__aitu_cache__/') ||
-    remoteUrl.startsWith('/asset-library/') ||
-    remoteUrl.startsWith('data:')
-  ) {
-    return remoteUrl;
+  const normalizedUrl =
+    mediaType === 'image' ? normalizeImageDataUrl(remoteUrl) : remoteUrl;
+
+  // 已经是本地路径，无需缓存
+  if (isVirtualMediaUrl(normalizedUrl)) {
+    return normalizedUrl;
+  }
+
+  if (normalizedUrl.startsWith('http://') || normalizedUrl.startsWith('https://')) {
+    if (mediaType !== 'audio' && !options?.forceRemoteCache) {
+      return normalizedUrl;
+    }
+
+    try {
+      const cacheSource = options?.source || 'AI_GENERATED';
+      const hintedFormat = getFileExtension(normalizedUrl);
+      const guessedFormat = hintedFormat !== 'bin' ? hintedFormat : format;
+      const guessedSuffix = index !== undefined ? `_${index}` : '';
+      const safeTaskId =
+        cacheSource === 'PLAYBACK_CACHE'
+          ? taskId.replace(/[^a-zA-Z0-9._-]+/g, '-')
+          : taskId;
+      const guessedLocalUrl =
+        cacheSource === 'PLAYBACK_CACHE'
+          ? `/__aitu_cache__/audio/${safeTaskId}${guessedSuffix}.${guessedFormat}`
+          : `${AI_GENERATED_AUDIO_URL_PREFIX}${taskId}${guessedSuffix}.${guessedFormat}`;
+
+      if (await unifiedCacheService.isCached(guessedLocalUrl)) {
+        return guessedLocalUrl;
+      }
+
+      const response = await fetch(normalizedUrl, {
+        credentials: 'omit',
+        cache: 'no-store',
+        referrerPolicy: 'no-referrer',
+      });
+      if (!response.ok) {
+        return normalizedUrl;
+      }
+
+      const blob = await response.blob();
+      if (blob.size === 0) {
+        return normalizedUrl;
+      }
+
+      const mimeFormat = getFileExtension('', blob.type);
+      const finalFormat =
+        mimeFormat !== 'bin'
+          ? mimeFormat
+          : hintedFormat !== 'bin'
+          ? hintedFormat
+          : guessedFormat;
+      const localUrl =
+        cacheSource === 'PLAYBACK_CACHE'
+          ? `/__aitu_cache__/audio/${safeTaskId}${guessedSuffix}.${finalFormat}`
+          : `${AI_GENERATED_AUDIO_URL_PREFIX}${taskId}${guessedSuffix}.${finalFormat}`;
+
+      if (await unifiedCacheService.isCached(localUrl)) {
+        return localUrl;
+      }
+
+      await unifiedCacheService.cacheMediaFromBlob(localUrl, blob, mediaType, {
+        taskId,
+        source: cacheSource,
+      });
+      return localUrl;
+    } catch (error) {
+      console.warn('[cacheRemoteUrl] Remote audio cache failed, using original URL:', error);
+      return normalizedUrl;
+    }
   }
 
   const suffix = index !== undefined ? `_${index}` : '';
-  const localUrl = `/__aitu_cache__/${mediaType}/${taskId}${suffix}.${format}`;
+  const inferredFormat = getFileExtension(normalizedUrl);
+  const finalFormat = inferredFormat !== 'bin' ? inferredFormat : format;
+  const localUrl =
+    mediaType === 'audio'
+      ? `${AI_GENERATED_AUDIO_URL_PREFIX}${taskId}${suffix}.${finalFormat}`
+      : `/__aitu_cache__/${mediaType}/${taskId}${suffix}.${finalFormat}`;
 
   try {
-    // 先尝试 cors 模式
-    let response: Response;
-    try {
-      response = await fetch(remoteUrl, { referrerPolicy: 'no-referrer' });
-    } catch {
-      // CORS 失败，降级到 no-cors（opaque response，无法读取状态码但 blob 可用）
-      response = await fetch(remoteUrl, { mode: 'no-cors', referrerPolicy: 'no-referrer' });
+    // data URL / 原始 base64：直接转 Blob 再缓存，避免把大串 base64 存进任务结果
+    if (isDataURL(normalizedUrl)) {
+      const response = await fetch(normalizedUrl);
+      const blob = await response.blob();
+      if (blob.size === 0) {
+        console.warn('[cacheRemoteUrl] Empty data URL blob, using original URL');
+        return normalizedUrl;
+      }
+      const contentHash = await calculateBlobChecksum(blob);
+      const hashedFormat = getFileExtension('', blob.type);
+      const contentAddressedUrl =
+        mediaType === 'audio'
+          ? `${AI_GENERATED_AUDIO_URL_PREFIX}content-${contentHash}.${hashedFormat !== 'bin' ? hashedFormat : finalFormat}`
+          : `/__aitu_cache__/${mediaType}/content-${contentHash}.${hashedFormat !== 'bin' ? hashedFormat : finalFormat}`;
+
+      if (await unifiedCacheService.isCached(contentAddressedUrl)) {
+        return contentAddressedUrl;
+      }
+
+      await unifiedCacheService.cacheMediaFromBlob(contentAddressedUrl, blob, mediaType, {
+        taskId,
+        ...(mediaType === 'audio' ? { source: 'AI_GENERATED' } : {}),
+      });
+      return contentAddressedUrl;
     }
 
-    // cors 模式下检查状态码；no-cors 模式下 response.type === 'opaque'，status 为 0
-    if (response.type !== 'opaque' && !response.ok) {
-      console.warn(`[cacheRemoteUrl] Failed to fetch ${remoteUrl}: ${response.status}, using original URL`);
-      return remoteUrl;
-    }
-
-    const blob = await response.blob();
-    if (blob.size === 0) {
-      console.warn('[cacheRemoteUrl] Empty blob, using original URL');
-      return remoteUrl;
-    }
-    await unifiedCacheService.cacheMediaFromBlob(localUrl, blob, mediaType, { taskId });
-    return localUrl;
+    return normalizedUrl;
   } catch (error) {
     console.warn('[cacheRemoteUrl] Cache failed, using original URL:', error);
-    return remoteUrl;
+    return normalizedUrl;
   }
 }
 
@@ -273,7 +402,7 @@ export async function cacheRemoteUrl(
 export async function cacheRemoteUrls(
   urls: string[],
   taskId: string,
-  mediaType: 'image' | 'video',
+  mediaType: 'image' | 'video' | 'audio',
   format: string
 ): Promise<string[]> {
   return Promise.all(

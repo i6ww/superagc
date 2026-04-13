@@ -12,6 +12,7 @@ import {
   Volume2,
   VolumeX,
   Download,
+  Paperclip,
   ChevronDown,
   ChevronRight,
   Globe,
@@ -22,11 +23,17 @@ import {
   Lock,
 } from 'lucide-react';
 import { MarkdownEditor, MarkdownEditorRef } from '../MarkdownEditor';
+import { MediaLibraryModal } from '../media-library';
 import { KBTagSelector } from './KBTagSelector';
 import { McpToolSelector } from './McpToolSelector';
-import { useTextToSpeech } from './useTextToSpeech';
+import { useCanvasAudioPlayback } from '../../hooks/useCanvasAudioPlayback';
 import { knowledgeBaseService } from '../../services/knowledge-base-service';
+import { openMusicPlayerToolAndPlay } from '../../services/tool-launch-service';
+import { createReadingPlaybackSource } from '../../services/reading-playback-source';
+import { buildAssetEmbedMarkdown } from '../../utils/markdown-asset-embeds';
 import './knowledge-base-editor.scss';
+import type { Asset } from '../../types/asset.types';
+import { SelectionMode } from '../../types/asset.types';
 import type { KBNote, KBTag, KBTagWithCount } from '../../types/knowledge-base.types';
 
 interface KBNoteEditorProps {
@@ -64,6 +71,7 @@ export const KBNoteEditor: React.FC<KBNoteEditorProps> = ({
 }) => {
   const [title, setTitle] = useState('');
   const [metadataCollapsed, setMetadataCollapsed] = useState(false);
+  const [isMediaLibraryOpen, setIsMediaLibraryOpen] = useState(false);
   /** DSL 解析状态：null=不显示, true=符合规范, false=不符合规范 */
   const [isDSLContent, setIsDSLContent] = useState<boolean | null>(null);
   const dslCheckTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -71,8 +79,8 @@ export const KBNoteEditor: React.FC<KBNoteEditorProps> = ({
   const editorRef = useRef<MarkdownEditorRef>(null);
   const currentNoteIdRef = useRef<string | null>(null);
 
-  const { isSpeaking, isPaused, isSupported, speak, pause, resume, stop } =
-    useTextToSpeech();
+  const playback = useCanvasAudioPlayback();
+  const isSpeechSupported = typeof window !== 'undefined' && 'speechSynthesis' in window;
 
   // 标签 IDs
   const selectedTagIds = useMemo(() => noteTags.map((t) => t.id), [noteTags]);
@@ -95,6 +103,7 @@ setOutputType((note.metadata?.outputType as 'image' | 'text' | 'video' | 'ppt' |
 
   // 切换笔记时重置标题、语音和 DSL 状态
   useEffect(() => {
+    const currentSourceId = note ? `kb-note:${note.id}` : null;
     if (note) {
       setTitle(note.title);
       currentNoteIdRef.current = note.id;
@@ -110,8 +119,14 @@ setOutputType((note.metadata?.outputType as 'image' | 'text' | 'video' | 'ppt' |
       currentNoteIdRef.current = null;
       setIsDSLContent(null);
     }
-    stop();
-  }, [note?.id, stop, isSkillDirectory, readOnly]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (
+      playback.mediaType === 'reading' &&
+      currentSourceId &&
+      playback.activeReadingSourceId?.startsWith(currentSourceId)
+    ) {
+      playback.stopPlayback();
+    }
+  }, [note?.id, isSkillDirectory, readOnly]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 标题变化时防抖保存
   const handleTitleChange = useCallback(
@@ -181,16 +196,36 @@ setOutputType((note.metadata?.outputType as 'image' | 'text' | 'video' | 'ppt' |
   // 语音朗读切换
   const handleSpeechToggle = useCallback(() => {
     if (!note) return;
-    if (isSpeaking) {
-      if (isPaused) {
-        resume();
+    const sourceId = `kb-note:${note.id}`;
+    const isCurrentReading =
+      playback.mediaType === 'reading'
+      && playback.activeReadingSourceId?.startsWith(sourceId);
+
+    if (isCurrentReading) {
+      if (playback.playing) {
+        playback.pausePlayback();
       } else {
-        pause();
+        void playback.resumePlayback();
       }
-    } else {
-      speak(note.content);
+      return;
     }
-  }, [note, isSpeaking, isPaused, speak, pause, resume]);
+
+    const readingSource = createReadingPlaybackSource({
+      elementId: sourceId,
+      title: note.title || '知识库笔记',
+      content: [note.title, note.content].filter(Boolean).join('\n\n'),
+      origin: {
+        kind: 'kb-note',
+        id: note.id,
+      },
+    });
+    if (!readingSource) return;
+
+    void openMusicPlayerToolAndPlay({
+      source: readingSource,
+      queue: [readingSource],
+    });
+  }, [note, playback]);
 
   // 导出 Markdown
   const handleExportMarkdown = useCallback(async () => {
@@ -208,6 +243,16 @@ setOutputType((note.metadata?.outputType as 'image' | 'text' | 'video' | 'ppt' |
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }, [note]);
+
+  const handleOpenMediaLibrary = useCallback(() => {
+    if (readOnly) return;
+    setIsMediaLibraryOpen(true);
+  }, [readOnly]);
+
+  const handleInsertAsset = useCallback((asset: Asset) => {
+    editorRef.current?.insertMarkdown(buildAssetEmbedMarkdown(asset));
+    setIsMediaLibraryOpen(false);
+  }, []);
 
   // 清理定时器
   useEffect(() => {
@@ -233,6 +278,11 @@ setOutputType((note.metadata?.outputType as 'image' | 'text' | 'video' | 'ppt' |
     );
   }
 
+  const currentReadingSourceId = `kb-note:${note.id}`;
+  const isCurrentReading =
+    playback.mediaType === 'reading'
+    && playback.activeReadingSourceId?.startsWith(currentReadingSourceId);
+
   return (
     <div className={`kb-note-editor ${readOnly ? 'kb-note-editor--readonly' : ''}`}>
       {/* 只读模式提示条 */}
@@ -252,19 +302,19 @@ setOutputType((note.metadata?.outputType as 'image' | 'text' | 'video' | 'ppt' |
           readOnly={readOnly}
         />
         <div className="kb-note-editor__actions">
-          {isSupported && (
+          {isSpeechSupported && (
             <button
-              className={`kb-note-editor__action-btn ${isSpeaking ? 'kb-note-editor__action-btn--active' : ''}`}
+              className={`kb-note-editor__action-btn ${isCurrentReading ? 'kb-note-editor__action-btn--active' : ''}`}
               onClick={handleSpeechToggle}
-              title={isSpeaking ? (isPaused ? '继续朗读' : '暂停朗读') : '语音朗读'}
+              title={isCurrentReading ? (playback.playing ? '暂停朗读' : '继续朗读') : '语音朗读'}
             >
-              {isSpeaking && !isPaused ? <VolumeX size={14} /> : <Volume2 size={14} />}
+              {isCurrentReading && playback.playing ? <VolumeX size={14} /> : <Volume2 size={14} />}
             </button>
           )}
-          {isSpeaking && (
+          {isSpeechSupported && isCurrentReading && (
             <button
               className="kb-note-editor__action-btn kb-note-editor__action-btn--danger"
-              onClick={stop}
+              onClick={playback.stopPlayback}
               title="停止朗读"
             >
               ■
@@ -277,6 +327,15 @@ setOutputType((note.metadata?.outputType as 'image' | 'text' | 'video' | 'ppt' |
           >
             <Download size={14} />
           </button>
+          {!readOnly && (
+            <button
+              className="kb-note-editor__action-btn"
+              onClick={handleOpenMediaLibrary}
+              title="插入素材"
+            >
+              <Paperclip size={14} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -410,6 +469,9 @@ setOutputType((note.metadata?.outputType as 'image' | 'text' | 'video' | 'ppt' |
           placeholder="开始写点什么..."
           showModeSwitch={!readOnly}
           readOnly={readOnly}
+          enableAssetEmbeds={true}
+          enableAssetLibraryImagePicker={!readOnly}
+          className="kb-note-markdown"
         />
       </div>
 
@@ -421,6 +483,16 @@ setOutputType((note.metadata?.outputType as 'image' | 'text' | 'video' | 'ppt' |
             : '⚡ 将由 AI 解析为工作流（大模型解析）'
           }
         </div>
+      )}
+
+      {isMediaLibraryOpen && (
+        <MediaLibraryModal
+          isOpen={isMediaLibraryOpen}
+          onClose={() => setIsMediaLibraryOpen(false)}
+          mode={SelectionMode.SELECT}
+          onSelect={handleInsertAsset}
+          selectButtonText="插入到笔记"
+        />
       )}
     </div>
   );

@@ -213,6 +213,18 @@ $brand-orange-dark: #E67E22;
     font-variant-numeric: tabular-nums;
   }
 
+  &__playlist-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  &__playlist-chip-count {
+    background: rgba(15, 23, 42, 0.08);
+  }
+
   &__header-spacer {
     flex: 1;
   }

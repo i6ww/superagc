@@ -1,6 +1,7 @@
 import React from 'react';
 import { I18nProvider } from '../../i18n';
 import { AssetProvider } from '../../contexts/AssetContext';
+import { AudioPlaylistProvider } from '../../contexts/AudioPlaylistContext';
 import { WorkflowProvider } from '../../contexts/WorkflowContext';
 import { RecentColorsProvider } from '../unified-color-picker';
 import { ToolbarConfigProvider } from '../../hooks/use-toolbar-config';
@@ -23,12 +24,11 @@ export const ToolProviderWrapper: React.FC<ToolProviderWrapperProps> = ({
 }) => {
   // 从 board 实例中获取应用状态（由 Drawnix.tsx 同步到 board 上）
   const appState = (board as any).appState;
-  
-  // 模拟 setAppState，实际上内部组件通常不需要在画布内修改全局 appState
-  // 如果需要修改，可能需要通过 board 扩展方法或事件
-  const setAppState = () => {
-    console.warn('setAppState is not supported in ToolProviderWrapper');
-  };
+
+  // 从 board 实例中获取真实的 setAppState（由 Drawnix.tsx 挂载）
+  const setAppState = (board as any).__setAppState || (() => {
+    console.warn('setAppState is not available in ToolProviderWrapper');
+  });
 
   const contextValue = {
     appState,
@@ -40,13 +40,15 @@ export const ToolProviderWrapper: React.FC<ToolProviderWrapperProps> = ({
     <I18nProvider>
       <RecentColorsProvider>
         <AssetProvider>
-          <ToolbarConfigProvider>
-            <WorkflowProvider>
-              <DrawnixContext.Provider value={contextValue}>
-                {children}
-              </DrawnixContext.Provider>
-            </WorkflowProvider>
-          </ToolbarConfigProvider>
+          <AudioPlaylistProvider>
+            <ToolbarConfigProvider>
+              <WorkflowProvider>
+                <DrawnixContext.Provider value={contextValue}>
+                  {children}
+                </DrawnixContext.Provider>
+              </WorkflowProvider>
+            </ToolbarConfigProvider>
+          </AudioPlaylistProvider>
         </AssetProvider>
       </RecentColorsProvider>
     </I18nProvider>

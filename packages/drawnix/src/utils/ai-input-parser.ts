@@ -8,14 +8,15 @@
  * 4. 输入内容包含其他内容 -> 走 Agent 流程
  */
 
-import { geminiSettings } from './settings-manager';
+import { geminiSettings, type ModelRef } from './settings-manager';
 import {
+  getDefaultAudioModel as getSystemDefaultAudioModel,
   getModelConfig,
   getImageModelDefaults,
-  getVideoModelDefaults,
   getDefaultImageModel as getSystemDefaultImageModel,
   getDefaultVideoModel as getSystemDefaultVideoModel,
 } from '../constants/model-config';
+import { getEffectiveVideoDefaultParams } from '../services/video-binding-utils';
 import { buildMJPromptSuffix } from './mj-params';
 import type { ImageDimensions } from '../mcp/types';
 
@@ -28,6 +29,8 @@ export type { ImageDimensions } from '../mcp/types';
 export interface ParseResult {
   /** 清理后的文本（移除特殊标记后） */
   cleanText: string;
+  /** 选中的音频模型 */
+  selectedAudioModel: string | null;
   /** 选中的图片模型 */
   selectedImageModel: string | null;
   /** 选中的视频模型 */
@@ -45,6 +48,7 @@ export interface ParseResult {
 function parseInput(text: string): ParseResult {
   return {
     cleanText: text,
+    selectedAudioModel: null,
     selectedImageModel: null,
     selectedVideoModel: null,
     selectedParams: [],
@@ -62,7 +66,7 @@ export type SendScenario =
 /**
  * 生成类型
  */
-export type GenerationType = 'image' | 'video' | 'text';
+export type GenerationType = 'image' | 'video' | 'audio' | 'text' | 'agent';
 
 /**
  * 带尺寸信息的图片
@@ -98,6 +102,8 @@ export interface ParsedGenerationParams {
   generationType: GenerationType;
   /** 使用的模型 ID */
   modelId: string;
+  /** 使用的模型来源引用 */
+  modelRef?: ModelRef | null;
   /** 是否为用户显式选择的模型 */
   isModelExplicit: boolean;
   /** 最终生成用的提示词（选中文本 + 默认 prompt） */
@@ -136,6 +142,14 @@ function getDefaultImageModel(): string {
 function getDefaultVideoModel(): string {
   const settings = geminiSettings.get();
   return settings?.videoModelName || getSystemDefaultVideoModel();
+}
+
+/**
+ * 获取默认音频模型
+ */
+function getDefaultAudioModel(): string {
+  const settings = geminiSettings.get();
+  return settings?.audioModelName || getSystemDefaultAudioModel();
 }
 
 /**
@@ -195,6 +209,8 @@ function normalizeSize(size: string): string {
 export interface ParseAIInputOptions {
   /** 指定使用的模型 ID（来自下拉选择器） */
   modelId?: string;
+  /** 指定使用的模型引用（来自供应商感知的选择器） */
+  modelRef?: ModelRef | null;
   /** 指定使用的尺寸（来自尺寸选择器，'auto' 表示不传尺寸参数） */
   size?: string;
   /** 指定生成类型（来自下拉选择器） */
@@ -235,6 +251,8 @@ export function parseAIInput(
     if (!options.generationType) {
       if (modelConfig?.type === 'video') {
         generationType = 'video';
+      } else if (modelConfig?.type === 'audio') {
+        generationType = 'audio';
       } else if (modelConfig?.type === 'text') {
         generationType = 'text';
       } else {
@@ -242,6 +260,10 @@ export function parseAIInput(
       }
     }
     modelId = options.modelId;
+    isModelExplicit = true;
+  } else if (parseResult.selectedAudioModel) {
+    generationType = 'audio';
+    modelId = parseResult.selectedAudioModel;
     isModelExplicit = true;
   } else if (parseResult.selectedVideoModel) {
     // 如果明确选择了视频模型，生成视频
@@ -258,14 +280,16 @@ export function parseAIInput(
     hasExtraContent &&
     !options?.generationType
   ) {
-    // 没有选中元素、只有文字输入时，默认使用文本模型（Agent 流程）
-    generationType = 'text';
+    // 没有选中元素、只有文字输入时，默认进入 Agent 流程
+    generationType = 'agent';
     modelId = getDefaultTextModel();
   } else {
     // 有选中元素但没指定模型时，默认使用图片模型
     if (generationType === 'video') {
       modelId = getDefaultVideoModel();
-    } else if (generationType === 'text') {
+    } else if (generationType === 'audio') {
+      modelId = getDefaultAudioModel();
+    } else if (generationType === 'text' || generationType === 'agent') {
       modelId = getDefaultTextModel();
     } else {
       modelId = getDefaultImageModel();
@@ -277,9 +301,13 @@ export function parseAIInput(
   let scenario: SendScenario;
   if (
     options?.generationType === 'image' ||
-    options?.generationType === 'video'
+    options?.generationType === 'video' ||
+    options?.generationType === 'audio' ||
+    options?.generationType === 'text'
   ) {
     scenario = 'direct_generation';
+  } else if (options?.generationType === 'agent') {
+    scenario = 'agent_flow';
   } else {
     scenario = hasExtraContent ? 'agent_flow' : 'direct_generation';
   }
@@ -300,7 +328,10 @@ export function parseAIInput(
     prompt = selectedTextContent;
   } else if (hasSelectedElements && imageCount > 0) {
     // 只有图片，生成默认提示词
-    prompt = generateDefaultPrompt(hasSelectedElements, [], imageCount);
+    prompt =
+      generationType === 'text'
+        ? ''
+        : generateDefaultPrompt(hasSelectedElements, [], imageCount);
   } else {
     prompt = '';
   }
@@ -324,7 +355,13 @@ export function parseAIInput(
   // 收集额外参数（非 size/duration 的自定义参数，如 seedream_quality, aspect_ratio）
   let extraParams: Record<string, string> | undefined;
   if (options?.params) {
-    if (!modelId.startsWith('mj') && options.params.size) {
+    if (
+      generationType !== 'audio' &&
+      generationType !== 'text' &&
+      generationType !== 'agent' &&
+      !modelId.startsWith('mj') &&
+      options.params.size
+    ) {
       size = normalizeSize(options.params.size);
     }
     if (options.params.duration) duration = options.params.duration;
@@ -366,22 +403,37 @@ export function parseAIInput(
   }
 
   // 如果没有指定尺寸且不是 auto 模式，使用模型默认值（文本模型不需要这些参数）
-  if (!size && options?.size !== 'auto' && generationType !== 'text') {
+  if (
+    !size &&
+    options?.size !== 'auto' &&
+    generationType !== 'text' &&
+    generationType !== 'agent' &&
+    generationType !== 'audio'
+  ) {
     const modelConfig = getModelConfig(modelId);
     if (modelConfig?.type === 'image' && modelConfig.imageDefaults) {
       // 图片模型使用默认尺寸
       size = '1x1'; // 默认正方形
     } else if (modelConfig?.type === 'video' && modelConfig.videoDefaults) {
-      size = normalizeSize(modelConfig.videoDefaults.size);
+      const defaults = getEffectiveVideoDefaultParams(
+        modelId,
+        options?.modelRef || modelId,
+        options?.params
+      );
+      size = normalizeSize(defaults.size || modelConfig.videoDefaults.size);
       if (!duration) {
-        duration = modelConfig.videoDefaults.duration;
+        duration = defaults.duration || modelConfig.videoDefaults.duration;
       }
     } else {
       // 使用通用默认值
       if (generationType === 'image') {
         size = '1x1';
       } else if (generationType === 'video') {
-        const defaults = getVideoModelDefaults(modelId);
+        const defaults = getEffectiveVideoDefaultParams(
+          modelId,
+          options?.modelRef || modelId,
+          options?.params
+        );
         size = normalizeSize(defaults.size);
         if (!duration) {
           duration = defaults.duration;
@@ -392,7 +444,11 @@ export function parseAIInput(
 
   // 视频模型：如果没有指定时长，使用默认值
   if (!duration && generationType === 'video') {
-    const defaults = getVideoModelDefaults(modelId);
+    const defaults = getEffectiveVideoDefaultParams(
+      modelId,
+      options?.modelRef || modelId,
+      options?.params
+    );
     duration = defaults.duration;
   }
 
@@ -403,6 +459,7 @@ export function parseAIInput(
     scenario,
     generationType,
     modelId,
+    modelRef: options?.modelRef || null,
     isModelExplicit,
     prompt,
     userInstruction,

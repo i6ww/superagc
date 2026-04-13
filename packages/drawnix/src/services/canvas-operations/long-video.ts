@@ -51,6 +51,10 @@ export interface VideoSegmentScript {
   prompt: string;
   /** 片段时长 */
   duration: number;
+  /** 转场提示 */
+  transition_hint?: 'cut' | 'dissolve' | 'match_cut' | 'fade_to_black';
+  /** 尾帧画面描述 */
+  end_frame_description?: string;
 }
 
 /**
@@ -88,6 +92,13 @@ function getScriptGenerationPrompt(
 3. 每个片段的描述要具体、可视化，包含：场景、主体、动作、镜头运动
 4. 使用英文撰写描述以获得更好的生成效果
 
+拼接衔接要求（极其重要！）：
+1. 视觉锚点：相邻片段之间必须有一个共同的视觉元素，确保画面连贯
+2. 运镜方向延续：如果一个片段结尾是向右平移，下一个片段开头应继续向右或保持静止
+3. 色调一致性：所有片段统一使用相同的色调和光线风格
+4. 动作连贯：如果一个片段结尾主体正在做某个动作，下一个片段开头要延续
+5. 尾帧描述：每个片段末尾需要描述最后画面的状态（因为会提取尾帧作为下一段首帧）
+
 输出格式（严格遵循 JSON）：
 \`\`\`json
 {
@@ -95,12 +106,9 @@ function getScriptGenerationPrompt(
     {
       "index": 1,
       "prompt": "Segment 1 description in English...",
-      "duration": ${segmentDuration}
-    },
-    {
-      "index": 2,
-      "prompt": "Segment 2 description in English...",
-      "duration": ${segmentDuration}
+      "duration": ${segmentDuration},
+      "transition_hint": "dissolve",
+      "end_frame_description": "Description of the last frame in English..."
     }
   ]
 }
@@ -109,6 +117,8 @@ function getScriptGenerationPrompt(
 注意：
 - 第一个片段要有好的开场
 - 相邻片段的结尾和开头要能自然衔接（因为会用尾帧作为下一段首帧）
+- transition_hint 从 'cut'/'dissolve'/'match_cut'/'fade_to_black' 中选择
+- 最后一个片段的 transition_hint 设为 'fade_to_black'
 - 最后一个片段要有完整的收尾`;
 }
 
@@ -137,6 +147,8 @@ function parseVideoScript(response: string): VideoSegmentScript[] {
       index: seg.index || i + 1,
       prompt: seg.prompt || '',
       duration: seg.duration || DEFAULT_SEGMENT_DURATION,
+      transition_hint: seg.transition_hint || undefined,
+      end_frame_description: seg.end_frame_description || undefined,
     }));
   } catch (error) {
     console.error('[LongVideo] Failed to parse script:', error);

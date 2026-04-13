@@ -169,6 +169,10 @@ aitu/
 20. **重构先问问题**：重构前明确要解决的实际问题；验证方案是否真的解决问题而非增加复杂度
 21. **统计上报旁路化**：统计/监控的初始化与上报须在 requestIdleCallback 或 setTimeout 中执行，不在主路径上做脱敏与网络请求；失败静默不向上抛
 22. **第三方 Session Replay**：默认关闭或按采样开启，避免主线程卡顿（wheel/setInterval）与 413；若开启需配置限流与 413 错误处理
+23. **组件库类型就窄不就宽**：给 UI 组件配置项（如 Dropdown options、Table columns、Form rules）写类型时，优先贴组件库声明的最窄类型；不要用 `ReactNode`、`unknown as Xxx` 这类宽泛写法糊过去，避免升级依赖后类型漂移
+24. **公共接口改签名必须全量收口**：修改 service / hook / util 的函数签名或返回结构后，必须全局搜索所有调用点并一并修正；禁止只改定义或只改单个调用点，留下“对象改 number / 字段名漂移”这类半更新状态
+25. **跨层参数禁止直接透传**：MCP、Service Worker、主线程执行器、UI 层的 `options` / `params` 若类型不一致，必须显式写 adapter / mapper 做转换；即使当前只映射 0-1 个字段，也不要把上一层对象直接传给下一层碰运气
+26. **外部输入入口先校验再执行业务**：Tool/RPC/URL 参数/存储恢复数据进入业务前，先做 type guard 或 schema 校验；禁止用 `as SomeType` 直接断言后调用，避免把编译期问题拖成运行时异常
 
 ### Service Worker 规则
 
@@ -202,6 +206,7 @@ aitu/
 28. **降级路径强制主线程执行器**：workflow 提交超时后降级时，MainThreadWorkflowEngine 须传 `forceFallbackExecutor: true`，否则 `executorFactory.getExecutor()` 可能仍返回 SW 执行器导致二次超时
 29. **Fetch Relay 初始化超时保护**：`fetchRelayClient.initialize()` 在热路径（如 `generateImage`、`doInitialize`）中必须用 `Promise.race` 加 3s 超时，超时后降级到 `directFetch`
 30. **模块迁移接口完整性**：将模块从 SW 迁移到主线程（或反向）时，新模块的 `interface` 定义必须与原模块逐字段对比，确保无遗漏；不仅调用时传参要完整，**类型定义本身**也要包含所有字段（如 `referenceImages`），否则即使调用方想传数据也无法传入
+31. **模型参数偏好按作用域隔离**：图片/视频/音频的参数持久化必须优先使用 `selectionKey`、回退 `modelId`，避免不同供应商的同名模型串配置；表单回填优先级必须是“任务/显式初始化参数 > 模型偏好 > 模型默认值”
 
 ### React 规则
 
@@ -222,6 +227,9 @@ aitu/
 15. **列表索引引用须用 ID 追踪**：当 Viewer/弹窗通过 `currentIndex` 引用列表项时，若列表可能动态变化（新项插入/删除），必须通过 item ID 在列表变化后修正索引，否则会显示错误的内容
 16. **RxJS 事件/全局 Store 传递的对象必须是新引用**：原地修改对象再 emit 会导致 React.memo 失效，必须创建新对象后再存入 Map 并 emit
 17. **useEffect 初始对账须用 ref 守卫**：遍历任务列表执行对账可能触发状态更新 → 依赖变化 → useEffect 重跑形成死循环，用 `useRef(false)` 确保只执行一次
+18. **模型选择器跨类型切换禁止错型 pinned**：从图片/视频/音频/文本切换生成类型时，若当前供应商下存在同名但不同类型模型，`pinned model` 逻辑必须返回 `null` 并回退到目标类型的最近有效选择 / 默认模型 / 首个可用模型，不能把旧类型模型伪装成新类型继续显示
+19. **可交互 hover 提示禁止使用原生 `title`**：凡是 tooltip 内需要复制、点击、悬停停留等交互，必须使用自定义浮层/portal Tooltip；原生 `title` 只能用于纯静态、不可交互的浏览器默认提示
+20. **模型项次要操作优先放右键菜单**：模型选择器里像“复制模型名”这类低频操作，优先放统一右键菜单；菜单标题直接展示真实调用的 `model.id`，不要复用展示名，避免内置/非内置模型出现认知偏差
 
 ### 其他常见陷阱
 
@@ -229,6 +237,7 @@ aitu/
 
 1. **API 错误字段类型安全**：`data.error` 可能是字符串或对象，必须用 `typeof` 区分后再传给 `new Error()`
 2. **数值范围转换**：回调链传递进度值时，0-1 和 0-100 范围容易混淆，每层输入/输出值域必须注释标注
+3. **AI 生成文本统一 Card 插入**：所有 AI 生成的文本内容（CHAT 结果、歌词等）插入画布时，必须通过 `InsertionItem.label` 传递标题（prompt 前 20 字符或领域标题），`insertTextToCanvas` 收到 title 后直接创建 Card（Markdown 渲染），不依赖 Markdown 特征检测；新增文本插入入口时需同步传 label
 
 ### 缓存规则
 
@@ -253,6 +262,7 @@ aitu/
 
 - **Tooltips**：始终使用 `theme='light'`，高层级容器内需显式设置更高 `zIndex` (如 20000)
 - **媒体预览**：统一使用 `UnifiedMediaViewer` 公共组件，禁止自定义 Dialog 实现
+- **媒体封面兜底**：音频封面/缩略图/播放器封面统一走公共组件处理失败占位，禁止各处重复写 `onError + fallback`
 - **生成结果缩略图**：使用 `object-fit: contain` 完整展示，禁止 cover 裁切
 - **小图 hover 预览**：缩略图应提供 hover 大图预览功能（Portal 渲染到 body）
 - **状态表意**：优先使用量化组件（如信号格）而非单一颜色圆点来展示程度差异

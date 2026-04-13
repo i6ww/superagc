@@ -6,6 +6,16 @@
  * 劣势：需要重新编码（有轻微质量损失）
  */
 
+import type { TransitionHint } from '../mcp/tools/video-analyze';
+
+/** 转场配置 */
+export interface TransitionConfig {
+  /** 每对相邻视频之间的转场类型，长度 = videoUrls.length - 1 */
+  transitions?: TransitionHint[];
+  /** 转场时长（秒），默认 0.5 */
+  transitionDuration?: number;
+}
+
 /** 合并进度回调 */
 export interface MergeProgressCallback {
   (progress: number, stage: 'downloading' | 'decoding' | 'encoding' | 'finalizing', message?: string): void;
@@ -159,7 +169,8 @@ function getBestVideoFormat(): { mimeType: string; extension: string } {
  */
 async function mergeVideosWithMediaRecorder(
   videoUrls: string[],
-  onProgress?: MergeProgressCallback
+  onProgress?: MergeProgressCallback,
+  transitionConfig?: TransitionConfig
 ): Promise<MergeResult> {
   // console.log('[WebCodecs] Using MediaRecorder to merge videos...');
 
@@ -221,6 +232,9 @@ async function mergeVideosWithMediaRecorder(
   onProgress?.(0, 'encoding', '开始录制视频...');
 
   // 逐个播放和录制视频
+  const transitions = transitionConfig?.transitions || [];
+  const tDur = transitionConfig?.transitionDuration ?? 0.5;
+
   for (let i = 0; i < videoUrls.length; i++) {
     // console.log(`[WebCodecs] Processing video ${i + 1}/${videoUrls.length}`);
     onProgress?.(
@@ -250,7 +264,10 @@ async function mergeVideosWithMediaRecorder(
       console.warn(`[WebCodecs] Failed to connect audio from video ${i + 1}:`, error);
     }
 
-    // 播放视频并绘制到画布
+    // 播放视频并绘制到画布（支持转场效果）
+    const transitionType = i < transitions.length ? transitions[i] : 'cut';
+    const needsFadeOut = transitionType === 'dissolve' || transitionType === 'fade_to_black';
+
     await new Promise<void>((resolve) => {
       video.play().catch(err => {
         console.warn(`[WebCodecs] Failed to play video ${i + 1}:`, err);
@@ -262,7 +279,25 @@ async function mergeVideosWithMediaRecorder(
           return;
         }
 
+        // 计算转场 alpha
+        let alpha = 1.0;
+        if (needsFadeOut && video.duration > 0) {
+          const timeLeft = video.duration - video.currentTime;
+          if (timeLeft < tDur) {
+            alpha = Math.max(0, timeLeft / tDur);
+          }
+        }
+
+        // fade_to_black: 先画黑底
+        if (transitionType === 'fade_to_black' && alpha < 1.0) {
+          ctx.fillStyle = '#000';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        ctx.globalAlpha = alpha;
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        ctx.globalAlpha = 1.0;
+
         requestAnimationFrame(drawFrame);
       };
 
@@ -355,7 +390,8 @@ class VideoMergeWebCodecsService {
    */
   async mergeVideos(
     videoUrls: string[],
-    onProgress?: MergeProgressCallback
+    onProgress?: MergeProgressCallback,
+    transitionConfig?: TransitionConfig
   ): Promise<MergeResult> {
     if (videoUrls.length === 0) {
       throw new Error('没有视频可合并');
@@ -392,7 +428,7 @@ class VideoMergeWebCodecsService {
       }
 
       // 使用 MediaRecorder 方案合并视频
-      return await mergeVideosWithMediaRecorder(videoUrls, onProgress);
+      return await mergeVideosWithMediaRecorder(videoUrls, onProgress, transitionConfig);
     } catch (error) {
       console.error('[WebCodecs] Merge failed:', error);
       throw new Error(`视频合并失败: ${error instanceof Error ? error.message : String(error)}`);
@@ -415,9 +451,10 @@ export const videoMergeWebCodecsService = VideoMergeWebCodecsService.getInstance
  */
 export async function mergeVideos(
   videoUrls: string[],
-  onProgress?: MergeProgressCallback
+  onProgress?: MergeProgressCallback,
+  transitionConfig?: TransitionConfig
 ): Promise<MergeResult> {
-  return videoMergeWebCodecsService.mergeVideos(videoUrls, onProgress);
+  return videoMergeWebCodecsService.mergeVideos(videoUrls, onProgress, transitionConfig);
 }
 
 /**

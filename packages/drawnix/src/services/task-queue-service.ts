@@ -1,21 +1,66 @@
 /**
  * Task Queue Service
- * 
+ *
  * Core service for managing the task queue lifecycle.
  * Implements singleton pattern and uses RxJS for event-driven architecture.
- * 
+ *
  * In fallback mode (SW disabled), this service directly writes to IndexedDB
  * via taskStorageWriter to ensure data persistence.
  */
 
 import { Subject, Observable } from 'rxjs';
-import { Task, TaskStatus, TaskType, TaskEvent, GenerationParams, TaskExecutionPhase } from '../types/task.types';
+import {
+  Task,
+  TaskStatus,
+  TaskType,
+  TaskEvent,
+  GenerationParams,
+  TaskExecutionPhase,
+} from '../types/task.types';
 import { generateTaskId, isTaskActive } from '../utils/task-utils';
-import { validateGenerationParams, sanitizeGenerationParams } from '../utils/validation-utils';
-import { taskStorageWriter, type SWTask } from './media-executor/task-storage-writer';
+import {
+  validateGenerationParams,
+  sanitizeGenerationParams,
+} from '../utils/validation-utils';
+import {
+  taskStorageWriter,
+  type SWTask,
+} from './media-executor/task-storage-writer';
 import { taskStorageReader } from './task-storage-reader';
+import { normalizeImageDataUrl } from '@aitu/utils';
 import { executorFactory, waitForTaskCompletion } from './media-executor';
-import { geminiSettings } from '../utils/settings-manager';
+import { hasInvocationRouteCredentials } from '../utils/settings-manager';
+import { DEFAULT_AUDIO_MODEL_ID } from '../constants/model-config';
+import {
+  getAdapterContextFromSettings,
+  resolveAdapterForInvocation,
+} from './model-adapters';
+import { cacheRemoteUrl, cacheRemoteUrls } from './media-executor/fallback-utils';
+import { STORAGE_LIMITS } from '../constants/TASK_CONSTANTS';
+
+async function cacheAudioCoverUrl(
+  coverUrl: string | undefined,
+  taskId: string,
+  index?: number
+): Promise<string | undefined> {
+  if (!coverUrl) {
+    return undefined;
+  }
+
+  try {
+    return await cacheRemoteUrl(
+      coverUrl,
+      `${taskId}-cover`,
+      'image',
+      'png',
+      index,
+      { forceRemoteCache: true }
+    );
+  } catch (error) {
+    console.warn('[TaskQueueService] Audio cover cache failed, using original URL:', error);
+    return coverUrl;
+  }
+}
 
 /**
  * Task Queue Service
@@ -71,7 +116,10 @@ class TaskQueueService {
    */
   private persistDelete(taskId: string): void {
     taskStorageWriter.deleteTask(taskId).catch((error) => {
-      console.error('[TaskQueueService] Failed to delete task from storage:', error);
+      console.error(
+        '[TaskQueueService] Failed to delete task from storage:',
+        error
+      );
     });
     // Invalidate reader cache after delete
     taskStorageReader.invalidateCache();
@@ -84,12 +132,160 @@ class TaskQueueService {
   private async executeTask(task: Task): Promise<void> {
     try {
       // Check API configuration
-      const settings = geminiSettings.get();
-      if (!settings.apiKey || !settings.baseUrl) {
-        console.warn('[TaskQueueService] No API configuration, cannot execute task');
+      const routeType =
+        task.type === TaskType.VIDEO
+          ? 'video'
+          : task.type === TaskType.AUDIO
+          ? 'audio'
+          : task.type === TaskType.CHAT
+          ? 'text'
+          : 'image';
+      if (
+        !hasInvocationRouteCredentials(
+          routeType,
+          task.params.modelRef || task.params.model
+        )
+      ) {
+        console.warn(
+          '[TaskQueueService] No API configuration, cannot execute task'
+        );
         this.updateTaskStatus(task.id, TaskStatus.FAILED, {
           error: { code: 'NO_API_KEY', message: '未配置 API Key' },
         });
+        return;
+      }
+
+      if (task.type === TaskType.AUDIO) {
+        const requestedModel = task.params.model as string | undefined;
+        const requestedModelRef = task.params.modelRef || null;
+        const adapter = resolveAdapterForInvocation(
+          'audio',
+          requestedModel || DEFAULT_AUDIO_MODEL_ID,
+          requestedModelRef
+        );
+
+        if (!adapter || adapter.kind !== 'audio') {
+          throw new Error(`No audio adapter for model: ${requestedModel}`);
+        }
+
+        const result = await adapter.generateAudio(
+          getAdapterContextFromSettings(
+            'audio',
+            requestedModelRef || requestedModel
+          ),
+          {
+            prompt: task.params.prompt,
+            model: requestedModel,
+            modelRef: requestedModelRef,
+            title: task.params.title,
+            tags: task.params.tags,
+            mv: task.params.mv,
+            sunoAction: task.params.sunoAction,
+            notifyHook: task.params.notifyHook,
+            continueClipId: task.params.continueClipId,
+            continueAt: task.params.continueAt,
+            params: {
+              ...(task.params as any).params,
+              onProgress: (progress: number) => {
+                this.updateTaskProgress(task.id, progress);
+                this.updateTaskStatus(task.id, TaskStatus.PROCESSING, {
+                  executionPhase: TaskExecutionPhase.POLLING,
+                });
+              },
+              onSubmitted: (remoteId: string) => {
+                this.updateTaskStatus(task.id, TaskStatus.PROCESSING, {
+                  remoteId,
+                  executionPhase: TaskExecutionPhase.POLLING,
+                });
+              },
+            },
+          }
+        );
+
+        // 缓存音频 URL 到 Cache Storage，防止远程链接过期
+        const fmt = result.format || (result.resultKind === 'lyrics' ? 'lyrics' : 'mp3');
+        let cachedUrl = result.url;
+        let cachedUrls = result.urls;
+        let cachedPreviewImageUrl = result.imageUrl;
+        let cachedClips = result.clips;
+
+        if (fmt !== 'lyrics') {
+          try {
+            cachedUrl = await cacheRemoteUrl(result.url, task.id, 'audio', fmt);
+            if (result.urls?.length) {
+              cachedUrls = await cacheRemoteUrls(result.urls, task.id, 'audio', fmt);
+            }
+            if (result.imageUrl) {
+              cachedPreviewImageUrl = await cacheAudioCoverUrl(
+                result.imageUrl,
+                task.id
+              );
+            }
+            if (result.clips?.length) {
+              cachedClips = await Promise.all(
+                result.clips.map(async (clip, index) => {
+                  const cachedCoverUrl = await cacheAudioCoverUrl(
+                    clip.imageLargeUrl || clip.imageUrl,
+                    task.id,
+                    result.clips!.length > 1 ? index : undefined
+                  );
+
+                  if (!cachedCoverUrl) {
+                    return clip;
+                  }
+
+                  return {
+                    ...clip,
+                    imageLargeUrl: clip.imageLargeUrl
+                      ? cachedCoverUrl
+                      : clip.imageLargeUrl,
+                    imageUrl: clip.imageUrl
+                      ? cachedCoverUrl
+                      : clip.imageUrl || cachedCoverUrl,
+                  };
+                })
+              );
+            }
+            if (!cachedPreviewImageUrl) {
+              cachedPreviewImageUrl =
+                cachedClips?.[0]?.imageLargeUrl ||
+                cachedClips?.[0]?.imageUrl;
+            }
+          } catch (cacheError) {
+            console.warn('[TaskQueueService] Audio cache failed, using original URLs:', cacheError);
+          }
+        }
+
+        const now = Date.now();
+        const completedTask: Task = {
+          ...(this.tasks.get(task.id) || task),
+          status: TaskStatus.COMPLETED,
+          progress: 100,
+          result: {
+            url: normalizeImageDataUrl(cachedUrl),
+            urls: cachedUrls?.map((u: string) => normalizeImageDataUrl(u)),
+            format: fmt,
+            size: 0,
+            resultKind: result.resultKind,
+            duration:
+              typeof result.duration === 'number' ? result.duration : undefined,
+            previewImageUrl: cachedPreviewImageUrl,
+            title: result.title,
+            lyricsText: result.lyricsText,
+            lyricsTitle: result.lyricsTitle,
+            lyricsTags: result.lyricsTags,
+            providerTaskId: result.providerTaskId || task.remoteId,
+            primaryClipId: result.primaryClipId,
+            clipIds: result.clipIds,
+            clips: cachedClips,
+          },
+          executionPhase: undefined,
+          completedAt: now,
+          updatedAt: now,
+        };
+        this.tasks.set(task.id, completedTask);
+        this.persistTask(completedTask);
+        this.emitEvent('taskUpdated', completedTask);
         return;
       }
 
@@ -108,7 +304,9 @@ class TaskQueueService {
               ...localTask,
               progress: progress.progress,
               updatedAt: Date.now(),
-              ...(progress.phase && { executionPhase: progress.phase as Task['executionPhase'] }),
+              ...(progress.phase && {
+                executionPhase: progress.phase as Task['executionPhase'],
+              }),
             };
             this.tasks.set(task.id, updatedTask);
             this.emitEvent('taskUpdated', updatedTask);
@@ -118,47 +316,81 @@ class TaskQueueService {
 
       // Execute based on task type
       switch (task.type) {
-        case TaskType.IMAGE:
+        case TaskType.IMAGE: {
           // 从 params.params 中提取额外参数（如 quality）
           const extraParams = (task.params as any).params || {};
-          await executor.generateImage({
-            taskId: task.id,
-            prompt: task.params.prompt,
-            model: task.params.model,
-            size: task.params.size,
-            referenceImages: task.params.referenceImages as string[] | undefined,
-            count: task.params.count as number | undefined,
-            uploadedImages: task.params.uploadedImages as Array<{ url?: string }> | undefined,
-            quality: extraParams.quality as '1k' | '2k' | '4k' | undefined,
-            params: extraParams,
-          }, executionOptions);
+          await executor.generateImage(
+            {
+              taskId: task.id,
+              prompt: task.params.prompt,
+              model: task.params.model,
+              modelRef: task.params.modelRef || null,
+              size: task.params.size,
+              referenceImages: task.params.referenceImages as
+                | string[]
+                | undefined,
+              count: task.params.count as number | undefined,
+              uploadedImages: task.params.uploadedImages as
+                | Array<{ url?: string }>
+                | undefined,
+              quality: extraParams.quality as '1k' | '2k' | '4k' | undefined,
+              params: extraParams,
+            },
+            executionOptions
+          );
           break;
+        }
         case TaskType.VIDEO: {
           // 从 uploadedImages（UI 层传入的 UploadedVideoImage[]）中提取 URL
-          const uploaded = task.params.uploadedImages as Array<{ url?: string }> | undefined;
+          const uploaded = task.params.uploadedImages as
+            | Array<{ url?: string }>
+            | undefined;
           const uploadedUrls = uploaded
             ?.map((img) => img.url)
             .filter((url): url is string => !!url);
           // 兼容旧字段 referenceImages / inputReference
           const refImages = task.params.referenceImages as string[] | undefined;
-          const inputRef = (task.params as { inputReference?: string }).inputReference;
+          const inputRef = (task.params as { inputReference?: string })
+            .inputReference;
           const finalRefs =
             uploadedUrls && uploadedUrls.length > 0
               ? uploadedUrls
               : refImages && refImages.length > 0
-                ? refImages
-                : inputRef
-                  ? [inputRef]
-                  : undefined;
-          await executor.generateVideo({
-            taskId: task.id,
-            prompt: task.params.prompt,
-            model: task.params.model,
-            duration: (task.params.duration ?? task.params.seconds)?.toString(),
-            size: task.params.size,
-            referenceImages: finalRefs,
-            params: (task.params as any).params,
-          }, executionOptions);
+              ? refImages
+              : inputRef
+              ? [inputRef]
+              : undefined;
+          await executor.generateVideo(
+            {
+              taskId: task.id,
+              prompt: task.params.prompt,
+              model: task.params.model,
+              modelRef: task.params.modelRef || null,
+              duration: (
+                task.params.duration ?? task.params.seconds
+              )?.toString(),
+              size: task.params.size,
+              referenceImages: finalRefs,
+              params: (task.params as any).params,
+            },
+            executionOptions
+          );
+          break;
+        }
+        case TaskType.CHAT: {
+          await executor.generateText(
+            {
+              taskId: task.id,
+              prompt: task.params.prompt,
+              model: task.params.model,
+              modelRef: task.params.modelRef || null,
+              referenceImages: task.params.referenceImages as
+                | string[]
+                | undefined,
+              params: (task.params as any).params,
+            },
+            executionOptions
+          );
           break;
         }
         default:
@@ -181,7 +413,9 @@ class TaskQueueService {
               updatedAt: Date.now(),
               ...(updatedTask.result && { result: updatedTask.result }),
               ...(updatedTask.error && { error: updatedTask.error }),
-              ...(updatedTask.completedAt && { completedAt: updatedTask.completedAt }),
+              ...(updatedTask.completedAt && {
+                completedAt: updatedTask.completedAt,
+              }),
             };
             this.tasks.set(task.id, newTask);
             this.emitEvent('taskUpdated', newTask);
@@ -241,7 +475,7 @@ class TaskQueueService {
 
   /**
    * Creates a new task and adds it to the queue
-   * 
+   *
    * @param params - Generation parameters
    * @param type - Task type (image or video)
    * @returns The created task
@@ -269,7 +503,9 @@ class TaskQueueService {
       startedAt: now,
       executionPhase: TaskExecutionPhase.SUBMITTING,
       // Initialize progress for video tasks
-      ...(type === TaskType.VIDEO && { progress: 0 }),
+      ...((type === TaskType.VIDEO || type === TaskType.AUDIO) && {
+        progress: 0,
+      }),
     };
 
     // Add to queue
@@ -281,10 +517,16 @@ class TaskQueueService {
     // Emit event
     this.emitEvent('taskCreated', task);
 
+    // 归档超出限制的旧任务
+    this.enforceRetentionLimit();
+
     // Execute task asynchronously (fire-and-forget)
     this.executeTask(task).catch((error) => {
       console.error('[TaskQueueService] Task execution error:', error);
     });
+
+    // 任务开始执行后剥离大字段（base64 参考图等）
+    this.stripLargeParams(task.id);
 
     // console.log(`[TaskQueueService] Created task ${task.id} (${type})`);
     return task;
@@ -292,7 +534,7 @@ class TaskQueueService {
 
   /**
    * Updates a task's status
-   * 
+   *
    * @param taskId - The task ID
    * @param status - New status
    * @param updates - Additional fields to update
@@ -306,7 +548,9 @@ class TaskQueueService {
     if (!task) {
       // Task not in memory — create a minimal entry so the event is still emitted.
       // This can happen after page refresh if restoreTasks hasn't run yet.
-      console.warn(`[TaskQueueService] Task ${taskId} not in memory, creating stub for status update`);
+      console.warn(
+        `[TaskQueueService] Task ${taskId} not in memory, creating stub for status update`
+      );
       const now = Date.now();
       task = {
         id: taskId,
@@ -330,7 +574,10 @@ class TaskQueueService {
     // Set timestamps based on status
     if (status === TaskStatus.PROCESSING && !updatedTask.startedAt) {
       updatedTask.startedAt = now;
-    } else if (status === TaskStatus.COMPLETED || status === TaskStatus.FAILED) {
+    } else if (
+      status === TaskStatus.COMPLETED ||
+      status === TaskStatus.FAILED
+    ) {
       updatedTask.completedAt = now;
     }
 
@@ -343,7 +590,11 @@ class TaskQueueService {
 
     // console.log(`[TaskQueueService] Updated task ${taskId} to ${status}`);
     if (status === TaskStatus.FAILED || status === TaskStatus.COMPLETED) {
-      console.debug(`[TaskQueueService] Task ${taskId} → ${status}, event emitted`);
+      console.debug(
+        `[TaskQueueService] Task ${taskId} → ${status}, event emitted`
+      );
+      // 任务进入终态后检查是否需要归档旧任务
+      this.enforceRetentionLimit();
     }
   }
 
@@ -386,7 +637,7 @@ class TaskQueueService {
 
   /**
    * Gets all tasks
-   * 
+   *
    * @returns Array of all tasks
    */
   getAllTasks(): Task[] {
@@ -395,17 +646,17 @@ class TaskQueueService {
 
   /**
    * Gets tasks by status
-   * 
+   *
    * @param status - The status to filter by
    * @returns Array of tasks with the specified status
    */
   getTasksByStatus(status: TaskStatus): Task[] {
-    return this.getAllTasks().filter(task => task.status === status);
+    return this.getAllTasks().filter((task) => task.status === status);
   }
 
   /**
    * Gets active tasks (pending, processing, retrying)
-   * 
+   *
    * @returns Array of active tasks
    */
   getActiveTasks(): Task[] {
@@ -414,7 +665,7 @@ class TaskQueueService {
 
   /**
    * Cancels a task
-   * 
+   *
    * @param taskId - The task ID to cancel
    */
   cancelTask(taskId: string): void {
@@ -425,7 +676,9 @@ class TaskQueueService {
     }
 
     if (!isTaskActive(task)) {
-      console.warn(`[TaskQueueService] Task ${taskId} is not active, cannot cancel`);
+      console.warn(
+        `[TaskQueueService] Task ${taskId} is not active, cannot cancel`
+      );
       return;
     }
 
@@ -445,8 +698,13 @@ class TaskQueueService {
       return;
     }
 
-    if (task.status !== TaskStatus.FAILED && task.status !== TaskStatus.CANCELLED) {
-      console.warn(`[TaskQueueService] Task ${taskId} is not failed or cancelled, cannot retry`);
+    if (
+      task.status !== TaskStatus.FAILED &&
+      task.status !== TaskStatus.CANCELLED
+    ) {
+      console.warn(
+        `[TaskQueueService] Task ${taskId} is not failed or cancelled, cannot retry`
+      );
       return;
     }
 
@@ -454,11 +712,14 @@ class TaskQueueService {
     const now = Date.now();
     this.updateTaskStatus(taskId, TaskStatus.PROCESSING, {
       error: undefined,
-      startedAt: now,  // Set new start time
+      startedAt: now, // Set new start time
       completedAt: undefined, // Clear completion time
-      remoteId: undefined,   // Clear remote ID for fresh submission
+      remoteId: undefined, // Clear remote ID for fresh submission
       executionPhase: TaskExecutionPhase.SUBMITTING,
-      progress: task.type === TaskType.VIDEO ? 0 : undefined, // Reset progress for video
+      progress:
+        task.type === TaskType.VIDEO || task.type === TaskType.AUDIO
+          ? 0
+          : undefined, // Reset progress for async media
     });
 
     // Execute task after retry
@@ -474,7 +735,7 @@ class TaskQueueService {
 
   /**
    * Deletes a task from the queue
-   * 
+   *
    * @param taskId - The task ID to delete
    */
   deleteTask(taskId: string): void {
@@ -499,7 +760,7 @@ class TaskQueueService {
    */
   clearCompletedTasks(): void {
     const completedTasks = this.getTasksByStatus(TaskStatus.COMPLETED);
-    completedTasks.forEach(task => this.deleteTask(task.id));
+    completedTasks.forEach((task) => this.deleteTask(task.id));
     // console.log(`[TaskQueueService] Cleared ${completedTasks.length} completed tasks`);
   }
 
@@ -508,7 +769,7 @@ class TaskQueueService {
    */
   clearFailedTasks(): void {
     const failedTasks = this.getTasksByStatus(TaskStatus.FAILED);
-    failedTasks.forEach(task => this.deleteTask(task.id));
+    failedTasks.forEach((task) => this.deleteTask(task.id));
     // console.log(`[TaskQueueService] Cleared ${failedTasks.length} failed tasks`);
   }
 
@@ -533,16 +794,24 @@ class TaskQueueService {
   syncTaskFromStorage(taskId: string, storageTask: Partial<Task>): void {
     const task = this.tasks.get(taskId);
     if (!task) return;
-    if (task.status === storageTask.status && task.progress === storageTask.progress) return;
+    if (
+      task.status === storageTask.status &&
+      task.progress === storageTask.progress
+    )
+      return;
 
-    const updatedTask: Task = { ...task, ...storageTask, updatedAt: Date.now() };
+    const updatedTask: Task = {
+      ...task,
+      ...storageTask,
+      updatedAt: Date.now(),
+    };
     this.tasks.set(taskId, updatedTask);
     this.emitEvent('taskUpdated', updatedTask);
   }
 
   /**
    * Restores tasks from storage
-   * 
+   *
    * Uses merge strategy: only restores tasks that don't already exist in memory,
    * or whose in-memory version is older than the stored version.
    * This prevents overwriting active tasks whose status has been updated
@@ -552,7 +821,10 @@ class TaskQueueService {
    */
   restoreTasks(tasks: Task[]): void {
     let restoredCount = 0;
-    tasks.forEach(task => {
+    tasks.forEach((task) => {
+      // 跳过已归档的任务
+      if (task.archived) return;
+
       const existing = this.tasks.get(task.id);
 
       // Skip if in-memory task is newer or at a more advanced status
@@ -564,22 +836,39 @@ class TaskQueueService {
       }
 
       // Ensure video tasks have progress field (for backward compatibility)
-      const restoredTask: Task = task.type === TaskType.VIDEO && task.progress === undefined
-        ? { ...task, progress: 0 }
-        : task;
+      let restoredTask: Task =
+        task.type === TaskType.VIDEO && task.progress === undefined
+          ? { ...task, progress: 0 }
+          : { ...task };
+
+      // 剥离大字段（base64 参考图等），减少内存占用
+      if (restoredTask.params?.referenceImages || restoredTask.params?.uploadedImages) {
+        restoredTask = {
+          ...restoredTask,
+          params: {
+            ...restoredTask.params,
+            referenceImages: undefined,
+            uploadedImages: undefined,
+          },
+        };
+      }
 
       this.tasks.set(restoredTask.id, restoredTask);
       restoredCount++;
     });
 
     // Emit a single batch update event instead of per-task events
-    console.warn(`[TaskQueueService] restoreTasks: ${restoredCount}/${tasks.length} restored, total in memory: ${this.tasks.size}`);
+    console.warn(
+      `[TaskQueueService] restoreTasks: ${restoredCount}/${tasks.length} restored, total in memory: ${this.tasks.size}`
+    );
     if (restoredCount > 0) {
       // Use the first task to emit a generic update that triggers UI refresh
       const allTasks = Array.from(this.tasks.values());
       if (allTasks.length > 0) {
         this.emitEvent('taskCreated', allTasks[0]);
       }
+      // 恢复后检查是否需要归档
+      this.enforceRetentionLimit();
     }
     // console.log(`[TaskQueueService] Restored ${restoredCount}/${tasks.length} tasks (merged)`);
   }
@@ -627,6 +916,70 @@ class TaskQueueService {
     this.updateTaskStatus(taskId, task.status, {
       insertedToCanvas: true,
     });
+  }
+
+  /**
+   * 自动归档超出保留限制的终态任务
+   * 归档后任务仍保留在 IndexedDB 中，但不参与活跃加载
+   */
+  private enforceRetentionLimit(): void {
+    const maxActive = STORAGE_LIMITS.MAX_RETAINED_TASKS;
+    if (this.tasks.size <= maxActive) return;
+
+    // 收集终态任务，按 updatedAt 升序（最旧的优先归档）
+    const terminalTasks: Task[] = [];
+    for (const task of this.tasks.values()) {
+      if (
+        task.status === TaskStatus.COMPLETED ||
+        task.status === TaskStatus.FAILED ||
+        task.status === TaskStatus.CANCELLED
+      ) {
+        terminalTasks.push(task);
+      }
+    }
+
+    terminalTasks.sort((a, b) => a.updatedAt - b.updatedAt);
+
+    const toArchiveCount = this.tasks.size - maxActive;
+    if (toArchiveCount <= 0) return;
+
+    const archiveIds: string[] = [];
+    for (let i = 0; i < Math.min(toArchiveCount, terminalTasks.length); i++) {
+      const task = terminalTasks[i];
+      this.tasks.delete(task.id);
+      archiveIds.push(task.id);
+    }
+
+    // 异步批量归档到 IndexedDB（fire-and-forget）
+    if (archiveIds.length > 0) {
+      taskStorageWriter.archiveTasks(archiveIds).catch((err) => {
+        console.debug('[TaskQueueService] Archive tasks failed:', err);
+      });
+      taskStorageReader.invalidateCache();
+      console.debug(
+        `[TaskQueueService] Archived ${archiveIds.length} tasks, active: ${this.tasks.size}`
+      );
+    }
+  }
+
+  /**
+   * 从内存中的任务副本剥离大字段（referenceImages 等 base64 数据）
+   * 不写回 IndexedDB，保留原始数据供重试时从 DB 读取
+   */
+  private stripLargeParams(taskId: string): void {
+    const task = this.tasks.get(taskId);
+    if (!task?.params) return;
+    const params = task.params as Record<string, unknown>;
+    if (params.referenceImages || params.uploadedImages) {
+      this.tasks.set(taskId, {
+        ...task,
+        params: {
+          ...task.params,
+          referenceImages: undefined,
+          uploadedImages: undefined,
+        },
+      });
+    }
   }
 
   /**

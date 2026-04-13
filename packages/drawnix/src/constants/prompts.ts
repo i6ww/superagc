@@ -176,7 +176,7 @@ export interface ColdStartSuggestion {
   /** 模型调用说明，介绍该命令会用到的模型概况 */
   tips: string;
   /** 生成类型：image(直接生图)、video(直接生视频)、agent(需要Agent分析) */
-  modelType?: 'image' | 'video' | 'agent';
+  modelType?: 'image' | 'video' | 'text' | 'agent';
 }
 
 export const AI_COLD_START_SUGGESTIONS: Record<'zh' | 'en', ColdStartSuggestion[]> = {

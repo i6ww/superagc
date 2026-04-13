@@ -15,10 +15,10 @@ import type {
   Asset,
 } from '../../types/asset.types';
 import { AssetType, AssetSource, SelectionMode } from '../../types/asset.types';
-import { downloadFile } from '@aitu/utils';
 import { useDrawnix } from '../../hooks/use-drawnix';
-import { removeElementsByAssetId, removeElementsByAssetUrl, isCacheUrl } from '../../utils/asset-cleanup';
+import { removeElementsByAssetIds, removeElementsByAssetUrls, isCacheUrl } from '../../utils/asset-cleanup';
 import { isZipFile, extractMediaFromZip } from '../../utils/zip-utils';
+import { buildAssetDownloadItem, smartDownload } from '../../utils/download-utils';
 import './MediaLibraryModal.scss';
 
 export function MediaLibraryModal({
@@ -124,6 +124,10 @@ export function MediaLibraryModal({
     [onSelect, onClose],
   );
 
+  const handleDownloadAsset = useCallback(async (asset: Asset) => {
+    await smartDownload([buildAssetDownloadItem(asset)]);
+  }, []);
+
   // 处理文件上传
   const handleFileUpload = useCallback(
     async (files: FileList) => {
@@ -149,10 +153,11 @@ export function MediaLibraryModal({
       for (const file of mediaFiles) {
         const isImage = file.type.startsWith('image/');
         const isVideo = file.type.startsWith('video/');
+        const isAudio = file.type.startsWith('audio/');
 
-        if (!isImage && !isVideo) {
+        if (!isImage && !isVideo && !isAudio) {
           console.warn(`[MediaLibrary] Invalid file type: ${file.type}`);
-          MessagePlugin.warning(`文件 "${file.name}" 不是有效的图片或视频格式`);
+          MessagePlugin.warning(`文件 "${file.name}" 不是有效的图片、视频或音频格式`);
           continue;
         }
 
@@ -198,7 +203,8 @@ export function MediaLibraryModal({
       try {
         for (const file of validFiles) {
           const isImage = file.type.startsWith('image/');
-          const type = isImage ? AssetType.IMAGE : AssetType.VIDEO;
+          const isAudio = file.type.startsWith('audio/');
+          const type = isImage ? AssetType.IMAGE : isAudio ? AssetType.AUDIO : AssetType.VIDEO;
           await addAsset(file, type, AssetSource.LOCAL);
         }
 
@@ -251,9 +257,9 @@ export function MediaLibraryModal({
       const isCacheAsset = isCacheUrl(asset.url);
 
       if (isCacheAsset) {
-        removeElementsByAssetUrl(board, asset.url);
+        removeElementsByAssetUrls(board, asset.dedupeUrls || [asset.url]);
       } else {
-        removeElementsByAssetId(board, assetId);
+        removeElementsByAssetIds(board, asset.dedupeAssetIds || [assetId]);
       }
     }
 
@@ -264,6 +270,7 @@ export function MediaLibraryModal({
   return (
     <>
       <WinBoxWindow
+        id="media-library"
         visible={isOpen}
         title="素材库"
         onClose={onClose}
@@ -290,7 +297,7 @@ export function MediaLibraryModal({
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*,video/*,.zip,application/zip,application/x-zip-compressed"
+          accept="image/*,video/*,audio/*,.zip,application/zip,application/x-zip-compressed"
           multiple
           style={{ display: 'none' }}
           onChange={handleFileInputChange}
@@ -317,9 +324,7 @@ export function MediaLibraryModal({
                 asset={selectedAsset}
                 onRename={renameAsset}
                 onDelete={handleRemoveAsset}
-                onDownload={(asset) => {
-                  downloadFile(asset.url, asset.name);
-                }}
+                onDownload={handleDownloadAsset}
                 onSelect={showSelectButton ? handleUseAsset : undefined}
                 showSelectButton={showSelectButton}
                 selectButtonText={selectButtonText}
@@ -344,9 +349,7 @@ export function MediaLibraryModal({
             asset={selectedAsset}
             onRename={renameAsset}
             onDelete={handleRemoveAsset}
-            onDownload={(asset) => {
-              downloadFile(asset.url, asset.name);
-            }}
+            onDownload={handleDownloadAsset}
             onSelect={showSelectButton ? handleUseAsset : undefined}
             showSelectButton={showSelectButton}
             selectButtonText={selectButtonText}

@@ -420,7 +420,7 @@ export const ImageFillPanel: React.FC<ImageFillPanelProps> = ({
       )}
 
       {/* 素材库弹窗 - 仅在内部控制时渲染 */}
-      {!externalMediaLibraryControl && (
+      {!externalMediaLibraryControl && showMediaLibrary && (
         <MediaLibraryModal
           isOpen={showMediaLibrary}
           onClose={() => setShowMediaLibrary(false)}

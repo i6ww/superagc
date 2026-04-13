@@ -11,6 +11,8 @@ export { mcpRegistry, MCPRegistry } from './registry';
 // 导出工具
 export { imageGenerationTool, getCurrentImageModel } from './tools/image-generation';
 export { videoGenerationTool, getCurrentVideoModel } from './tools/video-generation';
+export { audioGenerationTool, getCurrentAudioModel } from './tools/audio-generation';
+export { textGenerationTool, getCurrentTextModel } from './tools/text-generation';
 export {
   canvasInsertionTool,
   setCanvasBoard,
@@ -37,6 +39,8 @@ export type { LongVideoGenerationParams } from './tools/long-video-generation';
 export { pptGenerationTool, generatePPT } from './tools/ppt-generation';
 export type { PPTGenerationParams } from '../services/ppt';
 export { knowledgeBaseTools } from './tools/knowledge-base-tool';
+export { videoAnalyzeTool } from './tools/video-analyze';
+export type { VideoAnalyzeParams, VideoAnalysisData, VideoShot } from './tools/video-analyze';
 
 // 共享模块导出
 export { setBoard, getBoard } from './tools/shared';
@@ -45,6 +49,8 @@ export { setBoard, getBoard } from './tools/shared';
 import { mcpRegistry } from './registry';
 import { imageGenerationTool } from './tools/image-generation';
 import { videoGenerationTool } from './tools/video-generation';
+import { audioGenerationTool } from './tools/audio-generation';
+import { textGenerationTool } from './tools/text-generation';
 import { canvasInsertionTool } from './tools/canvas-insertion';
 import { aiAnalyzeTool } from './tools/ai-analyze';
 import { mermaidTool } from './tools/mermaid-tool';
@@ -56,6 +62,7 @@ import { svgTool } from './tools/svg-tool';
 import { longVideoGenerationTool } from './tools/long-video-generation';
 import { pptGenerationTool } from './tools/ppt-generation';
 import { knowledgeBaseTools } from './tools/knowledge-base-tool';
+import { videoAnalyzeTool } from './tools/video-analyze';
 
 /** 标记 MCP 是否已初始化 */
 let mcpInitialized = false;
@@ -73,6 +80,8 @@ export function initializeMCP(): void {
   mcpRegistry.registerAll([
     imageGenerationTool,
     videoGenerationTool,
+    audioGenerationTool,
+    textGenerationTool,
     longVideoGenerationTool,
     canvasInsertionTool,
     aiAnalyzeTool,
@@ -84,6 +93,7 @@ export function initializeMCP(): void {
     svgTool,
     pptGenerationTool,
     ...knowledgeBaseTools,
+    videoAnalyzeTool,
   ]);
   // console.log('[MCP] Initialized with built-in tools');
 }

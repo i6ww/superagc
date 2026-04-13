@@ -207,6 +207,7 @@ describe('WorkflowEngine Module', () => {
             generateImage: async () => {},
             generateVideo: async () => {},
             aiAnalyze: async () => {},
+            generateText: async () => ({ content: 'test' }),
           }),
         },
       }));
@@ -244,6 +245,7 @@ describe('WorkflowEngine Module', () => {
             generateImage: async () => {},
             generateVideo: async () => {},
             aiAnalyze: async () => {},
+            generateText: async () => ({ content: 'test' }),
           }),
         },
       }));
@@ -285,6 +287,7 @@ describe('WorkflowEngine Module', () => {
             generateImage: async () => {},
             generateVideo: async () => {},
             aiAnalyze: async () => {},
+            generateText: async () => ({ content: 'test' }),
           }),
         },
       }));
@@ -322,6 +325,7 @@ describe('WorkflowEngine Module', () => {
             generateImage: async () => {},
             generateVideo: async () => {},
             aiAnalyze: async () => {},
+            generateText: async () => ({ content: 'test' }),
           }),
         },
       }));
@@ -359,6 +363,7 @@ describe('WorkflowEngine Module', () => {
             generateImage: async () => {},
             generateVideo: async () => {},
             aiAnalyze: async () => {},
+            generateText: async () => ({ content: 'test' }),
           }),
         },
       }));

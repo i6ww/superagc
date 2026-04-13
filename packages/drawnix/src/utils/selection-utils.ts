@@ -8,6 +8,7 @@ import { SAME_ROW_THRESHOLD } from '../components/ttd-dialog/shared/size-constan
 import { trimImageWhiteAndTransparentBorder } from '@aitu/utils';
 import { isFillConfig, ImageFillConfig } from '../types/fill.types';
 import { generateFillDefId } from './fill-renderer';
+import { isCardElement } from '../types/card.types';
 
 /**
  * 从图片 URL 获取原始尺寸
@@ -187,6 +188,17 @@ export const sortElementsByPosition = (board: PlaitBoard, elements: PlaitElement
  */
 export const extractTextFromElement = (element: PlaitElement, board?: PlaitBoard): string => {
   const texts: string[] = [];
+
+  if (isCardElement(element)) {
+    return element.body?.trim() || '';
+  }
+
+  if (element.type === 'audio' && 'title' in element && typeof element.title === 'string') {
+    const title = element.title.trim();
+    if (title) {
+      texts.push(title);
+    }
+  }
   
   // Handle MindElement (mind map nodes)
   if (board && MindElement.isMindElement(board, element)) {

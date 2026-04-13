@@ -409,11 +409,13 @@ export const ToolboxDrawer: React.FC<ToolboxDrawerProps> = ({
       </BaseDrawer>
 
       {/* Custom Tool Dialog */}
-      <CustomToolDialog
-        visible={customToolDialogVisible}
-        onClose={handleDialogClose}
-        onSuccess={handleCustomToolSaved}
-      />
+      {customToolDialogVisible && (
+        <CustomToolDialog
+          visible={customToolDialogVisible}
+          onClose={handleDialogClose}
+          onSuccess={handleCustomToolSaved}
+        />
+      )}
     </>
   );
 };

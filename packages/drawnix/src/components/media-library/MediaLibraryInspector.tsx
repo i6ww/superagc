@@ -12,9 +12,10 @@ import {
   CheckCircle,
   Copy,
 } from 'lucide-react';
+import { isDataURL, normalizeImageDataUrl } from '@aitu/utils';
 import { formatDate, formatFileSize } from '../../utils/asset-utils';
 import { useAssetSize } from '../../hooks/useAssetSize';
-import { isCacheUrl, countElementsByAssetUrl } from '../../utils/asset-cleanup';
+import { isCacheUrl, countElementsByAssetUrls } from '../../utils/asset-cleanup';
 import { useDrawnix } from '../../hooks/use-drawnix';
 import type { MediaLibraryInspectorProps } from '../../types/asset.types';
 import './MediaLibraryInspector.scss';
@@ -25,14 +26,24 @@ import './MediaLibraryInspector.scss';
  * @param size 预览图尺寸（默认 small）
  */
 function getThumbnailUrl(originalUrl: string, size: 'small' | 'large' = 'small'): string {
+  const normalizedUrl = normalizeImageDataUrl(originalUrl);
+  if (
+    normalizedUrl.startsWith('http://') ||
+    normalizedUrl.startsWith('https://') ||
+    normalizedUrl.startsWith('blob:') ||
+    isDataURL(normalizedUrl)
+  ) {
+    return normalizedUrl;
+  }
+
   try {
-    const url = new URL(originalUrl, window.location.origin);
+    const url = new URL(normalizedUrl, window.location.origin);
     url.searchParams.set('thumbnail', size);
     return url.toString();
   } catch {
     // 如果 URL 解析失败，直接拼接参数
-    const separator = originalUrl.includes('?') ? '&' : '?';
-    return `${originalUrl}${separator}thumbnail=${size}`;
+    const separator = normalizedUrl.includes('?') ? '&' : '?';
+    return `${normalizedUrl}${separator}thumbnail=${size}`;
   }
 }
 
@@ -59,7 +70,7 @@ export function MediaLibraryInspector({
       return { isCacheAsset: false, canvasElementCount: 0 };
     }
     const isCache = isCacheUrl(asset.url);
-    const count = isCache ? countElementsByAssetUrl(board, asset.url) : 0;
+    const count = isCache ? countElementsByAssetUrls(board, asset.dedupeUrls || [asset.url]) : 0;
     return { isCacheAsset: isCache, canvasElementCount: count };
   }, [asset, board]);
 
@@ -109,14 +120,13 @@ export function MediaLibraryInspector({
     setDeleteDialogVisible(true);
   }, []);
 
-  // 确认删除
+  // 确认删除（成功提示由 AssetContext 统一展示，此处不再重复）
   const handleConfirmDelete = useCallback(async () => {
     if (!asset) return;
 
     try {
       await onDelete(asset.id);
       setDeleteDialogVisible(false);
-      MessagePlugin.success('删除成功');
     } catch (error) {
       // 错误已在Context中处理
     }
@@ -157,26 +167,44 @@ export function MediaLibraryInspector({
     );
   }
 
+  const normalizedAssetUrl =
+    asset.type === 'IMAGE' ? normalizeImageDataUrl(asset.url) : asset.url;
+
   return (
     <div className="media-library-inspector">
       {/* 预览 */}
       <div className="media-library-inspector__preview">
-        {asset.type === 'IMAGE' ? (
+        {asset.type === 'AUDIO' ? (
+          <div className="media-library-inspector__audio-preview">
+            {asset.thumbnail && (
+              <img
+                src={asset.thumbnail}
+                alt={asset.name}
+                className="media-library-inspector__audio-cover"
+              />
+            )}
+            <audio
+              src={normalizedAssetUrl}
+              controls
+              className="media-library-inspector__audio"
+            />
+          </div>
+        ) : asset.type === 'IMAGE' ? (
           <img
-            src={getThumbnailUrl(asset.url, 'large')}
+            src={getThumbnailUrl(normalizedAssetUrl, 'large')}
             alt={asset.name}
             className="media-library-inspector__image"
             onError={(e) => {
               // 预览图加载失败，回退到原图
-              (e.target as HTMLImageElement).src = asset.url;
+              (e.target as HTMLImageElement).src = normalizedAssetUrl;
             }}
           />
         ) : (
           <video
-            src={asset.url}
+            src={normalizedAssetUrl}
             controls
             className="media-library-inspector__video"
-            poster={getThumbnailUrl(asset.url, 'large')}
+            poster={getThumbnailUrl(normalizedAssetUrl, 'large')}
           />
         )}
       </div>
@@ -216,7 +244,7 @@ export function MediaLibraryInspector({
         <div className="media-library-inspector__meta-item">
           <span className="media-library-inspector__meta-label">类型</span>
           <span className="media-library-inspector__meta-value">
-            {asset.type === 'IMAGE' ? '图片' : '视频'}
+            {asset.type === 'IMAGE' ? '图片' : asset.type === 'AUDIO' ? '音频' : '视频'}
           </span>
         </div>
         <div className="media-library-inspector__meta-item">

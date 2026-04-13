@@ -11,7 +11,8 @@
 import { taskQueueService } from './task-queue';
 import { TaskStatus, TaskType, Task } from '../types/task.types';
 import { extractLastFrame } from '@aitu/utils';
-import { mergeVideos, type MergeProgressCallback } from './video-merge-webcodecs';
+import { mergeVideos, type MergeProgressCallback, type TransitionConfig } from './video-merge-webcodecs';
+import type { TransitionHint } from '../mcp/tools/video-analyze';
 import {
   createLongVideoSegmentTask,
   type LongVideoMeta,
@@ -30,6 +31,8 @@ interface LongVideoBatch {
   creatingNextFor: number | null;
   isMerging: boolean;
   mergeCompleted: boolean;
+  /** 完整脚本列表（从首个任务 meta 中提取） */
+  scripts: VideoSegmentScript[];
 }
 
 /**
@@ -121,6 +124,7 @@ class LongVideoChainService {
         creatingNextFor: null,
         isMerging: false,
         mergeCompleted: false,
+        scripts: scripts || [],
       };
       this.batches.set(batchId, batch);
     }
@@ -235,6 +239,9 @@ class LongVideoChainService {
 
       // console.log(`[LongVideoChain] Merging ${videoUrls.length} videos...`);
 
+      // 从任务 meta 中提取转场信息
+      const transitions = this.extractTransitions(batch);
+
       // 合并视频
       const onProgress: MergeProgressCallback = (progress, stage, message) => {
         const msg = message || `${stage} ${progress.toFixed(1)}%`;
@@ -242,7 +249,10 @@ class LongVideoChainService {
         // TODO: 可以在这里更新 UI 显示进度
       };
 
-      const result = await mergeVideos(videoUrls, onProgress);
+      const result = await mergeVideos(videoUrls, onProgress, {
+        transitions,
+        transitionDuration: 0.5,
+      });
 
       // console.log(`[LongVideoChain] Merge completed, duration: ${result.duration}s`);
 
@@ -276,6 +286,17 @@ class LongVideoChainService {
       // 回退：输出视频URL供用户手动下载
       // console.log(`[LongVideoChain] Merged video URL: ${videoUrl}`);
     }
+  }
+
+  /**
+   * 从批次的脚本中提取转场信息
+   */
+  private extractTransitions(batch: LongVideoBatch): TransitionHint[] {
+    if (!batch.scripts || batch.scripts.length === 0) return [];
+    return batch.scripts
+      .sort((a, b) => a.index - b.index)
+      .slice(0, -1)
+      .map(s => ((s as any).transition_hint as TransitionHint) || 'cut');
   }
 
   /**

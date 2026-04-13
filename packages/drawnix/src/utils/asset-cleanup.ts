@@ -6,18 +6,17 @@
 
 import { PlaitBoard, PlaitElement, CoreTransforms } from '@plait/core';
 import { PlaitDrawElement } from '@plait/draw';
-
-/** 素材库 URL 前缀 */
-const ASSET_URL_PREFIX = '/asset-library/';
-
-/** 缓存 URL 前缀（合并图片/视频） */
-const CACHE_URL_PREFIX = '/__aitu_cache__/';
+import {
+  ASSET_LIBRARY_URL_PREFIX,
+  CACHE_URL_PREFIX,
+  isVirtualMediaUrl,
+} from './virtual-media-url';
 
 /**
  * 检查是否为虚拟URL（素材库本地URL）
  */
 export function isVirtualUrl(url: string): boolean {
-  return url.startsWith('/asset-library/') || url.startsWith('/__aitu_cache__/');
+  return isVirtualMediaUrl(url);
 }
 
 /**
@@ -25,7 +24,7 @@ export function isVirtualUrl(url: string): boolean {
  * 支持相对路径 (/__aitu_cache__/...) 和完整 URL (http://xxx/__aitu_cache__/...)
  */
 export function isCacheUrl(url: string): boolean {
-  return url.startsWith(CACHE_URL_PREFIX) || url.includes(CACHE_URL_PREFIX);
+  return isVirtualUrl(url);
 }
 
 /**
@@ -33,12 +32,12 @@ export function isCacheUrl(url: string): boolean {
  * 例如: /asset-library/87501b99-6c6d-4053-8b38-37bfaabce9a3.png -> 87501b99-6c6d-4053-8b38-37bfaabce9a3
  */
 export function extractAssetIdFromUrl(url: string): string | null {
-  if (!url.startsWith(ASSET_URL_PREFIX)) {
+  if (!url.startsWith(ASSET_LIBRARY_URL_PREFIX)) {
     return null;
   }
   
   // 移除前缀和扩展名
-  const pathPart = url.slice(ASSET_URL_PREFIX.length);
+  const pathPart = url.slice(ASSET_LIBRARY_URL_PREFIX.length);
   const dotIndex = pathPart.lastIndexOf('.');
   if (dotIndex > 0) {
     return pathPart.slice(0, dotIndex);
@@ -50,7 +49,7 @@ export function extractAssetIdFromUrl(url: string): string | null {
  * 根据素材ID生成虚拟URL的匹配模式
  */
 export function getAssetUrlPattern(assetId: string): string {
-  return `${ASSET_URL_PREFIX}${assetId}`;
+  return `${ASSET_LIBRARY_URL_PREFIX}${assetId}`;
 }
 
 /**
@@ -220,28 +219,35 @@ export function countElementsByAssetUrl(board: PlaitBoard, assetUrl: string): nu
   let count = 0;
 
   for (const element of board.children) {
-    const url = (element as any).url;
-    if (!url || typeof url !== 'string') {
+    const candidateUrls = [(element as any).url, (element as any).audioUrl].filter(
+      (value): value is string => typeof value === 'string' && value.length > 0
+    );
+    if (candidateUrls.length === 0) {
       continue;
     }
 
-    // 支持完整 URL 和相对路径的匹配
-    const elementCachePath = extractCachePath(url);
-    const isMatch = url === assetUrl || 
-                    (targetCachePath && elementCachePath && targetCachePath === elementCachePath);
-    
+    const isMatch = candidateUrls.some((url) => {
+      const elementCachePath = extractCachePath(url);
+      return url === assetUrl ||
+        (targetCachePath && elementCachePath && targetCachePath === elementCachePath);
+    });
+
     if (isMatch) {
-      // 检查是否为图片或视频元素
       const isImage = PlaitDrawElement.isDrawElement(element) && PlaitDrawElement.isImage(element);
       const isVideo = (element as any).type === 'video' || (element as any).isVideo;
-      
-      if (isImage || isVideo) {
+      const isAudio = typeof (element as any).audioUrl === 'string';
+
+      if (isImage || isVideo || isAudio) {
         count++;
       }
     }
   }
 
   return count;
+}
+
+export function countElementsByAssetUrls(board: PlaitBoard, assetUrls: string[]): number {
+  return assetUrls.reduce((total, assetUrl) => total + countElementsByAssetUrl(board, assetUrl), 0);
 }
 
 /**
@@ -261,22 +267,25 @@ export function removeElementsByAssetUrl(board: PlaitBoard, assetUrl: string): n
   const elementsToRemove: PlaitElement[] = [];
 
   for (const element of board.children) {
-    const url = (element as any).url;
-    if (!url || typeof url !== 'string') {
+    const candidateUrls = [(element as any).url, (element as any).audioUrl].filter(
+      (value): value is string => typeof value === 'string' && value.length > 0
+    );
+    if (candidateUrls.length === 0) {
       continue;
     }
 
-    // 支持完整 URL 和相对路径的匹配
-    const elementCachePath = extractCachePath(url);
-    const isMatch = url === assetUrl ||
-                    (targetCachePath && elementCachePath && targetCachePath === elementCachePath);
+    const isMatch = candidateUrls.some((url) => {
+      const elementCachePath = extractCachePath(url);
+      return url === assetUrl ||
+        (targetCachePath && elementCachePath && targetCachePath === elementCachePath);
+    });
 
     if (isMatch) {
-      // 检查是否为图片或视频元素
       const isImage = PlaitDrawElement.isDrawElement(element) && PlaitDrawElement.isImage(element);
       const isVideo = (element as any).type === 'video' || (element as any).isVideo;
+      const isAudio = typeof (element as any).audioUrl === 'string';
 
-      if (isImage || isVideo) {
+      if (isImage || isVideo || isAudio) {
         elementsToRemove.push(element);
       }
     }
@@ -292,4 +301,8 @@ export function removeElementsByAssetUrl(board: PlaitBoard, assetUrl: string): n
   }
 
   return elementsToRemove.length;
+}
+
+export function removeElementsByAssetUrls(board: PlaitBoard, assetUrls: string[]): number {
+  return assetUrls.reduce((total, assetUrl) => total + removeElementsByAssetUrl(board, assetUrl), 0);
 }

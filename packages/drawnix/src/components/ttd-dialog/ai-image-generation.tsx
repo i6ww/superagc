@@ -1,8 +1,15 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from 'react';
 import './ttd-dialog.scss';
 import './ai-image-generation.scss';
 import { useI18n } from '../../i18n';
 import { type Language } from '../../constants/prompts';
+import { useDeviceType } from '../../hooks/useDeviceType';
 import { useTaskQueue } from '../../hooks/useTaskQueue';
 import { TaskType } from '../../types/task.types';
 import { MessagePlugin } from 'tdesign-react';
@@ -33,10 +40,31 @@ import {
 } from '../../constants/image-aspect-ratios';
 import { DialogTaskList } from '../task-queue/DialogTaskList';
 import { LS_KEYS } from '../../constants/storage-keys';
-import { geminiSettings } from '../../utils/settings-manager';
+import {
+  loadScopedAIImageToolPreferences,
+  saveAIImageToolPreferences,
+} from '../../services/ai-generation-preferences-service';
+import {
+  geminiSettings,
+  hasInvocationRouteCredentials,
+  resolveInvocationRoute,
+  createModelRef,
+  type ModelRef,
+} from '../../utils/settings-manager';
 import { promptForApiKey } from '../../utils/gemini-api';
 import { buildMJPromptSuffix } from '../../utils/mj-params';
-import { getCompatibleParams, getSizeOptionsForModel } from '../../constants/model-config';
+import {
+  getCompatibleParams,
+  getSizeOptionsForModel,
+  type ModelConfig,
+} from '../../constants/model-config';
+import { useSelectableModels } from '../../hooks/use-runtime-models';
+import { getPinnedSelectableModel } from '../../utils/runtime-model-discovery';
+import {
+  findMatchingSelectableModel,
+  getModelRefFromConfig,
+  getSelectionKey,
+} from '../../utils/model-selection';
 
 interface AIImageGenerationProps {
   initialPrompt?: string;
@@ -49,7 +77,11 @@ interface AIImageGenerationProps {
   targetFrameId?: string;
   targetFrameDimensions?: { width: number; height: number };
   selectedModel?: string;
+  selectedModelRef?: ModelRef | null;
   onModelChange?: (value: string) => void;
+  onModelRefChange?: (value: ModelRef | null) => void;
+  /** 外部传入的 batchId，用于任务关联（如视频分析器帧生成） */
+  externalBatchId?: string;
 }
 
 const AIImageGeneration = ({
@@ -63,19 +95,72 @@ const AIImageGeneration = ({
   targetFrameId,
   targetFrameDimensions,
   selectedModel,
+  selectedModelRef,
   onModelChange,
+  onModelRefChange,
+  externalBatchId,
 }: AIImageGenerationProps = {}) => {
+  const imageModels = useSelectableModels('image');
+  const initialRoute = resolveInvocationRoute('image');
+  const initialMatchedModel =
+    findMatchingSelectableModel(
+      imageModels,
+      initialRoute.modelId,
+      createModelRef(initialRoute.profileId, initialRoute.modelId)
+    ) ||
+    getPinnedSelectableModel(
+      'image',
+      initialRoute.modelId,
+      createModelRef(initialRoute.profileId, initialRoute.modelId)
+    );
+  const [currentModel, setCurrentModel] = useState(
+    initialMatchedModel?.id ||
+      imageModels[0]?.id ||
+      'gemini-2.5-flash-image-vip'
+  );
+  const [currentModelRef, setCurrentModelRef] = useState<ModelRef | null>(
+    getModelRefFromConfig(initialMatchedModel) ||
+      createModelRef(initialRoute.profileId, initialRoute.modelId)
+  );
+  const initialSelectionKey = getSelectionKey(
+    initialMatchedModel?.id ||
+      imageModels[0]?.id ||
+      'gemini-2.5-flash-image-vip',
+    getModelRefFromConfig(initialMatchedModel) ||
+      createModelRef(initialRoute.profileId, initialRoute.modelId)
+  );
+  const initialScopedPreferences = loadScopedAIImageToolPreferences(
+    initialMatchedModel?.id ||
+      imageModels[0]?.id ||
+      'gemini-2.5-flash-image-vip',
+    initialSelectionKey
+  );
   const [prompt, setPrompt] = useState(initialPrompt);
   const [mjSelectedParams, setMjSelectedParams] = useState<
     Record<string, string>
-  >({});
-  const [currentModel, setCurrentModel] = useState(() => {
-    const settings = geminiSettings.get();
-    return settings.imageModelName || 'gemini-2.5-flash-image-vip';
-  });
+  >(initialScopedPreferences.extraParams);
+  const visibleImageModels = useMemo(() => {
+    const currentMatch = findMatchingSelectableModel(
+      imageModels,
+      currentModel,
+      currentModelRef
+    );
+    if (currentMatch || !currentModel) {
+      return imageModels;
+    }
+
+    const pinnedModel = getPinnedSelectableModel(
+      'image',
+      currentModel,
+      currentModelRef
+    );
+    return pinnedModel ? [pinnedModel, ...imageModels] : imageModels;
+  }, [currentModel, currentModelRef, imageModels]);
   const [width, setWidth] = useState<number | string>(initialWidth || 1024);
   const [height, setHeight] = useState<number | string>(initialHeight || 1024);
-  const [aspectRatio, setAspectRatio] = useState<string>(initialAspectRatio || DEFAULT_ASPECT_RATIO);
+  const [aspectRatio, setAspectRatio] = useState<string>(
+    initialAspectRatio || initialScopedPreferences.aspectRatio || DEFAULT_ASPECT_RATIO
+  );
   const [error, setError] = useState<string | null>(null);
   const [uploadedImages, setUploadedImages] =
     useState<ReferenceImage[]>(initialImages);
@@ -85,7 +170,10 @@ const AIImageGeneration = ({
   const [taskListWidth, setTaskListWidth] = useState(() =>
     loadSavedWidth('image')
   );
+  const [mobilePanel, setMobilePanel] = useState<'config' | 'tasks'>('config');
   const containerRef = useRef<HTMLDivElement>(null);
+  const { viewportWidth } = useDeviceType();
+  const isCompactLayout = viewportWidth <= 768;
 
   // Use generation history from task queue
   const { imageHistory } = useGenerationHistory();
@@ -100,13 +188,16 @@ const AIImageGeneration = ({
     const sizeOptions = getSizeOptionsForModel(currentModel);
     if (sizeOptions.length === 0) return ASPECT_RATIO_OPTIONS;
 
-    const byValue = new Map(ASPECT_RATIO_OPTIONS.map((option) => [option.value, option]));
+    const byValue = new Map(
+      ASPECT_RATIO_OPTIONS.map((option) => [option.value, option])
+    );
     const mapped: AspectRatioOption[] = [];
 
     sizeOptions.forEach((sizeOption) => {
-      const normalized = sizeOption.value === 'auto'
-        ? 'auto'
-        : sizeOption.value.replace('x', ':');
+      const normalized =
+        sizeOption.value === 'auto'
+          ? 'auto'
+          : sizeOption.value.replace('x', ':');
       const option = byValue.get(normalized);
       if (option && !mapped.some((item) => item.value === option.value)) {
         mapped.push(option);
@@ -120,13 +211,25 @@ const AIImageGeneration = ({
     const params = getCompatibleParams(currentModel);
     // MJ 模型所有参数都走 dropdown；非 MJ 模型排除 size（已有 AspectRatioSelector）
     if (isMJModel) return params.length > 0;
-    return params.some(p => p.id !== 'size');
+    return params.some((p) => p.id !== 'size');
   }, [currentModel, isMJModel]);
 
-  // 模型切换时清空已选参数，避免跨模型残留不兼容配置
+  // Track if we're in manual edit mode (from handleEditTask) to prevent props from overwriting
+  const [isManualEdit, setIsManualEdit] = useState(false);
+
+  // 模型切换时恢复该模型上次使用的偏好
   useEffect(() => {
-    setMjSelectedParams({});
-  }, [currentModel]);
+    if (isManualEdit) {
+      return;
+    }
+
+    const scopedPreferences = loadScopedAIImageToolPreferences(
+      currentModel,
+      getSelectionKey(currentModel, currentModelRef)
+    );
+    setMjSelectedParams(scopedPreferences.extraParams);
+    setAspectRatio(scopedPreferences.aspectRatio);
+  }, [currentModel, currentModelRef, isManualEdit]);
 
   const handleMJParamChange = useCallback((paramId: string, value: string) => {
     if (!value || value === 'default') {
@@ -142,9 +245,6 @@ const AIImageGeneration = ({
       [paramId]: value,
     }));
   }, []);
-
-  // Track if we're in manual edit mode (from handleEditTask) to prevent props from overwriting
-  const [isManualEdit, setIsManualEdit] = useState(false);
 
   // 处理宽度变化
   const handleWidthChange = useCallback((width: number) => {
@@ -206,21 +306,79 @@ const AIImageGeneration = ({
   useEffect(() => {
     const handleSettingsChange = (newSettings: any) => {
       const nextModel =
-        newSettings.imageModelName || 'gemini-2.5-flash-image-vip';
+        newSettings.imageModelName ||
+        visibleImageModels[0]?.id ||
+        'gemini-2.5-flash-image-vip';
       if (nextModel !== currentModel) {
         setCurrentModel(nextModel);
+        const matchedModel = findMatchingSelectableModel(
+          visibleImageModels,
+          nextModel,
+          currentModelRef
+        );
+        setCurrentModelRef(getModelRefFromConfig(matchedModel) || null);
       }
     };
     geminiSettings.addListener(handleSettingsChange);
     return () => geminiSettings.removeListener(handleSettingsChange);
-  }, [currentModel]);
+  }, [currentModel, currentModelRef, visibleImageModels]);
+
+  useEffect(() => {
+    if (visibleImageModels.length === 0) return;
+    const matchedModel = findMatchingSelectableModel(
+      visibleImageModels,
+      currentModel,
+      currentModelRef
+    );
+    if (!matchedModel) {
+      const fallback = visibleImageModels[0];
+      setCurrentModel(fallback.id);
+      // 避免每次创建新对象引用导致级联重渲染
+      const nextRef = getModelRefFromConfig(fallback);
+      setCurrentModelRef(prev => {
+        if (prev && nextRef &&
+            prev.profileId === nextRef.profileId &&
+            prev.modelId === nextRef.modelId) {
+          return prev;
+        }
+        return nextRef;
+      });
+    }
+  }, [currentModel, currentModelRef, visibleImageModels]);
 
   // Keep local模型状态与头部下拉（受控 selectedModel）同步，避免展示过期的参数列表
   useEffect(() => {
-    if (selectedModel && selectedModel !== currentModel) {
-      setCurrentModel(selectedModel);
+    if (!selectedModel) {
+      return;
     }
-  }, [selectedModel, currentModel]);
+
+    const currentSelectionKey = getSelectionKey(currentModel, currentModelRef);
+    const nextSelectionKey = getSelectionKey(selectedModel, selectedModelRef);
+
+    if (currentSelectionKey !== nextSelectionKey) {
+      setCurrentModel(selectedModel);
+      const matchedModel = findMatchingSelectableModel(
+        visibleImageModels,
+        selectedModel,
+        selectedModelRef
+      );
+      const nextRef = getModelRefFromConfig(matchedModel) || selectedModelRef || null;
+      setCurrentModelRef(prev => {
+        if (prev && nextRef &&
+            prev.profileId === nextRef.profileId &&
+            prev.modelId === nextRef.modelId) {
+          return prev;
+        }
+        return nextRef;
+      });
+    }
+  }, [
+    currentModel,
+    currentModelRef,
+    selectedModel,
+    selectedModelRef,
+    visibleImageModels,
+  ]);
 
   useEffect(() => {
     if (!hasCompatibleParams && Object.keys(mjSelectedParams).length > 0) {
@@ -230,7 +388,9 @@ const AIImageGeneration = ({
 
   useEffect(() => {
     if (isMJModel || modelAspectRatioOptions.length === 0) return;
-    const supportedValues = new Set(modelAspectRatioOptions.map((option) => option.value));
+    const supportedValues = new Set(
+      modelAspectRatioOptions.map((option) => option.value)
+    );
     if (!supportedValues.has(aspectRatio)) {
       const nextValue = supportedValues.has('auto')
         ? 'auto'
@@ -238,6 +398,15 @@ const AIImageGeneration = ({
       setAspectRatio(nextValue);
     }
   }, [aspectRatio, isMJModel, modelAspectRatioOptions]);
+
+  useEffect(() => {
+    saveAIImageToolPreferences({
+      currentModel,
+      currentSelectionKey: getSelectionKey(currentModel, currentModelRef),
+      extraParams: mjSelectedParams,
+      aspectRatio,
+    });
+  }, [currentModel, currentModelRef, mjSelectedParams, aspectRatio]);
 
   // 清除错误状态当组件挂载时（对话框打开时）
   useEffect(() => {
@@ -257,6 +426,7 @@ const AIImageGeneration = ({
     setUploadedImages([]);
     setError(null);
     setAspectRatio(DEFAULT_ASPECT_RATIO); // 重置比例
+    setMobilePanel('config');
     // Clear manual edit mode
     setIsManualEdit(false);
     // 触发Footer组件更新
@@ -284,6 +454,7 @@ const AIImageGeneration = ({
 
     // 标记为手动编辑模式,防止 props 的 useEffect 覆盖我们的更改
     setIsManualEdit(true);
+    setMobilePanel('config');
 
     // 直接更新表单状态
     setPrompt(task.params.prompt || '');
@@ -301,6 +472,8 @@ const AIImageGeneration = ({
 
     // 更新模型选择（通过全局设置）
     if (task.params.model) {
+      setCurrentModel(task.params.model);
+      setCurrentModelRef((task.params.modelRef as ModelRef | null) || null);
       // console.log('Updating image model to:', task.params.model);
       const settings = geminiSettings.get();
       // console.log('Current settings:', settings);
@@ -347,7 +520,7 @@ const AIImageGeneration = ({
     );
   };
 
-  const handleGenerate = async (count: number = 1) => {
+  const handleGenerate = async (count = 1) => {
     if (!prompt || !prompt.trim()) {
       setError(
         language === 'zh' ? '请输入图像描述' : 'Please enter image description'
@@ -356,8 +529,9 @@ const AIImageGeneration = ({
     }
 
     // 先检查 API Key，没有则弹窗获取（只弹一次，避免批量生成时多次弹窗）
-    const settings = geminiSettings.get();
-    if (!settings.apiKey) {
+    if (
+      !hasInvocationRouteCredentials('image', currentModelRef || currentModel)
+    ) {
       const newApiKey = await promptForApiKey();
       if (!newApiKey) {
         setError(
@@ -386,10 +560,8 @@ const AIImageGeneration = ({
         const batchTaskIds: string[] = [];
         const batchId = `batch_${Date.now()}`;
 
-        // Get current image model from settings
-        const settings = geminiSettings.get();
         const currentImageModel =
-          settings.imageModelName || 'gemini-3-pro-image-preview-vip';
+          currentModel || resolveInvocationRoute('image').modelId;
 
         const finalPrompt = currentImageModel.startsWith('mj')
           ? [prompt.trim(), buildMJPromptSuffix(mjSelectedParams)]
@@ -398,9 +570,11 @@ const AIImageGeneration = ({
           : (prompt || '').trim();
 
         // 非 MJ 模型的额外参数（如 seedream_quality）透传给 adapter
-        const extraParams = !currentImageModel.startsWith('mj') && Object.keys(mjSelectedParams).length > 0
-          ? mjSelectedParams
-          : undefined;
+        const extraParams =
+          !currentImageModel.startsWith('mj') &&
+          Object.keys(mjSelectedParams).length > 0
+            ? mjSelectedParams
+            : undefined;
 
         // 如果参数中有 size，优先使用参数中的 size
         const finalSize = extraParams?.size
@@ -415,11 +589,14 @@ const AIImageGeneration = ({
             aspectRatio,
             size: finalSize,
             model: currentImageModel,
+            modelRef: currentModelRef || null,
             uploadedImages: convertedImages,
             batchId,
             batchIndex: i + 1,
             batchTotal: count,
-            autoInsertToCanvas: getAutoInsertValue(LS_KEYS.AI_IMAGE_AUTO_INSERT),
+            autoInsertToCanvas: getAutoInsertValue(
+              LS_KEYS.AI_IMAGE_AUTO_INSERT
+            ),
             targetFrameId,
             targetFrameDimensions,
             ...(extraParams ? { params: extraParams } : {}),
@@ -440,6 +617,7 @@ const AIImageGeneration = ({
 
           savePromptToHistory(finalPrompt);
           setError(null);
+          setMobilePanel('tasks');
           // Clear manual edit mode after batch generating
           setIsManualEdit(false);
         } else {
@@ -455,9 +633,8 @@ const AIImageGeneration = ({
       // 单个任务生成
 
       // Get current image model from settings
-      const settings = geminiSettings.get();
       const currentImageModel =
-        settings.imageModelName || 'gemini-2.5-flash-image-vip';
+        currentModel || resolveInvocationRoute('image').modelId;
 
       const finalPrompt = currentImageModel.startsWith('mj')
         ? [prompt.trim(), buildMJPromptSuffix(mjSelectedParams)]
@@ -466,9 +643,11 @@ const AIImageGeneration = ({
         : (prompt || '').trim();
 
       // 非 MJ 模型的额外参数（如 seedream_quality）透传给 adapter
-      const extraParams = !currentImageModel.startsWith('mj') && Object.keys(mjSelectedParams).length > 0
-        ? mjSelectedParams
-        : undefined;
+      const extraParams =
+        !currentImageModel.startsWith('mj') &&
+        Object.keys(mjSelectedParams).length > 0
+          ? mjSelectedParams
+          : undefined;
 
       // 如果参数中有 size，优先使用参数中的 size
       const finalSize = extraParams?.size
@@ -483,11 +662,12 @@ const AIImageGeneration = ({
         aspectRatio,
         size: finalSize,
         model: currentImageModel,
+        modelRef: currentModelRef || null,
         // 保存上传的图片（已转换为可序列化的格式）
         uploadedImages: convertedImages,
         autoInsertToCanvas: getAutoInsertValue(LS_KEYS.AI_IMAGE_AUTO_INSERT),
         // 始终包含 batchId 以跳过重复检测
-        batchId: `image_single_${Date.now()}`,
+        batchId: externalBatchId || `image_single_${Date.now()}`,
         batchIndex: 1,
         batchTotal: 1,
         targetFrameId,
@@ -511,6 +691,7 @@ const AIImageGeneration = ({
 
         // 只清除预览和错误，保留表单数据（prompt和参考图）
         setError(null);
+        setMobilePanel('tasks');
         // Clear manual edit mode after generating
         setIsManualEdit(false);
       } else {
@@ -557,18 +738,73 @@ const AIImageGeneration = ({
 
   return (
     <div className="ai-image-generation-container">
-      <div className="main-content" ref={containerRef}>
+      {isCompactLayout ? (
+        <div className="ai-generation-mobile-switcher" role="tablist">
+          <button
+            type="button"
+            className={`ai-generation-mobile-switcher__tab ${
+              mobilePanel === 'config'
+                ? 'ai-generation-mobile-switcher__tab--active'
+                : ''
+            }`}
+            onClick={() => setMobilePanel('config')}
+          >
+            生成设置
+          </button>
+          <button
+            type="button"
+            className={`ai-generation-mobile-switcher__tab ${
+              mobilePanel === 'tasks'
+                ? 'ai-generation-mobile-switcher__tab--active'
+                : ''
+            }`}
+            onClick={() => setMobilePanel('tasks')}
+          >
+            生成任务
+          </button>
+        </div>
+      ) : null}
+
+      <div
+        className={`main-content ${
+          isCompactLayout ? 'main-content--mobile-panels' : ''
+        }`}
+        ref={containerRef}
+      >
         {/* AI 图片生成表单 */}
-        <div className="ai-image-generation-section">
+        <div
+          className={`ai-image-generation-section ${
+            isCompactLayout && mobilePanel !== 'config'
+              ? 'ai-generation-mobile-panel--hidden'
+              : ''
+          }`}
+        >
           <div className="ai-image-generation-form">
             {/* 模型选择器 */}
             {selectedModel !== undefined && onModelChange && (
               <div className="form-header-row">
                 <div className="model-selector-wrapper">
                   <ModelDropdown
-                    selectedModel={selectedModel}
-                    onSelect={(value) => onModelChange(value)}
+                    selectedModel={currentModel}
+                    selectedSelectionKey={getSelectionKey(
+                      currentModel,
+                      currentModelRef
+                    )}
+                    onSelect={(value) => {
+                      setCurrentModel(value);
+                      setCurrentModelRef(null);
+                      onModelChange(value);
+                      onModelRefChange?.(null);
+                    }}
+                    onSelectModel={(model: ModelConfig) => {
+                      setCurrentModel(model.id);
+                      const nextModelRef = getModelRefFromConfig(model);
+                      setCurrentModelRef(nextModelRef);
+                      onModelChange(model.id);
+                      onModelRefChange?.(nextModelRef);
+                    }}
                     language={language}
+                    models={visibleImageModels}
                     placement="down"
                     variant="form"
                     disabled={isGenerating}
@@ -646,21 +882,32 @@ const AIImageGeneration = ({
           />
         </div>
 
-        {/* 可拖动分隔条 */}
-        <ResizableDivider
-          isRightPanelVisible={isTaskListVisible}
-          onToggleRightPanel={handleToggleTaskList}
-          onWidthChange={handleWidthChange}
-          rightPanelWidth={taskListWidth}
-          language={language}
-          storageKey="image"
-        />
+        {!isCompactLayout ? (
+          <ResizableDivider
+            isRightPanelVisible={isTaskListVisible}
+            onToggleRightPanel={handleToggleTaskList}
+            onWidthChange={handleWidthChange}
+            rightPanelWidth={taskListWidth}
+            language={language}
+            storageKey="image"
+          />
+        ) : null}
 
         {/* 任务列表侧栏 */}
-        {isTaskListVisible && (
+        {(isCompactLayout || isTaskListVisible) && (
           <div
-            className="task-sidebar"
-            style={{ width: taskListWidth, flexShrink: 0 }}
+            className={`task-sidebar ${
+              isCompactLayout ? 'task-sidebar--mobile-panel' : ''
+            } ${
+              isCompactLayout && mobilePanel !== 'tasks'
+                ? 'ai-generation-mobile-panel--hidden'
+                : ''
+            }`}
+            style={
+              isCompactLayout
+                ? undefined
+                : { width: taskListWidth, flexShrink: 0 }
+            }
           >
             <DialogTaskList
               taskType={TaskType.IMAGE}

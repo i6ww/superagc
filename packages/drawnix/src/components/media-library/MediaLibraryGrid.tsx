@@ -4,7 +4,7 @@
  */
 
 import { useMemo, useState, useCallback, useRef, useEffect, useTransition } from 'react';
-import { Loading, Input, Button, Checkbox, Popconfirm, Tooltip } from 'tdesign-react';
+import { Loading, Input, Button, Checkbox, Popconfirm, Tooltip, Dialog } from 'tdesign-react';
 import { 
   Search, 
   Trash2, 
@@ -13,6 +13,7 @@ import {
   HardDrive,
   Video as VideoIcon,
   Image as ImageIcon,
+  Music,
   Globe,
   User,
   Sparkles,
@@ -28,8 +29,9 @@ import {
   Eye,
   PlusCircle,
   CloudUpload,
+  Heart,
+  ListMusic,
 } from 'lucide-react';
-import JSZip from 'jszip';
 import { 
   ImageUploadIcon as ImageUploadIconComp,
   MediaLibraryIcon,
@@ -37,22 +39,39 @@ import {
 import { useAssets } from '../../contexts/AssetContext';
 import { filterAssets, formatFileSize, formatDate } from '../../utils/asset-utils';
 import { useDeviceType } from '../../hooks/useDeviceType';
-import { downloadFile } from '@aitu/utils';
+import { normalizeImageDataUrl } from '@aitu/utils';
 import { VirtualAssetGrid } from './VirtualAssetGrid';
 import { MediaLibraryEmpty } from './MediaLibraryEmpty';
 import { ViewModeToggle } from './ViewModeToggle';
 import { UnifiedMediaViewer, type MediaItem as UnifiedMediaItem } from '../shared/media-preview';
 import { ImageEditor } from '../image-editor';
+import { AudioPlaylistTabs } from '../shared/AudioPlaylistTabs';
+import {
+  ContextMenu,
+  useContextMenuState,
+  type ContextMenuEntry,
+} from '../shared';
 import type { MediaLibraryGridProps, ViewMode, SortOption, Asset } from '../../types/asset.types';
 import { AssetType, AssetSource } from '../../types/asset.types';
 import { useDrawnix } from '../../hooks/use-drawnix';
-import { removeElementsByAssetIds, removeElementsByAssetUrl, isCacheUrl, countElementsByAssetUrl } from '../../utils/asset-cleanup';
+import { removeElementsByAssetIds, removeElementsByAssetUrls, isCacheUrl, countElementsByAssetUrls } from '../../utils/asset-cleanup';
 import { insertImageFromUrl } from '../../data/image';
 import { insertVideoFromUrl } from '../../data/video';
 import { useGitHubSync } from '../../contexts/GitHubSyncContext';
+import { useAudioPlaylists } from '../../contexts/AudioPlaylistContext';
 import { mediaSyncService } from '../../services/github-sync/media-sync-service';
 import { taskQueueService } from '../../services/task-queue';
+import { openMusicPlayerToolAndPlay } from '../../services/tool-launch-service';
 import { TaskStatus, TaskType } from '../../types/task.types';
+import {
+  AUDIO_PLAYLIST_ALL_ID,
+  type AudioPlaylist,
+} from '../../types/audio-playlist.types';
+import {
+  buildAssetDownloadItem,
+  buildAssetDownloadItems,
+  smartDownload,
+} from '../../utils/download-utils';
 import './MediaLibraryGrid.scss';
 import './VirtualAssetGrid.scss';
 
@@ -97,6 +116,7 @@ const TYPE_OPTIONS = [
   { value: 'ALL', label: '全部类型', icon: MediaLibraryIcon },
   { value: AssetType.IMAGE, label: '图片', icon: ImageUploadIconComp },
   { value: AssetType.VIDEO, label: '视频', icon: VideoIcon },
+  { value: AssetType.AUDIO, label: '音频', icon: Music },
 ];
 
 // 来源过滤选项
@@ -141,6 +161,19 @@ export function MediaLibraryGrid({
   storageStatus,
 }: MediaLibraryGridProps) {
   const { assets, filters, loading, setFilters, removeAssets, removeAsset, syncedUrls, loadSyncedUrls } = useAssets();
+  const {
+    playlists,
+    favoriteAssetIds,
+    playlistItems,
+    createPlaylist,
+    renamePlaylist,
+    deletePlaylist,
+    addAssetToPlaylist,
+    removeAssetFromPlaylist,
+    toggleFavorite,
+    isFavorite,
+    getPlaylistAssetIds,
+  } = useAudioPlaylists();
   const { board } = useDrawnix();
   const { isMobile } = useDeviceType();
   const [isDragging, setIsDragging] = useState(false);
@@ -167,6 +200,18 @@ export function MediaLibraryGrid({
   const { isConfigured } = useGitHubSync();
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState(0); // 0-100
+  const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
+  const {
+    contextMenu: assetContextMenu,
+    open: openAssetMenu,
+    close: closeAssetMenu,
+  } = useContextMenuState<Asset>();
+  const [playlistDialog, setPlaylistDialog] = useState<{
+    mode: 'create' | 'rename' | 'create-and-add';
+    playlistId?: string;
+    targetAssetId?: string;
+  } | null>(null);
+  const [playlistNameInput, setPlaylistNameInput] = useState('');
 
   // 加载已同步的 URL（当配置了 GitHub 同步时）
   useEffect(() => {
@@ -174,6 +219,22 @@ export function MediaLibraryGrid({
       loadSyncedUrls();
     }
   }, [isConfigured, loadSyncedUrls]);
+
+  useEffect(() => {
+    if (filters.activeType && filters.activeType !== AssetType.AUDIO && selectedPlaylistId) {
+      setSelectedPlaylistId(null);
+    }
+  }, [filters.activeType, selectedPlaylistId]);
+
+  useEffect(() => {
+    if (
+      selectedPlaylistId &&
+      selectedPlaylistId !== AUDIO_PLAYLIST_ALL_ID &&
+      !playlists.some((playlist) => playlist.id === selectedPlaylistId)
+    ) {
+      setSelectedPlaylistId(null);
+    }
+  }, [playlists, selectedPlaylistId]);
 
   // 监听媒体同步完成事件，刷新同步状态
   useEffect(() => {
@@ -207,6 +268,7 @@ export function MediaLibraryGrid({
       all: assets.length,
       image: assets.filter(a => a.type === AssetType.IMAGE).length,
       video: assets.filter(a => a.type === AssetType.VIDEO).length,
+      audio: assets.filter(a => a.type === AssetType.AUDIO).length,
       local: assets.filter(a => a.source === AssetSource.LOCAL).length,
       ai: assets.filter(a => a.source === AssetSource.AI_GENERATED).length,
       sourceAll: assets.length,
@@ -234,8 +296,137 @@ export function MediaLibraryGrid({
   // 应用筛选和排序
   const filteredResult = useMemo(() => {
     const result = filterAssets(assets, filters);
-    return result;
-  }, [assets, filters]);
+    if (!selectedPlaylistId) {
+      return result;
+    }
+
+    const playlistAssetIds = new Set(
+      selectedPlaylistId === AUDIO_PLAYLIST_ALL_ID
+        ? assets.filter((asset) => asset.type === AssetType.AUDIO).map((asset) => asset.id)
+        : getPlaylistAssetIds(selectedPlaylistId)
+    );
+
+    const playlistAssets = result.assets.filter((asset) => playlistAssetIds.has(asset.id));
+    return {
+      assets: playlistAssets,
+      count: playlistAssets.length,
+      isEmpty: playlistAssets.length === 0,
+    };
+  }, [assets, filters, selectedPlaylistId, getPlaylistAssetIds]);
+
+  const currentPlaylistAssetIds = useMemo(
+    () => new Set(selectedPlaylistId ? getPlaylistAssetIds(selectedPlaylistId) : []),
+    [getPlaylistAssetIds, selectedPlaylistId]
+  );
+
+  const handleAssetDownload = useCallback(async (asset: Asset) => {
+    await smartDownload([buildAssetDownloadItem(asset)]);
+  }, []);
+
+  const assetContextMenuItems = useMemo<ContextMenuEntry<Asset>[]>(() => [
+    {
+      key: 'open-player',
+      label: '在音乐播放器中打开',
+      icon: <Music size={14} />,
+      onSelect: async (asset) => {
+        const audioQueue = filteredResult.assets
+          .filter((item) => item.type === AssetType.AUDIO)
+          .map((item) => ({
+            elementId: `asset:${item.id}`,
+            audioUrl: item.url,
+            title: item.name,
+            previewImageUrl: item.thumbnail,
+          }));
+        const activePlaylist = selectedPlaylistId
+          ? playlists.find((playlist) => playlist.id === selectedPlaylistId) || null
+          : null;
+
+        await openMusicPlayerToolAndPlay({
+          source: {
+            elementId: `asset:${asset.id}`,
+            audioUrl: asset.url,
+            title: asset.name,
+            previewImageUrl: asset.thumbnail,
+          },
+          queue: audioQueue,
+          playlist:
+            activePlaylist && selectedPlaylistId !== AUDIO_PLAYLIST_ALL_ID
+              ? {
+                  playlistId: activePlaylist.id,
+                  playlistName: activePlaylist.name,
+                }
+              : undefined,
+        });
+      },
+    },
+    {
+      key: 'favorite',
+      label: (asset) => (favoriteAssetIds.has(asset.id) ? '取消收藏' : '加入收藏'),
+      icon: <Heart size={14} />,
+      onSelect: (asset) => {
+        if (asset.type === AssetType.AUDIO) {
+          void toggleFavorite(asset.id);
+        }
+      },
+    },
+    {
+      key: 'playlist-actions',
+      type: 'submenu',
+      label: '添加到播放列表',
+      icon: <ListMusic size={14} />,
+      children: (asset) =>
+        playlists.map((playlist) => {
+          const exists = (playlistItems[playlist.id] || []).some(
+            (item) => item.assetId === asset.id
+          );
+          return {
+            key: `playlist-${playlist.id}`,
+            label: exists ? `已在 ${playlist.name}` : `添加到 ${playlist.name}`,
+            icon: <ListMusic size={14} />,
+            disabled: exists,
+            onSelect: () => {
+              void addAssetToPlaylist(asset.id, playlist.id);
+            },
+          };
+        }),
+    },
+    {
+      key: 'remove-current',
+      label: '从当前播放列表移除',
+      icon: <XSquare size={14} />,
+      danger: true,
+      disabled: (asset) =>
+        !selectedPlaylistId ||
+        selectedPlaylistId === AUDIO_PLAYLIST_ALL_ID ||
+        !currentPlaylistAssetIds.has(asset.id),
+      onSelect: (asset) => {
+        if (selectedPlaylistId && selectedPlaylistId !== AUDIO_PLAYLIST_ALL_ID) {
+          void removeAssetFromPlaylist(asset.id, selectedPlaylistId);
+        }
+      },
+    },
+    {
+      key: 'create-playlist',
+      label: '新建播放列表并添加',
+      icon: <Plus size={14} />,
+      onSelect: (asset) => {
+        setPlaylistNameInput('');
+        setPlaylistDialog({ mode: 'create-and-add', targetAssetId: asset.id });
+        closeAssetMenu();
+      },
+    },
+  ], [
+    addAssetToPlaylist,
+    closeAssetMenu,
+    currentPlaylistAssetIds,
+    favoriteAssetIds,
+    filteredResult.assets,
+    playlists,
+    playlistItems,
+    removeAssetFromPlaylist,
+    selectedPlaylistId,
+    toggleFavorite,
+  ]);
 
   // 视图模式切换处理 - 带防抖和过渡动画，并持久化到 localStorage
   const handleViewModeChange = useCallback((mode: ViewMode) => {
@@ -408,12 +599,15 @@ export function MediaLibraryGrid({
         
         // 缓存类型素材使用 URL 匹配删除
         for (const asset of cacheAssets) {
-          removeElementsByAssetUrl(board, asset.url);
+          removeElementsByAssetUrls(board, asset.dedupeUrls || [asset.url]);
         }
-        
+
         // 普通素材使用 ID 匹配删除
         if (normalAssetIds.length > 0) {
-          removeElementsByAssetIds(board, normalAssetIds);
+          const expandedIds = filteredSelectedAssets.flatMap(asset =>
+            isCacheUrl(asset.url) ? [] : (asset.dedupeAssetIds || [asset.id])
+          );
+          removeElementsByAssetIds(board, expandedIds);
         }
       }
       
@@ -448,7 +642,7 @@ export function MediaLibraryGrid({
     const cacheAssets = filteredSelectedAssets.filter(a => isCacheUrl(a.url));
     
     for (const asset of cacheAssets) {
-      affectedCount += countElementsByAssetUrl(board, asset.url);
+      affectedCount += countElementsByAssetUrls(board, asset.dedupeUrls || [asset.url]);
     }
     
     return { hasCacheAssets: cacheAssets.length > 0, affectedCount };
@@ -459,103 +653,18 @@ export function MediaLibraryGrid({
   const handleBatchDownload = useCallback(async () => {
     // 只获取筛选结果中被选中的素材
     const selectedAssets = filteredResult.assets.filter(a => selectedAssetIds.has(a.id));
-    const totalFiles = selectedAssets.length;
     
-    if (totalFiles === 0 || isDownloading) return;
+    if (selectedAssets.length === 0 || isDownloading) return;
     
     setIsDownloading(true);
     setDownloadProgress(0);
     
     try {
-      const zip = new JSZip();
-      let fetchedCount = 0;
-      
-      // 逐个获取文件并更新进度（0-50%）
-      const results: Array<{ fileName: string; blob: Blob } | null> = [];
-      
-      for (const asset of selectedAssets) {
-        try {
-          const response = await fetch(asset.url);
-          if (!response.ok) {
-            console.warn(`[MediaLibraryGrid] Failed to fetch ${asset.name}: ${response.status}`);
-            results.push(null);
-          } else {
-            const blob = await response.blob();
-            
-            // 获取文件扩展名
-            let ext = '';
-            if (asset.type === AssetType.IMAGE) {
-              ext = asset.name.match(/\.(jpg|jpeg|png|gif|webp|svg)$/i)?.[0] || '.png';
-            } else {
-              ext = asset.name.match(/\.(mp4|webm|mov|avi)$/i)?.[0] || '.mp4';
-            }
-            
-            // 确保文件名有扩展名
-            const fileName = asset.name.includes('.') ? asset.name : `${asset.name}${ext}`;
-            results.push({ fileName, blob });
-          }
-        } catch (err) {
-          console.warn(`[MediaLibraryGrid] Failed to fetch ${asset.name}:`, err);
-          results.push(null);
-        }
-        
-        fetchedCount++;
-        setDownloadProgress(Math.round((fetchedCount / totalFiles) * 50));
-      }
-      
-      // 添加成功获取的文件到 zip
-      let addedCount = 0;
-      const fileNames = new Map<string, number>();
-      
-      for (const result of results) {
-        if (result) {
-          // 处理重名文件
-          let fileName = result.fileName;
-          const count = fileNames.get(fileName) || 0;
-          if (count > 0) {
-            const dotIndex = fileName.lastIndexOf('.');
-            if (dotIndex > 0) {
-              fileName = `${fileName.slice(0, dotIndex)}_${count}${fileName.slice(dotIndex)}`;
-            } else {
-              fileName = `${fileName}_${count}`;
-            }
-          }
-          fileNames.set(result.fileName, count + 1);
-          
-          zip.file(fileName, result.blob);
-          addedCount++;
-        }
-      }
-      
-      if (addedCount === 0) {
-        console.error('[MediaLibraryGrid] No files were added to the zip');
-        return;
-      }
-      
-      // 生成 zip 文件（50-100%）
-      const zipBlob = await zip.generateAsync(
-        { 
-          type: 'blob',
-          compression: 'DEFLATE',
-          compressionOptions: { level: 6 }
-        },
-        (metadata) => {
-          // 压缩进度：50-100%
-          setDownloadProgress(50 + Math.round(metadata.percent / 2));
-        }
+      await smartDownload(
+        buildAssetDownloadItems(selectedAssets),
+        `素材_${new Date().toISOString().slice(0, 10)}.zip`,
+        setDownloadProgress
       );
-      
-      setDownloadProgress(100);
-      
-      // 下载
-      const url = URL.createObjectURL(zipBlob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `素材_${new Date().toISOString().slice(0, 10)}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
     } catch (error) {
       console.error('[MediaLibraryGrid] Download failed:', error);
     } finally {
@@ -664,14 +773,63 @@ export function MediaLibraryGrid({
     return aiSyncable + localSyncable;
   }, [filteredResult.assets, selectedAssetIds]);
 
+  const handleToggleFavorite = useCallback(async (asset: Asset) => {
+    if (asset.type !== AssetType.AUDIO) return;
+    await toggleFavorite(asset.id);
+  }, [toggleFavorite]);
+
+  const openAssetContextMenu = useCallback((asset: Asset, event: React.MouseEvent) => {
+    if (asset.type !== AssetType.AUDIO) return;
+    event.preventDefault();
+    event.stopPropagation();
+    openAssetMenu(event, asset);
+  }, [openAssetMenu]);
+
+  const handleSelectPlaylist = useCallback((playlistId: string | null) => {
+    setSelectedPlaylistId(playlistId);
+    if (playlistId) {
+      setFilters({ activeType: AssetType.AUDIO });
+    }
+  }, [setFilters]);
+
+  const openCreatePlaylistDialog = useCallback((mode: 'create' | 'create-and-add', targetAssetId?: string) => {
+    setPlaylistNameInput('');
+    setPlaylistDialog({ mode, targetAssetId });
+    closeAssetMenu();
+  }, [closeAssetMenu]);
+
+  const openRenamePlaylistDialog = useCallback((playlist: AudioPlaylist) => {
+    setPlaylistNameInput(playlist.name);
+    setPlaylistDialog({ mode: 'rename', playlistId: playlist.id });
+  }, []);
+
+  const handleSubmitPlaylistDialog = useCallback(async () => {
+    if (!playlistDialog) return;
+    if (playlistDialog.mode === 'rename' && playlistDialog.playlistId) {
+      await renamePlaylist(playlistDialog.playlistId, playlistNameInput);
+    } else {
+      const playlist = await createPlaylist(playlistNameInput);
+      if (playlistDialog.mode === 'create-and-add' && playlistDialog.targetAssetId) {
+        await addAssetToPlaylist(playlistDialog.targetAssetId, playlist.id);
+      }
+      handleSelectPlaylist(playlist.id);
+    }
+    setPlaylistDialog(null);
+    setPlaylistNameInput('');
+  }, [playlistDialog, renamePlaylist, playlistNameInput, createPlaylist, addAssetToPlaylist, handleSelectPlaylist]);
+
   // 将素材转换为预览项
   const convertToMediaItems = useCallback((assetList: Asset[]): UnifiedMediaItem[] => {
     return assetList.map(asset => ({
       id: asset.id,
-      url: asset.url,
-      type: asset.type === AssetType.VIDEO ? 'video' : 'image',
+      url: asset.type === AssetType.IMAGE ? normalizeImageDataUrl(asset.url) : asset.url,
+      type: asset.type === AssetType.VIDEO ? 'video' : asset.type === AssetType.AUDIO ? 'audio' : 'image',
       title: asset.name,
       alt: asset.name,
+      posterUrl: asset.thumbnail,
+      prompt: asset.prompt,
+      artist: asset.modelName,
+      album: asset.type === AssetType.AUDIO ? 'Aitu Generated' : undefined,
     }));
   }, []);
 
@@ -693,7 +851,7 @@ export function MediaLibraryGrid({
   const handleInsertFromViewer = useCallback(async (item: UnifiedMediaItem) => {
     // 优先使用外部回调（如果有）
     if (onDoubleClick) {
-      const asset = filteredResult.assets.find(a => a.url === item.url);
+      const asset = filteredResult.assets.find(a => a.id === item.id);
       if (asset) {
         onDoubleClick(asset);
         return;
@@ -706,7 +864,7 @@ export function MediaLibraryGrid({
         if (item.type === 'video') {
           await insertVideoFromUrl(board, item.url);
         } else {
-          await insertImageFromUrl(board, item.url);
+          await insertImageFromUrl(board, normalizeImageDataUrl(item.url));
         }
         // 插入成功后关闭预览
         setPreviewVisible(false);
@@ -929,7 +1087,7 @@ export function MediaLibraryGrid({
           <div className="media-library-grid__filter-island">
             <div className="media-library-grid__filter-group">
               {TYPE_OPTIONS.map(opt => {
-                  const count = opt.value === 'ALL' ? counts.all : (opt.value === AssetType.IMAGE ? counts.image : counts.video);
+                  const count = opt.value === 'ALL' ? counts.all : opt.value === AssetType.IMAGE ? counts.image : opt.value === AssetType.AUDIO ? counts.audio : counts.video;
                   const Icon = opt.icon;
                   const isActive = (filters.activeType || 'ALL') === opt.value;
                   return (
@@ -1013,6 +1171,20 @@ export function MediaLibraryGrid({
           </div>
         </div>
 
+        {(!filters.activeType || filters.activeType === AssetType.AUDIO) && (
+          <AudioPlaylistTabs
+            className="media-library-grid__playlist-bar"
+            selectedPlaylistId={selectedPlaylistId || AUDIO_PLAYLIST_ALL_ID}
+            allCount={counts.audio}
+            playlists={playlists}
+            playlistItems={playlistItems}
+            onSelect={handleSelectPlaylist}
+            onCreate={() => openCreatePlaylistDialog('create')}
+            onRename={openRenamePlaylistDialog}
+            onDelete={(playlist) => void deletePlaylist(playlist.id)}
+          />
+        )}
+
         {/* 下载进度条 */}
         {isDownloading && (
           <div className="media-library-grid__progress">
@@ -1057,6 +1229,9 @@ export function MediaLibraryGrid({
               onSelectAsset={isSelectionMode ? toggleAssetSelection : onSelectAsset}
               onDoubleClick={onDoubleClick}
               onPreview={handlePreview}
+              onContextMenu={openAssetContextMenu}
+              isFavorite={isFavorite}
+              onToggleFavorite={handleToggleFavorite}
               syncedUrls={syncedUrls}
             />
           </div>
@@ -1066,8 +1241,8 @@ export function MediaLibraryGrid({
             <div className="media-library-grid__mobile-inspector">
               <div className="media-library-grid__mobile-inspector-info">
                 <div className="media-library-grid__mobile-inspector-type">
-                  {selectedAsset.type === AssetType.IMAGE ? <ImageIcon size={14} /> : <VideoIcon size={14} />}
-                  <span>{selectedAsset.type === AssetType.IMAGE ? '图片' : '视频'}</span>
+                  {selectedAsset.type === AssetType.IMAGE ? <ImageIcon size={14} /> : selectedAsset.type === AssetType.AUDIO ? <Music size={14} /> : <VideoIcon size={14} />}
+                  <span>{selectedAsset.type === AssetType.IMAGE ? '图片' : selectedAsset.type === AssetType.AUDIO ? '音频' : '视频'}</span>
                   {selectedAsset.source === AssetSource.AI_GENERATED && (
                     <span className="media-library-grid__mobile-inspector-ai">AI</span>
                   )}
@@ -1100,7 +1275,9 @@ export function MediaLibraryGrid({
                 <Tooltip content="下载" theme="light">
                   <button
                     className="media-library-grid__mobile-inspector-btn"
-                    onClick={() => downloadFile(selectedAsset.url, selectedAsset.name)}
+                    onClick={() => {
+                      void handleAssetDownload(selectedAsset);
+                    }}
                     data-track="mobile_download"
                   >
                     <Download size={18} />
@@ -1174,6 +1351,28 @@ export function MediaLibraryGrid({
           onInsert={board ? handleEditInsert : undefined}
         />
       )}
+
+      <ContextMenu
+        state={assetContextMenu}
+        items={assetContextMenuItems}
+        onClose={closeAssetMenu}
+      />
+
+      <Dialog
+        visible={!!playlistDialog}
+        header={playlistDialog?.mode === 'rename' ? '重命名播放列表' : '新建播放列表'}
+        onClose={() => setPlaylistDialog(null)}
+        onConfirm={() => void handleSubmitPlaylistDialog()}
+        confirmBtn="确定"
+        cancelBtn="取消"
+      >
+        <Input
+          value={playlistNameInput}
+          onChange={(value) => setPlaylistNameInput(String(value))}
+          placeholder="请输入播放列表名称"
+          autofocus
+        />
+      </Dialog>
     </div>
   );
 }

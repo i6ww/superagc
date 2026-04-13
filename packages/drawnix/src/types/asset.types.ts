@@ -13,6 +13,7 @@
 export enum AssetType {
   IMAGE = 'IMAGE',
   VIDEO = 'VIDEO',
+  AUDIO = 'AUDIO',
 }
 
 /**
@@ -44,6 +45,9 @@ export interface Asset {
   // 元数据
   createdAt: number; // Unix timestamp (ms)
   size?: number; // 文件大小（字节），可选
+  contentHash?: string; // 文件内容哈希，用于本地去重
+  dedupeAssetIds?: string[]; // 去重组内的本地素材 ID（仅本地来源）
+  dedupeUrls?: string[]; // 去重组内的缓存 URL（仅本地来源）
 
   // 可选扩展
   thumbnail?: string; // 缩略图URL（视频用）
@@ -195,6 +199,7 @@ export interface StorageStats {
   totalAssets: number;
   imageCount: number;
   videoCount: number;
+  audioCount: number;
   localCount: number;
   aiGeneratedCount: number;
   totalSize: number; // 估算的总大小（字节）
@@ -350,6 +355,7 @@ export function createAsset(params: {
   name: string;
   mimeType: string;
   size?: number;
+  contentHash?: string;
   prompt?: string;
   modelName?: string;
 }): Asset {
@@ -362,6 +368,7 @@ export function createAsset(params: {
     mimeType: params.mimeType,
     createdAt: Date.now(),
     ...(params.size && { size: params.size }),
+    ...(params.contentHash && { contentHash: params.contentHash }),
     ...(params.prompt && { prompt: params.prompt }),
     ...(params.modelName && { modelName: params.modelName }),
   };

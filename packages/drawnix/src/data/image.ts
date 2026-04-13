@@ -9,7 +9,6 @@ import {
   Transforms,
 } from '@plait/core';
 import { DataURL } from '../types';
-import { getDataURL } from './blob';
 import { MindElement, MindTransforms } from '@plait/mind';
 import { DrawTransforms } from '@plait/draw';
 import { getElementOfFocusedImage } from '@plait/common';
@@ -17,6 +16,8 @@ import { getInsertionPointForSelectedElements, getInsertionPointBelowBottommostE
 import { assetStorageService } from '../services/asset-storage-service';
 import { analytics } from '../utils/posthog-analytics';
 import { cacheRemoteUrl } from '../services/media-executor/fallback-utils';
+import { normalizeImageDataUrl } from '@aitu/utils';
+import { AssetSource, AssetType } from '../types/asset.types';
 
 /**
  * 从保存的选中元素IDs计算插入点
@@ -75,6 +76,7 @@ const getInsertionPointFromSavedSelection = (
 };
 
 export const loadHTMLImageElement = (dataURL: DataURL, crossOrigin = false) => {
+  const normalizedURL = normalizeImageDataUrl(dataURL) as DataURL;
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image();
     if (crossOrigin) {
@@ -87,7 +89,23 @@ export const loadHTMLImageElement = (dataURL: DataURL, crossOrigin = false) => {
     image.onerror = (error) => {
       reject(error);
     };
-    image.src = dataURL;
+    image.src = normalizedURL;
+  });
+};
+
+const loadHTMLImageElementFromBlob = (blob: Blob) => {
+  const objectUrl = URL.createObjectURL(blob);
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+    image.onerror = (error) => {
+      URL.revokeObjectURL(objectUrl);
+      reject(error);
+    };
+    image.src = objectUrl;
   });
 };
 
@@ -121,12 +139,17 @@ export const loadHTMLImageElementWithRetry = (
   maxRetries = 3,
   bypassSWAfterRetries = 1
 ): Promise<HTMLImageElement> => {
+  // 存量数据可能存有原始 base64，先统一转为 data URL
+  const normalizedURL = normalizeImageDataUrl(dataURL) as DataURL;
+  if (normalizedURL !== dataURL) {
+    console.debug('[loadHTMLImageElementWithRetry] normalized raw base64 →', normalizedURL.slice(0, 60) + '...');
+  }
   // 外部 URL 不设置 crossOrigin（避免 CORS），不追加参数（避免破坏签名）
-  const isExternalUrl = dataURL.startsWith('http://') || dataURL.startsWith('https://');
+  const isExternalUrl = normalizedURL.startsWith('http://') || normalizedURL.startsWith('https://');
 
   return new Promise((resolve, reject) => {
     let retryCount = 0;
-    let currentUrl = dataURL;
+    let currentUrl = normalizedURL;
     let bypassSW = false;
 
     const tryLoad = () => {
@@ -148,13 +171,13 @@ export const loadHTMLImageElementWithRetry = (
             // 外部 URL 不追加任何参数，直接重试原始 URL
             const delay = Math.min(1000 * Math.pow(2, retryCount - 1), 5000);
             setTimeout(() => {
-              image.src = dataURL;
+              image.src = normalizedURL;
             }, delay);
           } else {
             // 本地 URL：可以追加 bypass_sw 和 _retry 参数
             if (retryCount >= bypassSWAfterRetries && !bypassSW) {
               bypassSW = true;
-              currentUrl = addBypassSWParam(dataURL) as DataURL;
+              currentUrl = addBypassSWParam(normalizedURL) as DataURL;
             }
             const separator = currentUrl.includes('?') ? '&' : '?';
             const retryUrl = `${currentUrl}${separator}_retry=${Date.now()}`;
@@ -164,7 +187,7 @@ export const loadHTMLImageElementWithRetry = (
             }, delay);
           }
         } else {
-          console.error(`[loadHTMLImageElement] 加载失败，已重试 ${maxRetries} 次:`, dataURL);
+          console.error(`[loadHTMLImageElement] 加载失败，已重试 ${maxRetries} 次:`, normalizedURL);
           reject(error);
         }
       };
@@ -255,80 +278,77 @@ export const insertImage = async (
     ? null
     : getSelectedElements(board)[0] || getElementOfFocusedImage(board);
   const defaultImageWidth = selectedElement ? 240 : 400;
-  
-  // 先读取图片数据用于获取尺寸
-  const dataURL = await getDataURL(imageFile);
-  const image = await loadHTMLImageElement(dataURL);
-  
-  // 将图片存入素材库获取虚拟 URL
-  let imageUrl: string = dataURL;
+
+  const image = await loadHTMLImageElementFromBlob(imageFile);
+  let imageUrl = URL.createObjectURL(imageFile);
+  let shouldRevokeObjectUrl = true;
+
   try {
     await assetStorageService.initialize();
-    const { virtualUrl } = await assetStorageService.storeBase64AsAsset(
-      dataURL,
-      imageFile.name
-    );
-    imageUrl = virtualUrl;
+    const asset = await assetStorageService.addAsset({
+      type: AssetType.IMAGE,
+      source: AssetSource.LOCAL,
+      name: imageFile.name,
+      blob: imageFile,
+      mimeType: imageFile.type,
+    });
+    imageUrl = asset.url;
+    shouldRevokeObjectUrl = false;
   } catch (err) {
-    console.warn('[insertImage] Failed to store asset, using base64:', err);
-    // 失败时回退到使用 base64
-  }
-  
-  // 使用虚拟 URL 构建 imageItem
-  const imageItem = buildImage(image, imageUrl as DataURL, defaultImageWidth);
-  const element = startPoint && getHitElementByPoint(board, startPoint);
-
-  if (isDrop && element && MindElement.isMindElement(board, element)) {
-    MindTransforms.setImage(board, element as MindElement, imageItem);
-    return;
+    console.warn('[insertImage] Failed to store asset, using object URL:', err);
   }
 
-  if (
-    selectedElement &&
-    MindElement.isMindElement(board, selectedElement) &&
-    !isDrop
-  ) {
-    MindTransforms.setImage(board, selectedElement as MindElement, imageItem);
-  } else {
-    // If no startPoint is provided, use saved selection for insertion point calculation
-    let insertionPoint = startPoint;
-    if (!startPoint && !isDrop) {
-      // 优先使用保存的选中元素IDs计算插入位置
-      insertionPoint = getInsertionPointFromSavedSelection(
-        board,
-        imageItem.width
-      );
+  try {
+    const imageItem = buildImage(image, imageUrl as DataURL, defaultImageWidth);
+    const element = startPoint && getHitElementByPoint(board, startPoint);
 
-      // 如果没有保存的选中元素,回退到使用当前选中元素
-      if (!insertionPoint) {
-        const calculatedPoint = getInsertionPointForSelectedElements(board);
-        if (calculatedPoint) {
-          // 图片插入位置应该在所有选中元素垂直居中对齐
-          // 将X坐标向左偏移图片宽度的一半，让图片以计算点为中心显示
-          insertionPoint = [
-            calculatedPoint[0] - imageItem.width / 2,
-            calculatedPoint[1],
-          ] as Point;
-        } else {
-          // 如果没有选中元素,在最下方元素的下方插入
-          insertionPoint = getInsertionPointBelowBottommostElement(board, imageItem.width);
-        }
-      }
+    if (isDrop && element && MindElement.isMindElement(board, element)) {
+      MindTransforms.setImage(board, element as MindElement, imageItem);
+      return;
     }
 
-    DrawTransforms.insertImage(board, imageItem, insertionPoint);
+    if (
+      selectedElement &&
+      MindElement.isMindElement(board, selectedElement) &&
+      !isDrop
+    ) {
+      MindTransforms.setImage(board, selectedElement as MindElement, imageItem);
+    } else {
+      let insertionPoint = startPoint;
+      if (!startPoint && !isDrop) {
+        insertionPoint = getInsertionPointFromSavedSelection(
+          board,
+          imageItem.width
+        );
 
-    // 插入后滚动视口到新元素位置（如果不在视口内）
-    if (insertionPoint && !isDrop) {
-      // 计算图片中心点位置用于滚动
-      const centerPoint: Point = [
-        insertionPoint[0] + imageItem.width / 2,
-        insertionPoint[1] + imageItem.height / 2,
-      ];
-      // 使用 requestAnimationFrame 确保 DOM 更新后再滚动
-      requestAnimationFrame(() => {
-        scrollToPointIfNeeded(board, centerPoint);
-      });
+        if (!insertionPoint) {
+          const calculatedPoint = getInsertionPointForSelectedElements(board);
+          if (calculatedPoint) {
+            insertionPoint = [
+              calculatedPoint[0] - imageItem.width / 2,
+              calculatedPoint[1],
+            ] as Point;
+          } else {
+            insertionPoint = getInsertionPointBelowBottommostElement(board, imageItem.width);
+          }
+        }
+      }
+
+      DrawTransforms.insertImage(board, imageItem, insertionPoint);
+
+      if (insertionPoint && !isDrop) {
+        const centerPoint: Point = [
+          insertionPoint[0] + imageItem.width / 2,
+          insertionPoint[1] + imageItem.height / 2,
+        ];
+        requestAnimationFrame(() => {
+          scrollToPointIfNeeded(board, centerPoint);
+        });
+      }
+    }
+  } finally {
+    if (shouldRevokeObjectUrl) {
+      URL.revokeObjectURL(imageUrl);
     }
   }
 };
@@ -342,11 +362,15 @@ export const insertImageFromUrl = async (
   skipScroll?: boolean,
   skipImageLoad?: boolean // 如果为 true 且提供了 referenceDimensions，则跳过图片加载直接使用提供的尺寸
 ) => {
-  // 外部 URL 先缓存到本地，避免 CORS/Referer 问题
-  let resolvedUrl = imageUrl;
-  if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-    const cachedUrl = await cacheRemoteUrl(imageUrl, `insert-${Date.now()}`, 'image', 'png');
-    if (cachedUrl !== imageUrl) {
+  // 外部 URL 和 data URL 先缓存到本地
+  let resolvedUrl = normalizeImageDataUrl(imageUrl);
+  if (
+    resolvedUrl.startsWith('http://') ||
+    resolvedUrl.startsWith('https://') ||
+    resolvedUrl.startsWith('data:')
+  ) {
+    const cachedUrl = await cacheRemoteUrl(resolvedUrl, `insert-${Date.now()}`, 'image', 'png');
+    if (cachedUrl !== resolvedUrl) {
       resolvedUrl = cachedUrl;
     }
   }

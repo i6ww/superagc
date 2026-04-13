@@ -83,6 +83,8 @@ export interface SWTask {
   insertedToCanvas?: boolean;
   /** Whether the task was synced from remote (should not be resumed) */
   syncedFromRemote?: boolean;
+  /** Whether the task has been archived (excluded from active loading) */
+  archived?: boolean;
 }
 
 // ============================================================================
@@ -391,6 +393,7 @@ export const DEFAULT_TASK_QUEUE_CONFIG: TaskQueueConfig = {
   timeouts: {
     [TaskType.IMAGE]: 10 * 60 * 1000, // 10 minutes for image
     [TaskType.VIDEO]: 20 * 60 * 1000, // 20 minutes for video
+    [TaskType.AUDIO]: 30 * 60 * 1000, // 30 minutes for audio
     [TaskType.CHARACTER]: 10 * 60 * 1000, // 10 minutes
     [TaskType.INSPIRATION_BOARD]: 10 * 60 * 1000, // 10 minutes (same as image)
     [TaskType.CHAT]: 10 * 60 * 1000, // 10 minutes

@@ -1,3 +1,287 @@
+## 0.6.21 (2026-04-13)
+
+### 🚀 Features
+
+- 知识库素材嵌入 — Milkdown 自定义节点插件 ([fec0e2a9](https://github.com/ljquan/aitu/commit/fec0e2a9))
+
+### 🩹 Fixes
+
+- 修复媒体库弹窗条件渲染和音频封面URL处理 ([d13e108b](https://github.com/ljquan/aitu/commit/d13e108b))
+- 收口关闭态工具箱与素材库弹窗挂载，修复用户页 Hook 崩溃 ([45bfddb3](https://github.com/ljquan/aitu/commit/45bfddb3))
+- iframe 环境下打开 AI 图片生成弹窗 Maximum update depth exceeded ([8c5a11fc](https://github.com/ljquan/aitu/commit/8c5a11fc))
+- 避免 Milkdown 在 editorView 缺失时读取 markdown ([0d04c261](https://github.com/ljquan/aitu/commit/0d04c261))
+
+### ❤️  Thank You
+
+- liquid <ljquan@qq.com>
+
+## 0.6.20 (2026-04-13)
+
+### 🚀 Features
+
+- 模型测试性价比评分 + 选择器收藏/淘汰标记 ([e3b694ac](https://github.com/ljquan/aitu/commit/e3b694ac))
+
+### 🩹 Fixes
+
+- 统一音频下载封面写入逻辑 ([97ab456a](https://github.com/ljquan/aitu/commit/97ab456a))
+
+### ❤️  Thank You
+
+- liquid <ljquan@qq.com>
+
+## 0.6.19 (2026-04-12)
+
+### 🚀 Features
+
+- 增强错误处理与iframe测试支持 ([f4682ff8](https://github.com/ljquan/aitu/commit/f4682ff8))
+- 音乐播放器支持知识库语音快捷操作 ([e53e6846](https://github.com/ljquan/aitu/commit/e53e6846))
+- 右键菜单动态展示模型描述和文档链接 ([563376e1](https://github.com/ljquan/aitu/commit/563376e1))
+- 集成供应商模型价格信息展示 ([8c011dbd](https://github.com/ljquan/aitu/commit/8c011dbd))
+- 优化画布 Markdown 卡片与知识库联动 ([c04b9efd](https://github.com/ljquan/aitu/commit/c04b9efd))
+- 增加内置模型推荐分并统一排序 ([bb65488e](https://github.com/ljquan/aitu/commit/bb65488e))
+- 多选框增加全选/清除，修复测试本组模型数不一致 ([2ede78a7](https://github.com/ljquan/aitu/commit/2ede78a7))
+- 更新默认模型至 Gemini 3.1 Pro Preview 并改进模型基准测试 ([3cce05df](https://github.com/ljquan/aitu/commit/3cce05df))
+- 模型测试历史会话增加搜索与模态筛选 ([522b6c5d](https://github.com/ljquan/aitu/commit/522b6c5d))
+
+### 🩹 Fixes
+
+- 防白屏 — 全局错误边界 + 统一错误恢复 UI + 日志导出 ([6be795c9](https://github.com/ljquan/aitu/commit/6be795c9))
+- 统一播放器速率控制并隔离播放缓存音频 ([5334ca60](https://github.com/ljquan/aitu/commit/5334ca60))
+- 收敛 AI 媒体缓存语义与远程缓存去重 ([a35370f8](https://github.com/ljquan/aitu/commit/a35370f8))
+- 补齐任务队列归档提示与历史数量 ([e8fb08d7](https://github.com/ljquan/aitu/commit/e8fb08d7))
+- override TDesign Tooltip default max-width to display larger video ([1c9c73c5](https://github.com/ljquan/aitu/commit/1c9c73c5))
+- 修复GitHub同步上下文未提供时的错误处理 ([eaf6a41d](https://github.com/ljquan/aitu/commit/eaf6a41d))
+
+### 🔧 Chores
+
+- style: 提升右键菜单 disabled 项可读性 ([91add984](https://github.com/ljquan/aitu/commit/91add984))
+- style: fix config dashboard layout responsiveness in narrow container ([cf92bb0f](https://github.com/ljquan/aitu/commit/cf92bb0f))
+- style: optimize model benchmark layout for smaller screens ([b5e36a01](https://github.com/ljquan/aitu/commit/b5e36a01))
+- style: increase API Key tooltip width for better video visibility ([6688fb4c](https://github.com/ljquan/aitu/commit/6688fb4c))
+- style: optimize settings layout and model selection UI ([b99baa5b](https://github.com/ljquan/aitu/commit/b99baa5b))
+
+### ❤️  Thank You
+
+- liquid <ljquan@qq.com>
+
+## 0.6.18 (2026-04-11)
+
+### 🚀 Features
+
+- 历史版本路径支持 + 未知元素类型容错 ([48a78cd4](https://github.com/ljquan/aitu/commit/48a78cd4))
+- 优化模型批测入口与模型结果导出 ([358e44ae](https://github.com/ljquan/aitu/commit/358e44ae))
+- 生成步骤交互优化 + 字段精简 ([c576d987](https://github.com/ljquan/aitu/commit/c576d987))
+- refine model benchmark batch selection ([e18ff27e](https://github.com/ljquan/aitu/commit/e18ff27e))
+- add model benchmark workbench ([d7b695b6](https://github.com/ljquan/aitu/commit/d7b695b6))
+- 视频上传预览 + 生成页重新分析 + UI 优化 ([5323a31d](https://github.com/ljquan/aitu/commit/5323a31d))
+- 脚本表单优化 + 生成链路增强 ([79ec5d77](https://github.com/ljquan/aitu/commit/79ec5d77))
+- 长视频分段拼接全套优化 ([002dc30d](https://github.com/ljquan/aitu/commit/002dc30d))
+- AI 文本生成结果统一以 Markdown Card 方式插入画布 ([c97fca2a](https://github.com/ljquan/aitu/commit/c97fca2a))
+- 新增视频分析工具 + 重构 MCP 队列逻辑为公共模块 ([ac0f7331](https://github.com/ljquan/aitu/commit/ac0f7331))
+
+### 🩹 Fixes
+
+- 补齐推荐模型选择与默认分组去重 ([1a496766](https://github.com/ljquan/aitu/commit/1a496766))
+- 收敛模型测试弹窗启动与状态同步 ([0529b331](https://github.com/ljquan/aitu/commit/0529b331))
+- 设置弹窗单模型测试带入当前模型 ([9aa52c23](https://github.com/ljquan/aitu/commit/9aa52c23))
+- 修复设置弹窗激活后仍被测试弹窗遮挡 ([99d0d0d4](https://github.com/ljquan/aitu/commit/99d0d0d4))
+- 修复多窗口最新激活未置顶 ([1f956f2d](https://github.com/ljquan/aitu/commit/1f956f2d))
+- ensure rawData is persisted and improve JSON display styling ([2aa967af](https://github.com/ljquan/aitu/commit/2aa967af))
+- 修复 generateContent 路由与超时问题 ([7299a706](https://github.com/ljquan/aitu/commit/7299a706))
+- 收紧 API key 错误判定，避免误开设置面板 ([21fffaa4](https://github.com/ljquan/aitu/commit/21fffaa4))
+- 修复 AI 文本插入为普通文本 + Card 换行丢失 + 选中带标题 ([8479ac79](https://github.com/ljquan/aitu/commit/8479ac79))
+- 修复模型搜索供应商展示与中文输入误选 ([2412e404](https://github.com/ljquan/aitu/commit/2412e404))
+- 保留远程媒体原始 URL 语义 ([8f9f828f](https://github.com/ljquan/aitu/commit/8f9f828f))
+- 深度用户页面加载内存溢出优化 ([71a0dfe2](https://github.com/ljquan/aitu/commit/71a0dfe2))
+
+### 🔧 Chores
+
+- refactor(winbox): 统一窗口 z-index 管理，修复多窗口遮挡与测试弹窗状态问题 ([6ec47b57](https://github.com/ljquan/aitu/commit/6ec47b57))
+- style(model-benchmark): comprehensive UI/UX beautification and functional refinement ([2fe7bb15](https://github.com/ljquan/aitu/commit/2fe7bb15))
+- docs: 补充 AI 文本插入必须传 label 走 Card 的编码规则 ([69bce1a9](https://github.com/ljquan/aitu/commit/69bce1a9))
+- 添加搜索 ([fe650d69](https://github.com/ljquan/aitu/commit/fe650d69))
+
+### ❤️  Thank You
+
+- liquid <ljquan@qq.com>
+
+## 0.6.17 (2026-04-09)
+
+### 🚀 Features
+
+- 优化音乐播放器布局与队列体验 ([4a76a43d](https://github.com/ljquan/aitu/commit/4a76a43d))
+- 统一音乐播放器，始终显示播放列表标签栏，新增"全部语音"标签 ([a66e6d81](https://github.com/ljquan/aitu/commit/a66e6d81))
+- 增加 TTS 播报设置入口 ([bd77e254](https://github.com/ljquan/aitu/commit/bd77e254))
+- add canvas text read-aloud ([63c30e48](https://github.com/ljquan/aitu/commit/63c30e48))
+- route audio entries into music player playback ([e8b9c4ff](https://github.com/ljquan/aitu/commit/e8b9c4ff))
+- 增加音频播放列表与收藏能力 ([f8179794](https://github.com/ljquan/aitu/commit/f8179794))
+- 素材库支持音频展示、缓存与拖拽插入 ([8c5a7e51](https://github.com/ljquan/aitu/commit/8c5a7e51))
+
+### 🩹 Fixes
+
+- 保持画布朗读在播放器切换时不中断 ([13b98cca](https://github.com/ljquan/aitu/commit/13b98cca))
+- 音乐播放器时间展示回退\n\n问题描述：音乐播放器列表在拿不到音频时长时展示 --:--，无法向用户提供有效时间信息。\n修复思路：新增统一时间副标题格式化，优先展示解析/已有时长，缺失时回退展示素材生成时间。\n更新代码架构：在 MusicPlayerTool 收敛音频时间展示策略，并为素材列表补充元数据时长解析链路。 ([204da5a4](https://github.com/ljquan/aitu/commit/204da5a4))
+- 修复音乐播放器最小化误触发底层播放控件\n\n问题描述:\n- 点击音乐播放器右上角最小化按钮时，事件会继续落到底层画布播放控件\n- 导致播放器最小化的同时误触发暂停/播放，交互结果与用户预期不一致\n\n修复思路:\n- 在最小化按钮上阻止 pointer/click 事件冒泡与默认行为\n- 使用 requestAnimationFrame 延后一帧执行最小化，避免同一点击链路被底层控件消费\n\n更新代码架构:\n- 收敛到音乐播放器工具内部按钮事件处理，不改播放服务与队列模型\n- 维持现有播放器/画布控件职责边界，仅修复 UI 事件穿透问题 ([6ab178e1](https://github.com/ljquan/aitu/commit/6ab178e1))
+- 为无标题 markdown 卡片显示默认标题 ([6f96cfec](https://github.com/ljquan/aitu/commit/6f96cfec))
+- markdown 元素按文本参与提示词 ([32a17163](https://github.com/ljquan/aitu/commit/32a17163))
+- 保持 Agent 分类切模型不降级为文本 ([2fbe82de](https://github.com/ljquan/aitu/commit/2fbe82de))
+- 优化设置弹窗小屏适配 ([39eeb5ba](https://github.com/ljquan/aitu/commit/39eeb5ba))
+- unify canvas audio queue playback ([a0839a10](https://github.com/ljquan/aitu/commit/a0839a10))
+- allow create menu on system playlist tabs ([b4837565](https://github.com/ljquan/aitu/commit/b4837565))
+- unify playlist interactions and duration display ([f61bf142](https://github.com/ljquan/aitu/commit/f61bf142))
+- dedupe local canvas files and media library ([ac6181d2](https://github.com/ljquan/aitu/commit/ac6181d2))
+- 过滤辅助缓存条目避免封面图显示为独立素材 ([43bb958b](https://github.com/ljquan/aitu/commit/43bb958b))
+- 修复本地拖入音频的标题和封面显示 ([9e7776ba](https://github.com/ljquan/aitu/commit/9e7776ba))
+- 修复音频素材详情面板展示问题 ([e4a545a4](https://github.com/ljquan/aitu/commit/e4a545a4))
+- 修复 Suno 参数下拉框不显示及版本默认值问题 ([2b658c37](https://github.com/ljquan/aitu/commit/2b658c37))
+
+### 🔧 Chores
+
+- refactor: 调整知识库工具分类 ([81e64fc8](https://github.com/ljquan/aitu/commit/81e64fc8))
+- refactor(context-menu): 统一右键菜单公共组件 ([65739440](https://github.com/ljquan/aitu/commit/65739440))
+- refactor: unify audio playlist tags ([babb531a](https://github.com/ljquan/aitu/commit/babb531a))
+- refactor: unify audio track list and context menu ([0f544aae](https://github.com/ljquan/aitu/commit/0f544aae))
+
+### ❤️  Thank You
+
+- liquid <ljquan@qq.com>
+
+## 0.6.16 (2026-04-08)
+
+### 🩹 Fixes
+
+- 修复 Suno 默认动作与 release 卡死问题 ([9d216539](https://github.com/ljquan/aitu/commit/9d216539))
+
+### ❤️  Thank You
+
+- liquid <ljquan@qq.com>
+
+## 0.6.15 (2026-04-08)
+
+### 🚀 Features
+
+- 优化播放器定位、高度、拖拽和垂直布局 ([78038789](https://github.com/ljquan/aitu/commit/78038789))
+- 完善音频预览与下载体验 ([d3f5a1d5](https://github.com/ljquan/aitu/commit/d3f5a1d5))
+- sort models by freshness and persist model-scoped generation preferences ([98ad2a06](https://github.com/ljquan/aitu/commit/98ad2a06))
+- add provider config shortcut ([14901355](https://github.com/ljquan/aitu/commit/14901355))
+
+### ❤️  Thank You
+
+- liquid <ljquan@qq.com>
+
+## 0.6.14 (2026-04-08)
+
+### 🚀 Features
+
+- 支持 Suno 歌词任务与厂商识别能力 ([d3223043](https://github.com/ljquan/aitu/commit/d3223043))
+- 恢复被误删掉代码 ([9166971c](https://github.com/ljquan/aitu/commit/9166971c))
+- 恢复被误删掉代码 ([82134958](https://github.com/ljquan/aitu/commit/82134958))
+- 优化代码 ([4ebfdf60](https://github.com/ljquan/aitu/commit/4ebfdf60))
+- 优化代码 ([7f71ea6c](https://github.com/ljquan/aitu/commit/7f71ea6c))
+- 新增模型 ([d8cf2816](https://github.com/ljquan/aitu/commit/d8cf2816))
+- 优化导出 ([ea50f410](https://github.com/ljquan/aitu/commit/ea50f410))
+- 增加 Stitch 设计工作流资产与规范 ([5d2c139b](https://github.com/ljquan/aitu/commit/5d2c139b))
+- 增加画布音频节点与播放能力 ([6bf9d299](https://github.com/ljquan/aitu/commit/6bf9d299))
+- 接入音频生成任务与工作流链路 ([9fe365ab](https://github.com/ljquan/aitu/commit/9fe365ab))
+- 增加音频模态与 Suno 路由基础 ([d3d94f4c](https://github.com/ljquan/aitu/commit/d3d94f4c))
+- 增加 Kling 参数适配 ([539a2827](https://github.com/ljquan/aitu/commit/539a2827))
+- 增加 Kling 能力路由 ([03f2fec2](https://github.com/ljquan/aitu/commit/03f2fec2))
+- 优化至形状可导出 ([210c68b9](https://github.com/ljquan/aitu/commit/210c68b9))
+- 优化至适配画笔 ([a946b42f](https://github.com/ljquan/aitu/commit/a946b42f))
+- 优化移动端设置与供应商配置体验 ([868f1fee](https://github.com/ljquan/aitu/commit/868f1fee))
+- 增强文本多模态识图与供应商模型路由体验 ([ad47afef](https://github.com/ljquan/aitu/commit/ad47afef))
+- 完善多供应商模型协议路由与 Sora 视频适配 ([5c217bd2](https://github.com/ljquan/aitu/commit/5c217bd2))
+- 优化模型选择器供应商与厂商分层展示 ([f43a9e4d](https://github.com/ljquan/aitu/commit/f43a9e4d))
+- 优化设置页模型发现与配置体验 ([868b0d45](https://github.com/ljquan/aitu/commit/868b0d45))
+- 重构设置页并修复配置持久化 ([f7962788](https://github.com/ljquan/aitu/commit/f7962788))
+
+### 🩹 Fixes
+
+- persist dropdown selections and correct type fallback ([1d868c5e](https://github.com/ljquan/aitu/commit/1d868c5e))
+- 修复 web 端音频任务类型检查失败 ([74e80377](https://github.com/ljquan/aitu/commit/74e80377))
+- 优化音频节点内容布局与信息层级 ([526cd0ce](https://github.com/ljquan/aitu/commit/526cd0ce))
+- 优化移动端音频播放器并恢复桌面端展示 ([ab75d70a](https://github.com/ljquan/aitu/commit/ab75d70a))
+- 补充媒体任务兼容与路由回归 ([e09750e1](https://github.com/ljquan/aitu/commit/e09750e1))
+- 完善音频入口与任务展示体验 ([10dc0abd](https://github.com/ljquan/aitu/commit/10dc0abd))
+- 优化 Kling 参数展示 ([b7ad05d4](https://github.com/ljquan/aitu/commit/b7ad05d4))
+
+### 🔧 Chores
+
+- bump version to 0.6.13 ([1a3d4deb](https://github.com/ljquan/aitu/commit/1a3d4deb))
+- bump version to 0.6.12 ([ecaf487e](https://github.com/ljquan/aitu/commit/ecaf487e))
+- checkpoint current local changes ([fe2bdb7e](https://github.com/ljquan/aitu/commit/fe2bdb7e))
+- 优化弹窗 ([16563720](https://github.com/ljquan/aitu/commit/16563720))
+- featL：优化导出 ([8e78c7ff](https://github.com/ljquan/aitu/commit/8e78c7ff))
+- 实现多供应商模型配置与按模型来源路由 ([979ff59d](https://github.com/ljquan/aitu/commit/979ff59d))
+- 实现模型获取与按需添加流程 ([7d5f9ab8](https://github.com/ljquan/aitu/commit/7d5f9ab8))
+
+### ❤️  Thank You
+
+- liquid <ljquan@qq.com>
+- gongchengtu <1817063960@qq.com>
+- liangyufeng <l.yfeng@qq.com>
+
+## 0.6.12 (2026-03-31)
+
+### 🚀 Features
+
+- 隐藏原生滚动条 ([15e61dcb](https://github.com/ljquan/aitu/commit/15e61dcb))
+- 重建多供应商模型路由与移动端配置体验 ([78de2528](https://github.com/ljquan/aitu/commit/78de2528))
+
+### 🩹 Fixes
+
+- 修复多供应商分支构建类型错误 ([541000cc](https://github.com/ljquan/aitu/commit/541000cc))
+- 修复缩略图地址钩子语法错误 ([c8883799](https://github.com/ljquan/aitu/commit/c8883799))
+- update app version to 0.6.11 and adjust build time ([8d8ad46a](https://github.com/ljquan/aitu/commit/8d8ad46a))
+
+### ❤️  Thank You
+
+- liangyufeng <l.yfeng@qq.com>
+- gongchengtu <1817063960@qq.com>
+- liquid <ljquan@qq.com>
+
+## 0.6.11 (2026-03-18)
+
+### 🔧 Chores
+
+- 更新应用版本至0.6.10并修正调整大小句柄常量 ([4bf18818](https://github.com/ljquan/aitu/commit/4bf18818))
+- fixed: 兼容base64图片返回 ([94d4a81c](https://github.com/ljquan/aitu/commit/94d4a81c))
+- fixed:修复部署失败 ([9ecdebcc](https://github.com/ljquan/aitu/commit/9ecdebcc))
+- fixed:修复素材库删除的bug ([6ac4bf95](https://github.com/ljquan/aitu/commit/6ac4bf95))
+- fixed:修复素材库删除的bug ([c93d449e](https://github.com/ljquan/aitu/commit/c93d449e))
+
+### ❤️  Thank You
+
+- liquid <ljquan@qq.com>
+- liangyufeng <l.yfeng@qq.com>
+
+## 0.6.10 (2026-03-16)
+
+### 🚀 Features
+
+- 修改部署失败的问题 ([23533dd2](https://github.com/ljquan/aitu/commit/23533dd2))
+- 添加导出ppt的功能 ([08e4fd52](https://github.com/ljquan/aitu/commit/08e4fd52))
+- 持久化 AI 生成参数偏好 ([dbf42e78](https://github.com/ljquan/aitu/commit/dbf42e78))
+- 添加页面刷新后视频任务恢复和工作流同步机制 ([8daecd7b](https://github.com/ljquan/aitu/commit/8daecd7b))
+- 优化画布上插入内容让其可滚动 ([76024c85](https://github.com/ljquan/aitu/commit/76024c85))
+- 优化agent回答文本框 ([d706c6ed](https://github.com/ljquan/aitu/commit/d706c6ed))
+- 优化知识库对话ai回答内容将其渲染为对应的markdown格式&优化skill生成的内容让外层文本框高度自适应内容高度 ([cb76e4df](https://github.com/ljquan/aitu/commit/cb76e4df))
+
+### 🩹 Fixes
+
+- 修复切换画板时刷新页面丢失当前画板的问题 ([c164a1dc](https://github.com/ljquan/aitu/commit/c164a1dc))
+
+### 🔧 Chores
+
+- 更新构建时间戳 ([431af243](https://github.com/ljquan/aitu/commit/431af243))
+- feat：优化文本框高度 ([435cc865](https://github.com/ljquan/aitu/commit/435cc865))
+
+### ❤️  Thank You
+
+- liangyufeng <l.yfeng@qq.com>
+- gongchengtu <1817063960@qq.com>
+- liquid <ljquan@qq.com>
+
 ## 0.6.9 (2026-03-08)
 
 ### 🚀 Features

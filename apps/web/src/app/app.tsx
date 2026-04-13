@@ -14,7 +14,8 @@ import {
 } from '@drawnix/drawnix';
 import { PlaitBoard, PlaitElement, PlaitTheme, Viewport, updateViewBox, initializeViewBox, updateViewportOffset } from '@plait/core';
 import { MessagePlugin } from 'tdesign-react';
-import { CrashRecoveryDialog } from './CrashRecoveryDialog';
+import { ErrorFallbackUI, safeModeReload, goToDebug } from './ErrorBoundary';
+import { collectAndDownloadErrorLog } from '../utils/error-log-exporter';
 
 // 节流保存 viewport 的间隔（毫秒）
 const VIEWPORT_SAVE_DEBOUNCE = 500;
@@ -63,6 +64,7 @@ export function App() {
   // 如果 handleBoardChange 依赖 isDataReady state，onChange 变化后旧回调中 isDataReady 永远为 false
   const isDataReadyRef = useRef(false);
   const [showCrashDialog, setShowCrashDialog] = useState(false);
+  const [initError, setInitError] = useState<Error | null>(null);
   const [value, setValue] = useState<{
     children: PlaitElement[];
     viewport?: Viewport;
@@ -105,6 +107,7 @@ export function App() {
         // 使用 switchBoard 确保加载完整数据
         const currentBoardId = workspaceService.getState().currentBoardId;
         // 验证画板是否存在，防止旧状态中的 currentBoardId 指向不存在的画板
+        
         if (currentBoardId && workspaceService.getBoardMetadata(currentBoardId)) {
           const currentBoard = await workspaceService.switchBoard(currentBoardId);
           setValue({
@@ -254,6 +257,7 @@ export function App() {
         }
       } catch (error) {
         console.error('[App] Initialization failed:', error);
+        setInitError(error instanceof Error ? error : new Error(String(error)));
       } finally {
         isDataReadyRef.current = true;
         setIsDataReady(true);
@@ -268,37 +272,46 @@ export function App() {
 
   // Handle board switching
   const handleBoardSwitch = useCallback(async (board: Board, skipUrlUpdate: boolean = false) => {
-    // 立即更新 URL 和 sessionStorage，确保刷新页面时能恢复到正确的画板
-    // 必须在任何异步操作之前执行，避免刷新时丢失画板选择
-    if (!skipUrlUpdate) {
-      updateBoardIdInUrl(board.id);
-      const workspaceService = WorkspaceService.getInstance();
-      workspaceService.persistCurrentBoardId(board.id);
-    }
-    setCurrentBoardId(board.id);
-
-    // 切换画布时重置脏标志，新画布的初始数据不需要保存
-    localDirtyRef.current = false;
-
-    // 在设置 state 之前，预先恢复失效的视频 URL
-    const elements = await recoverVideoUrlsInElements(board.elements || []);
-
-    setValue({
-      children: elements,
-      viewport: board.viewport,
-      theme: board.theme,
-    });
-
-    // 等待 React 更新完成后，手动触发画布边界更新
-    // 使用 setTimeout 而不是 queueMicrotask，给 React 更多时间完成 DOM 更新
-    setTimeout(() => {
-      if (boardRef.current) {
-        // 完整的边界更新流程
-        initializeViewBox(boardRef.current);
-        updateViewBox(boardRef.current);
-        updateViewportOffset(boardRef.current);
+    try {
+      // 立即更新 URL 和 sessionStorage，确保刷新页面时能恢复到正确的画板
+      // 必须在任何异步操作之前执行，避免刷新时丢失画板选择
+      if (!skipUrlUpdate) {
+        updateBoardIdInUrl(board.id);
+        const workspaceService = WorkspaceService.getInstance();
+        workspaceService.persistCurrentBoardId(board.id);
       }
-    }, 0);
+      setCurrentBoardId(board.id);
+
+      // 切换画布时重置脏标志，新画布的初始数据不需要保存
+      localDirtyRef.current = false;
+
+      // 在设置 state 之前，预先恢复失效的视频 URL
+      const elements = await recoverVideoUrlsInElements(board.elements || []);
+
+      setValue({
+        children: elements,
+        viewport: board.viewport,
+        theme: board.theme,
+      });
+
+      // 等待 React 更新完成后，手动触发画布边界更新
+      // 使用 setTimeout 而不是 queueMicrotask，给 React 更多时间完成 DOM 更新
+      setTimeout(() => {
+        if (boardRef.current) {
+          // 完整的边界更新流程
+          initializeViewBox(boardRef.current);
+          updateViewBox(boardRef.current);
+          updateViewportOffset(boardRef.current);
+        }
+      }, 0);
+    } catch (error) {
+      console.error('[App] Board switch failed:', error);
+      MessagePlugin.error({
+        content: `切换画板失败: ${error instanceof Error ? error.message : '未知错误'}`,
+        duration: 5000,
+        closeBtn: true,
+      });
+    }
   }, []);
 
   // Handle browser back/forward navigation
@@ -553,14 +566,32 @@ export function App() {
     }, 100);
   }, []);
 
-  // 显示崩溃恢复对话框
+  // 显示崩溃恢复对话框（统一使用 ErrorFallbackUI）
   if (showCrashDialog) {
     return (
-      <CrashRecoveryDialog
+      <ErrorFallbackUI
+        variant="crash"
         crashCount={crashRecoveryService.getCrashCount()}
         memoryInfo={crashRecoveryService.getMemoryInfo()}
-        onUseSafeMode={() => handleSafeModeChoice(true)}
         onIgnore={() => handleSafeModeChoice(false)}
+        onSafeModeReload={() => handleSafeModeChoice(true)}
+        onGoToDebug={goToDebug}
+      />
+    );
+  }
+
+  // 初始化失败：展示错误 UI 而非白屏
+  if (initError) {
+    return (
+      <ErrorFallbackUI
+        variant="error"
+        title="应用初始化失败"
+        description="无法加载画板数据，可能是存储损坏或浏览器限制。"
+        errorMessage={initError.message}
+        errorStack={initError.stack}
+        onExportLog={() => collectAndDownloadErrorLog(initError)}
+        onSafeModeReload={safeModeReload}
+        onGoToDebug={goToDebug}
       />
     );
   }

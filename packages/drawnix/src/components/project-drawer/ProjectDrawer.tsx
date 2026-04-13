@@ -13,7 +13,6 @@ import React, {
   useEffect,
   DragEvent,
 } from 'react';
-import { createPortal } from 'react-dom';
 import {
   Button,
   Input,
@@ -51,6 +50,11 @@ import {
 import { BaseDrawer } from '../side-drawer';
 import { workspaceExportService } from '../../services/workspace-export-service';
 import { safeReload } from '../../utils/active-tasks';
+import {
+  ContextMenu,
+  useContextMenuState,
+  type ContextMenuEntry,
+} from '../shared';
 import { FramePanel } from './FramePanel';
 import { LayerPanel } from './LayerPanel';
 import './project-drawer.scss';
@@ -77,6 +81,14 @@ interface DragData {
 
 // Drop position type
 type DropPosition = 'before' | 'after' | 'inside' | null;
+
+interface ProjectDrawerContextMenuPayload {
+  type: 'folder' | 'board';
+  id: string;
+  name: string;
+  folderId?: string | null;
+  parentId?: string | null;
+}
 
 // Inner component for tree content
 const ProjectDrawerContent: React.FC<{
@@ -136,18 +148,11 @@ const ProjectDrawerContent: React.FC<{
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
-  
-  // 右键菜单状态
-  const [contextMenu, setContextMenu] = useState<{
-    visible: boolean;
-    x: number;
-    y: number;
-    type: 'folder' | 'board';
-    id: string;
-    name: string;
-    folderId?: string | null;
-    parentId?: string | null;
-  } | null>(null);
+  const {
+    contextMenu,
+    open: openContextMenu,
+    close: closeContextMenu,
+  } = useContextMenuState<ProjectDrawerContextMenuPayload>();
 
   const findBoardNameById = useCallback(
     (nodes: TreeNode[], id: string): string | null => {
@@ -254,25 +259,6 @@ const ProjectDrawerContent: React.FC<{
     };
   }, []);
 
-  // 关闭右键菜单
-  const closeContextMenu = useCallback(() => {
-    setContextMenu(null);
-  }, []);
-
-  // 点击其他地方关闭右键菜单
-  useEffect(() => {
-    if (contextMenu?.visible) {
-      const handleClick = () => closeContextMenu();
-      document.addEventListener('click', handleClick);
-      document.addEventListener('contextmenu', handleClick);
-      return () => {
-        document.removeEventListener('click', handleClick);
-        document.removeEventListener('contextmenu', handleClick);
-      };
-    }
-    return undefined;
-  }, [contextMenu?.visible, closeContextMenu]);
-
   // 处理右键菜单
   const handleContextMenu = useCallback((
     e: React.MouseEvent,
@@ -284,17 +270,14 @@ const ProjectDrawerContent: React.FC<{
   ) => {
     e.preventDefault();
     e.stopPropagation();
-    setContextMenu({
-      visible: true,
-      x: e.clientX,
-      y: e.clientY,
+    openContextMenu(e, {
       type,
       id,
       name,
       folderId,
       parentId,
     });
-  }, []);
+  }, [openContextMenu]);
 
   // Auto-select text when input is focused
   const handleInputFocus = useCallback(
@@ -786,11 +769,9 @@ const ProjectDrawerContent: React.FC<{
   };
 
   // 处理右键菜单点击
-  const handleContextMenuAction = useCallback((action: string) => {
-    if (!contextMenu) return;
-    
-    const { type, id, name, folderId } = contextMenu;
-    
+  const handleContextMenuAction = useCallback((action: string, payload: ProjectDrawerContextMenuPayload) => {
+    const { type, id, name } = payload;
+
     switch (action) {
       case 'new-board':
         onCreateBoard(id);
@@ -825,15 +806,100 @@ const ProjectDrawerContent: React.FC<{
         }
         break;
     }
-    
+
     closeContextMenu();
-  }, [contextMenu, onCreateBoard, onCreateFolder, onCopyBoard, startEditing, onDelete, onDeleteMultiple, selectedBoardIds, onMoveBoard, closeContextMenu]);
+  }, [onCreateBoard, onCreateFolder, onCopyBoard, startEditing, onDelete, onDeleteMultiple, selectedBoardIds, onMoveBoard, closeContextMenu]);
 
   // 获取移动菜单选项
   const moveOptions = useMemo(() => {
-    if (!contextMenu || contextMenu.type !== 'board') return [];
+    if (!contextMenu || contextMenu.payload.type !== 'board') return [];
     return getFolderOptions();
   }, [contextMenu, getFolderOptions]);
+
+  const contextMenuItems = useMemo<ContextMenuEntry<ProjectDrawerContextMenuPayload>[]>(() => {
+    if (!contextMenu) {
+      return [];
+    }
+
+    const payload = contextMenu.payload;
+    if (payload.type === 'folder') {
+      return [
+        {
+          key: 'new-board',
+          label: '新建画板',
+          icon: <AddIcon />,
+          onSelect: (current) => handleContextMenuAction('new-board', current),
+        },
+        {
+          key: 'new-folder',
+          label: '新建文件夹',
+          icon: <FolderAddIcon />,
+          onSelect: (current) => handleContextMenuAction('new-folder', current),
+        },
+        { key: 'divider-1', type: 'divider' },
+        {
+          key: 'rename',
+          label: '重命名',
+          icon: <EditIcon />,
+          onSelect: (current) => handleContextMenuAction('rename', current),
+        },
+        {
+          key: 'delete',
+          label: '删除',
+          icon: <DeleteIcon />,
+          danger: true,
+          onSelect: (current) => handleContextMenuAction('delete', current),
+        },
+      ];
+    }
+
+    return [
+      {
+        key: 'copy',
+        label: '复制',
+        icon: <FileCopyIcon />,
+        onSelect: (current) => handleContextMenuAction('copy', current),
+      },
+      {
+        key: 'rename',
+        label: '重命名',
+        icon: <EditIcon />,
+        onSelect: (current) => handleContextMenuAction('rename', current),
+      },
+      {
+        key: 'move',
+        type: 'submenu',
+        label: '移动到',
+        icon: <MoveIcon />,
+        children: moveOptions.map((opt) => ({
+          key: `move-${opt.value}`,
+          label: opt.content,
+          onSelect: (current: ProjectDrawerContextMenuPayload) =>
+            handleContextMenuAction(
+              opt.value === 'root' ? 'move-root' : `move-${opt.value}`,
+              current
+            ),
+        })),
+      },
+      { key: 'divider-1', type: 'divider' },
+      {
+        key: 'delete',
+        label: '删除',
+        icon: <DeleteIcon />,
+        danger: true,
+        onSelect: (current) => handleContextMenuAction('delete', current),
+      },
+      {
+        key: 'delete-selected',
+        label: `删除选中的 ${selectedBoardIds?.size ?? 0} 个画板`,
+        icon: <DeleteIcon />,
+        danger: true,
+        disabled: (current) =>
+          (selectedBoardIds?.size ?? 0) <= 1 || !selectedBoardIds?.has(current.id),
+        onSelect: (current) => handleContextMenuAction('delete-selected', current),
+      },
+    ];
+  }, [contextMenu, handleContextMenuAction, moveOptions, selectedBoardIds]);
 
   return (
     <>
@@ -844,84 +910,11 @@ const ProjectDrawerContent: React.FC<{
             : renderBoardNode(node as BoardTreeNode)
         )}
       </div>
-      
-      {/* 右键菜单 - 使用 Portal 渲染到 body 避免被容器截断 */}
-      {contextMenu?.visible && createPortal(
-        <div
-          className="project-drawer-context-menu"
-          style={{
-            position: 'fixed',
-            left: contextMenu.x,
-            top: contextMenu.y,
-            zIndex: 10000,
-          }}
-        >
-          {contextMenu.type === 'folder' ? (
-            // 文件夹右键菜单
-            <>
-              <div className="project-drawer-context-menu__item" onClick={() => handleContextMenuAction('new-board')}>
-                <AddIcon />
-                <span>新建画板</span>
-              </div>
-              <div className="project-drawer-context-menu__item" onClick={() => handleContextMenuAction('new-folder')}>
-                <FolderAddIcon />
-                <span>新建文件夹</span>
-              </div>
-              <div className="project-drawer-context-menu__divider" />
-              <div className="project-drawer-context-menu__item" onClick={() => handleContextMenuAction('rename')}>
-                <EditIcon />
-                <span>重命名</span>
-              </div>
-              <div className="project-drawer-context-menu__item project-drawer-context-menu__item--danger" onClick={() => handleContextMenuAction('delete')}>
-                <DeleteIcon />
-                <span>删除</span>
-              </div>
-            </>
-          ) : (
-            // 画板右键菜单
-            <>
-              <div className="project-drawer-context-menu__item" onClick={() => handleContextMenuAction('copy')}>
-                <FileCopyIcon />
-                <span>复制</span>
-              </div>
-              <div className="project-drawer-context-menu__item" onClick={() => handleContextMenuAction('rename')}>
-                <EditIcon />
-                <span>重命名</span>
-              </div>
-              <div className="project-drawer-context-menu__submenu">
-                <div className="project-drawer-context-menu__item">
-                  <MoveIcon />
-                  <span>移动到</span>
-                  <ChevronRightIcon style={{ marginLeft: 'auto' }} />
-                </div>
-                <div className="project-drawer-context-menu__submenu-content">
-                  {moveOptions.map((opt) => (
-                    <div
-                      key={opt.value}
-                      className="project-drawer-context-menu__item"
-                      onClick={() => handleContextMenuAction(opt.value === 'root' ? 'move-root' : `move-${opt.value}`)}
-                    >
-                      <span>{opt.content}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="project-drawer-context-menu__divider" />
-              <div className="project-drawer-context-menu__item project-drawer-context-menu__item--danger" onClick={() => handleContextMenuAction('delete')}>
-                <DeleteIcon />
-                <span>删除</span>
-              </div>
-              {(selectedBoardIds?.size ?? 0) > 1 && selectedBoardIds?.has(contextMenu.id) && (
-                <div className="project-drawer-context-menu__item project-drawer-context-menu__item--danger" onClick={() => handleContextMenuAction('delete-selected')}>
-                  <DeleteIcon />
-                  <span>删除选中的 {selectedBoardIds?.size} 个画板</span>
-                </div>
-              )}
-            </>
-          )}
-        </div>,
-        document.body
-      )}
+      <ContextMenu
+        state={contextMenu}
+        items={contextMenuItems}
+        onClose={closeContextMenu}
+      />
     </>
   );
 };

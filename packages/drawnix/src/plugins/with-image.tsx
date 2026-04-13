@@ -14,10 +14,14 @@ import {
   toViewBoxPoint,
   WritableClipboardOperationType,
 } from '@plait/core';
-import { isSupportedImageFileType } from '../data/blob';
+import { isSupportedImageFileType, isSupportedAudioFileType } from '../data/blob';
 import { insertImage, insertImageFromUrlAndSelect } from '../data/image';
+import { insertAudioFromUrl, getAudioFileDuration, extractAudioCoverArt } from '../data/audio';
+import { unifiedCacheService } from '../services/unified-cache-service';
+import { assetStorageService } from '../services/asset-storage-service';
 import { isHitImage, MindElement, ImageData } from '@plait/mind';
 import { ImageViewer } from '../libs/image-viewer';
+import { AssetSource, AssetType } from '../types/asset.types';
 
 /**
  * 从 dataTransfer 中提取图片 URL
@@ -117,13 +121,62 @@ export const withImagePlugin = (board: PlaitBoard) => {
   newBoard.drop = (event: DragEvent) => {
     // 优先处理文件拖拽
     if (event.dataTransfer?.files?.length) {
-      const imageFile = event.dataTransfer.files[0];
-      if (isSupportedImageFileType(imageFile.type)) {
+      const file = event.dataTransfer.files[0];
+      if (isSupportedImageFileType(file.type)) {
         const point = toViewBoxPoint(
           board,
           toHostPoint(board, event.x, event.y)
         );
-        insertImage(board, imageFile, point, true);
+        insertImage(board, file, point, true);
+        return true;
+      }
+      if (isSupportedAudioFileType(file.type)) {
+        const point = toViewBoxPoint(
+          board,
+          toHostPoint(board, event.x, event.y)
+        );
+        (async () => {
+          try {
+            const title = file.name.replace(/\.[^.]+$/, '');
+            await assetStorageService.initialize();
+            const asset = await assetStorageService.addAsset({
+              type: AssetType.AUDIO,
+              source: AssetSource.LOCAL,
+              name: file.name,
+              blob: file,
+              mimeType: file.type,
+            });
+            await unifiedCacheService.updateCachedMedia(asset.url, {
+              metadata: {
+                name: title,
+              },
+            });
+
+            // 并行提取时长和封面
+            const [duration, coverBlob] = await Promise.all([
+              getAudioFileDuration(file),
+              extractAudioCoverArt(file),
+            ]);
+
+            let previewImageUrl: string | undefined;
+            if (coverBlob) {
+              const coverUrl = `/__aitu_cache__/image/${asset.id}-cover.png`;
+              await unifiedCacheService.cacheMediaFromBlob(coverUrl, coverBlob, 'image', {
+                taskId: `${asset.id}-cover`,
+                name: `${title}-cover`,
+              });
+              previewImageUrl = coverUrl;
+            }
+
+            await insertAudioFromUrl(board, asset.url, {
+              title,
+              duration,
+              previewImageUrl,
+            }, point, true);
+          } catch (err) {
+            console.error('[withImagePlugin] Failed to insert audio from drop:', err);
+          }
+        })();
         return true;
       }
     }

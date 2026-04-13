@@ -6,17 +6,29 @@
  */
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Button, Tabs, Dialog, MessagePlugin, Input, Radio, Tooltip, Checkbox, Badge } from 'tdesign-react';
+import { Button, Tabs, Dialog, MessagePlugin, Input, Tooltip, Checkbox } from 'tdesign-react';
 import { DeleteIcon, SearchIcon, UserIcon, RefreshIcon, PauseCircleIcon, CheckDoubleIcon, ImageIcon, VideoIcon, FilterIcon } from 'tdesign-icons-react';
+import { Music4 } from 'lucide-react';
 import { VirtualTaskList } from './VirtualTaskList';
+import { ArchivedTaskList } from './ArchivedTaskList';
 import { useTaskQueue } from '../../hooks/useTaskQueue';
 import { Task, TaskType, TaskStatus } from '../../types/task.types';
 import { unifiedCacheService } from '../../services/unified-cache-service';
+import { taskStorageReader } from '../../services/task-storage-reader';
 import { useDrawnix, DialogType } from '../../hooks/use-drawnix';
 import { insertImageFromUrl } from '../../data/image';
 import { insertVideoFromUrl } from '../../data/video';
-import { sanitizeFilename, downloadFromBlob } from '@aitu/utils';
-import { downloadMediaFile } from '../../utils/download-utils';
+import {
+  AUDIO_CARD_DEFAULT_HEIGHT,
+  AUDIO_CARD_DEFAULT_WIDTH,
+  insertAudioFromUrl,
+} from '../../data/audio';
+import { executeCanvasInsertion } from '../../services/canvas-operations';
+import { normalizeImageDataUrl } from '@aitu/utils';
+import {
+  buildTaskDownloadItems,
+  smartDownload,
+} from '../../utils/download-utils';
 import { BaseDrawer } from '../side-drawer';
 import { CharacterCreateDialog } from '../character/CharacterCreateDialog';
 import { CharacterList } from '../character/CharacterList';
@@ -26,10 +38,10 @@ import { ImageEditor } from '../image-editor';
 import { useGitHubSync } from '../../contexts/GitHubSyncContext';
 import { mediaSyncService } from '../../services/github-sync/media-sync-service';
 import { CloudUploadIcon } from 'tdesign-icons-react';
+import { formatLyricsForCanvas, getLyricsTags, getLyricsTitle, isLyricsTask } from '../../utils/lyrics-task-utils';
 import './task-queue.scss';
 
 const { TabPanel } = Tabs;
-const RadioGroup = Radio.Group;
 
 // Storage key for drawer width
 export const TASK_DRAWER_WIDTH_KEY = 'task-queue-drawer-width';
@@ -78,10 +90,17 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [clearType, setClearType] = useState<'completed' | 'failed'>('completed');
   const [searchText, setSearchText] = useState<string>('');
-  const [typeFilter, setTypeFilter] = useState<'all' | 'image' | 'video' | 'character'>('all');
+  const [typeFilter, setTypeFilter] = useState<
+    'all' | 'image' | 'video' | 'audio' | 'text' | 'character'
+  >('all');
   const [previewTaskId, setPreviewTaskId] = useState<string | null>(null);
   const [previewVisible, setPreviewVisible] = useState(false);
-  const [previewInitialIndex, setPreviewInitialIndex] = useState(0);
+  const [previewInitialIndex, setPreviewInitialIndex] = useState<
+    number | number[]
+  >(0);
+  const [previewInitialMode, setPreviewInitialMode] = useState<
+    'single' | 'compare'
+  >('single');
   
   // 图片编辑器状态
   const [imageEditorVisible, setImageEditorVisible] = useState(false);
@@ -95,6 +114,7 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const [showBatchDeleteConfirm, setShowBatchDeleteConfirm] = useState(false);
+  const [archivedCount, setArchivedCount] = useState<number | null>(null);
   
   // Sync state
   const { isConfigured } = useGitHubSync();
@@ -108,6 +128,28 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
   useEffect(() => {
     unifiedCacheService.initCacheStatus();
   }, []);
+
+  useEffect(() => {
+    if (!expanded) {
+      return;
+    }
+
+    let cancelled = false;
+
+    taskStorageReader.getArchivedTaskCount().then((count) => {
+      if (!cancelled) {
+        setArchivedCount(count);
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        setArchivedCount(0);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, activeTab]);
 
   // Filter and sort tasks
   const filteredTasks = useMemo(() => {
@@ -129,6 +171,9 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
       case 'cancelled':
         tasksToFilter = cancelledTasks;
         break;
+      case 'archived':
+        // 归档任务由 ArchivedTaskList 独立加载
+        return [];
       default:
         tasksToFilter = tasks;
     }
@@ -136,7 +181,14 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
     // Apply type filter
     if (typeFilter !== 'all' && typeFilter !== 'character') {
       tasksToFilter = tasksToFilter.filter(task =>
-        task.type === (typeFilter === 'image' ? TaskType.IMAGE : TaskType.VIDEO)
+        task.type ===
+        (typeFilter === 'image'
+          ? TaskType.IMAGE
+          : typeFilter === 'audio'
+          ? TaskType.AUDIO
+          : typeFilter === 'text'
+          ? TaskType.CHAT
+          : TaskType.VIDEO)
       );
     }
 
@@ -144,7 +196,14 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
     if (searchText.trim()) {
       const searchLower = searchText.toLowerCase().trim();
       tasksToFilter = tasksToFilter.filter(task =>
-        task.params.prompt.toLowerCase().includes(searchLower)
+        task.params.prompt.toLowerCase().includes(searchLower) ||
+        String(task.result?.title || '').toLowerCase().includes(searchLower) ||
+        String(task.result?.lyricsTitle || '').toLowerCase().includes(searchLower) ||
+        String(task.result?.lyricsText || '').toLowerCase().includes(searchLower) ||
+        String(task.result?.chatResponse || '').toLowerCase().includes(searchLower) ||
+        (task.result?.lyricsTags || []).some((tag) =>
+          String(tag).toLowerCase().includes(searchLower)
+        )
       );
     }
 
@@ -280,6 +339,8 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
       all: tasks.length,
       image: tasks.filter(t => t.type === TaskType.IMAGE).length,
       video: tasks.filter(t => t.type === TaskType.VIDEO).length,
+      audio: tasks.filter(t => t.type === TaskType.AUDIO).length,
+      text: tasks.filter(t => t.type === TaskType.CHAT).length,
       character: characters.length,
     };
   }, [tasks, characters]);
@@ -342,32 +403,26 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
 
   const handleDownload = async (taskId: string) => {
     const task = tasks.find(t => t.id === taskId);
-    if (!task?.result?.url && !task?.result?.urls?.length) return;
+    if (task && isLyricsTask(task)) {
+      MessagePlugin.info('歌词任务支持复制或插入画布');
+      return;
+    }
+    if (!task) return;
 
-    const urls = task.result.urls?.length ? task.result.urls : [task.result.url];
+    const downloadItems = buildTaskDownloadItems(task);
+    if (downloadItems.length === 0) return;
 
     try {
-      for (let i = 0; i < urls.length; i++) {
-        const url = urls[i];
-        const filename = `${sanitizeFilename(task.params.prompt) || task.type}${urls.length > 1 ? `-${i + 1}` : ''}.${task.result.format}`;
-        // 1. 优先从本地 IndexedDB 缓存获取
-        const cachedBlob = await unifiedCacheService.getCachedBlob(url);
-        if (cachedBlob) {
-          downloadFromBlob(cachedBlob, filename);
-          continue;
-        }
-        // 2. 缓存不存在，从 URL 下载（带重试，SW 会自动去重）
-        const result = await downloadMediaFile(
-          url,
-          task.params.prompt,
-          task.result.format,
-          task.type
-        );
-        if (result && 'opened' in result) {
-          // 浏览器已打开标签页
-        }
-      }
-      MessagePlugin.success(urls.length > 1 ? '多图已开始下载' : '下载成功');
+      await smartDownload(downloadItems);
+      MessagePlugin.success(
+        task.type === TaskType.AUDIO
+          ? downloadItems.length > 1
+            ? '多条音频已开始下载'
+            : '音频下载成功'
+          : downloadItems.length > 1
+          ? '多图已开始下载'
+          : '下载成功'
+      );
       onTaskAction?.('download', taskId);
     } catch (error) {
       console.error('Download failed:', error);
@@ -375,26 +430,165 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
     }
   };
 
-  const handleInsert = async (taskId: string) => {
+  const handleCopy = async (taskId: string) => {
     const task = tasks.find(t => t.id === taskId);
-    if ((!task?.result?.url && !task?.result?.urls?.length) || !board) {
-      console.warn('Cannot insert: task result or board not available');
-      MessagePlugin.warning('无法插入：白板未就绪');
+    if (!task || !isLyricsTask(task)) {
+      MessagePlugin.warning('暂无可复制的歌词');
+      return;
+    }
+
+    const text = formatLyricsForCanvas(task);
+    if (!text.trim()) {
+      MessagePlugin.warning('暂无可复制的歌词');
+      return;
+    }
+
+    if (!navigator.clipboard?.writeText) {
+      MessagePlugin.warning('当前环境不支持复制');
       return;
     }
 
     try {
+      await navigator.clipboard.writeText(text);
+      MessagePlugin.success('歌词已复制');
+      onTaskAction?.('copy', taskId);
+    } catch (error) {
+      console.error('Failed to copy lyrics:', error);
+      MessagePlugin.error('复制失败，请稍后重试');
+    }
+  };
+
+  const handleInsert = async (taskId: string) => {
+    const task = tasks.find(t => t.id === taskId);
+    if (!task || !board) {
+      console.warn('Cannot insert: task result or board not available');
+      MessagePlugin.warning('无法插入：白板未就绪');
+      return;
+    }
+    if (!task.result?.url && !task.result?.urls?.length && !isLyricsTask(task)) {
+      const chatResponse =
+        task.type === TaskType.CHAT ? task.result?.chatResponse : undefined;
+      if (chatResponse?.trim()) {
+        const promptLabel = (task.params.prompt || '').slice(0, 20) || undefined;
+        await executeCanvasInsertion({
+          items: [
+            {
+              type: 'text',
+              content: chatResponse,
+              label: promptLabel,
+            },
+          ],
+        });
+        MessagePlugin.success('文本已插入到白板');
+        onTaskAction?.('insert', taskId);
+        return;
+      }
+      console.warn('Cannot insert: task result is empty');
+      MessagePlugin.warning('无法插入：任务结果为空');
+      return;
+    }
+
+    try {
+      const taskResult = task.result!;
       if (task.type === TaskType.IMAGE) {
-        const urls = task.result.urls?.length ? task.result.urls : [task.result.url];
+        const urls = taskResult.urls?.length ? taskResult.urls : [taskResult.url];
         for (const url of urls) {
-          await insertImageFromUrl(board, url);
+          await insertImageFromUrl(board, normalizeImageDataUrl(url));
         }
         MessagePlugin.success(urls.length > 1 ? '多图已插入到白板' : '图片已插入到白板');
       } else if (task.type === TaskType.VIDEO) {
         // 插入视频到白板
-        await insertVideoFromUrl(board, task.result.url);
+        await insertVideoFromUrl(board, taskResult.url);
         // console.log('Video inserted to board:', taskId);
         MessagePlugin.success('视频已插入到白板');
+      } else if (task.type === TaskType.AUDIO) {
+        if (isLyricsTask(task)) {
+          const lyricsLabel = getLyricsTitle(
+            taskResult,
+            task.params.title || task.params.prompt
+          ) || (task.params.prompt || '').slice(0, 20) || undefined;
+          await executeCanvasInsertion({
+            items: [
+              {
+                type: 'text',
+                content: formatLyricsForCanvas(task),
+                label: lyricsLabel,
+                metadata: {
+                  title: getLyricsTitle(
+                    taskResult,
+                    task.params.title || task.params.prompt
+                  ),
+                  tags: getLyricsTags(taskResult),
+                },
+              },
+            ],
+          });
+          MessagePlugin.success('歌词已插入到白板');
+          onTaskAction?.('insert', taskId);
+          return;
+        }
+
+        const urls = taskResult.urls?.length ? taskResult.urls : [taskResult.url];
+        const baseMetadata = {
+          title: taskResult.title || task.params.title || task.params.prompt,
+          duration: taskResult.duration,
+          previewImageUrl: taskResult.previewImageUrl,
+          tags:
+            typeof task.params.tags === 'string'
+              ? task.params.tags
+              : undefined,
+          mv:
+            typeof task.params.mv === 'string'
+              ? task.params.mv
+              : undefined,
+          prompt: task.params.prompt,
+          providerTaskId: taskResult.providerTaskId || task.remoteId,
+          clipId: taskResult.primaryClipId || taskResult.clipIds?.[0],
+          clipIds: taskResult.clipIds,
+        };
+
+        if (urls.length === 1) {
+          await insertAudioFromUrl(board, urls[0], baseMetadata);
+        } else {
+          await executeCanvasInsertion({
+            items: urls.map((audioUrl, index) => ({
+              type: 'audio',
+              content: audioUrl,
+              groupId: `task-audio-${task.id}`,
+              dimensions: {
+                width: AUDIO_CARD_DEFAULT_WIDTH,
+                height: AUDIO_CARD_DEFAULT_HEIGHT,
+              },
+              metadata: {
+                ...baseMetadata,
+                title:
+                  taskResult.clips?.[index]?.title ||
+                  `${baseMetadata.title || 'Audio'} ${index + 1}`,
+                clipId:
+                  taskResult.clips?.[index]?.clipId ||
+                  taskResult.clipIds?.[index] ||
+                  baseMetadata.clipId,
+              },
+            })),
+          });
+        }
+
+        MessagePlugin.success(
+          urls.length > 1 ? '多条音频卡片已插入到白板' : '音频卡片已插入到白板'
+        );
+      } else if (task.type === TaskType.CHAT) {
+        const chatResponse = taskResult.chatResponse || '';
+        const promptLabel = (task.params.prompt || '').slice(0, 20) || undefined;
+        await executeCanvasInsertion({
+          items: [
+            {
+              type: 'text',
+              content: chatResponse,
+              label: promptLabel,
+            },
+          ],
+        });
+        MessagePlugin.success('文本已插入到白板');
       }
       onTaskAction?.('insert', taskId);
     } catch (error) {
@@ -436,6 +630,9 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
         initialResultUrls: task.result?.urls,  // 多图/多视频结果
       };
       openDialog(DialogType.aiVideoGeneration, initialData);
+    } else if (task.type === TaskType.AUDIO) {
+      MessagePlugin.info('音频任务暂不支持从任务面板直接编辑');
+      return;
     }
 
     onTaskAction?.('edit', taskId);
@@ -454,7 +651,17 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
   const completedTasksWithResults = useMemo(() => {
     const seen = new Set<string>();
     return filteredTasks.filter(t => {
-      if (t.status !== TaskStatus.COMPLETED || !t.result?.url) return false;
+      if (
+        t.status !== TaskStatus.COMPLETED ||
+        (!t.result?.url && !t.result?.urls?.length) ||
+        (
+          t.type !== TaskType.IMAGE &&
+          t.type !== TaskType.VIDEO &&
+          !(t.type === TaskType.AUDIO && t.result?.resultKind !== 'lyrics')
+        )
+      ) {
+        return false;
+      }
       if (seen.has(t.id)) return false; // 跳过重复的任务 ID
       seen.add(t.id);
       return true;
@@ -462,42 +669,122 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
   }, [filteredTasks]);
 
   // 展开多图任务为多个 MediaItem，同时建立 taskId -> 首个 previewIndex 的映射
-  const { previewMediaItems, taskIdToPreviewIndex } = useMemo(() => {
+  const { previewMediaItems, taskIdToPreviewConfig } = useMemo(() => {
     const items: UnifiedMediaItem[] = [];
-    const indexMap = new Map<string, number>();
+    const configMap = new Map<
+      string,
+      { mode: 'single' | 'compare'; index: number | number[] }
+    >();
 
     for (const task of completedTasksWithResults) {
-      const urls = task.result!.urls?.length
-        ? task.result!.urls
-        : [task.result!.url];
-      const mediaType = task.type === TaskType.VIDEO ? 'video' as const : 'image' as const;
-      const title = task.params.prompt?.substring(0, 50);
+      const startIndex = items.length;
+      const title =
+        task.result?.title ||
+        task.params.title ||
+        task.params.prompt?.substring(0, 50) ||
+        '媒体预览';
 
-      // 记录该任务第一张图在列表中的索引
-      indexMap.set(task.id, items.length);
+      if (task.type === TaskType.AUDIO) {
+        const audioItems =
+          task.result?.clips
+            ?.filter((clip) => Boolean(clip.audioUrl))
+            .map((clip, i) => ({
+              id: clip.clipId || clip.id || `${task.id}-${i}`,
+              url: clip.audioUrl,
+              type: 'audio' as const,
+              title:
+                clip.title ||
+                (task.result?.clips && task.result.clips.length > 1
+                  ? `${title} (${i + 1}/${task.result.clips.length})`
+                  : title),
+              posterUrl:
+                clip.imageLargeUrl ||
+                clip.imageUrl ||
+                task.result?.previewImageUrl,
+              duration:
+                typeof clip.duration === 'number'
+                  ? clip.duration
+                  : task.result?.duration,
+              prompt: task.params.prompt,
+              tags:
+                typeof task.params.tags === 'string'
+                  ? task.params.tags
+                  : undefined,
+              artist: task.params.model || task.params.mv || 'Aitu',
+              album: 'Aitu Generated',
+            })) ?? [];
+        const fallbackUrls = task.result!.urls?.length
+          ? task.result!.urls
+          : task.result!.url
+            ? [task.result!.url]
+            : [];
+        const mediaItems =
+          audioItems.length > 0
+            ? audioItems
+            : fallbackUrls.map((url, i) => ({
+                id: fallbackUrls.length > 1 ? `${task.id}-${i}` : task.id,
+                url,
+                type: 'audio' as const,
+                title:
+                  fallbackUrls.length > 1
+                    ? `${title} (${i + 1}/${fallbackUrls.length})`
+                    : title,
+                posterUrl: task.result?.previewImageUrl,
+                duration: task.result?.duration,
+                prompt: task.params.prompt,
+                tags:
+                  typeof task.params.tags === 'string'
+                    ? task.params.tags
+                    : undefined,
+                artist: task.params.model || task.params.mv || 'Aitu',
+                album: 'Aitu Generated',
+              }));
+        items.push(...mediaItems);
+      } else {
+        const urls = task.result!.urls?.length
+          ? task.result!.urls
+          : [task.result!.url];
+        const mediaType = task.type === TaskType.VIDEO ? 'video' as const : 'image' as const;
 
-      for (let i = 0; i < urls.length; i++) {
-        items.push({
-          id: urls.length > 1 ? `${task.id}-${i}` : task.id,
-          url: urls[i],
-          type: mediaType,
-          title: urls.length > 1 ? `${title} (${i + 1}/${urls.length})` : title,
-        });
+        for (let i = 0; i < urls.length; i++) {
+          const normalizedUrl = mediaType === 'image'
+            ? normalizeImageDataUrl(urls[i])
+            : urls[i];
+          items.push({
+            id: urls.length > 1 ? `${task.id}-${i}` : task.id,
+            url: normalizedUrl,
+            type: mediaType,
+            title: urls.length > 1 ? `${title} (${i + 1}/${urls.length})` : title,
+          });
+        }
       }
+
+      const taskItemCount = items.length - startIndex;
+      configMap.set(task.id, {
+        mode: task.type === TaskType.AUDIO && taskItemCount > 1 ? 'compare' : 'single',
+        index:
+          task.type === TaskType.AUDIO && taskItemCount > 1
+            ? Array.from(
+                { length: Math.min(taskItemCount, 4) },
+                (_, offset) => startIndex + offset
+              )
+            : startIndex,
+      });
     }
 
-    return { previewMediaItems: items, taskIdToPreviewIndex: indexMap };
+    return { previewMediaItems: items, taskIdToPreviewConfig: configMap };
   }, [completedTasksWithResults]);
 
   // Preview navigation handlers - 使用 Map 精确查找索引
   const handlePreviewOpen = useCallback((taskId: string) => {
     setPreviewTaskId(taskId);
-    const index = taskIdToPreviewIndex.get(taskId);
-    if (index !== undefined) {
-      setPreviewInitialIndex(index);
+    const config = taskIdToPreviewConfig.get(taskId);
+    if (config !== undefined) {
+      setPreviewInitialMode(config.mode);
+      setPreviewInitialIndex(config.index);
       setPreviewVisible(true);
     }
-  }, [taskIdToPreviewIndex]);
+  }, [taskIdToPreviewConfig]);
 
   const handlePreviewClose = useCallback(() => {
     setPreviewTaskId(null);
@@ -546,24 +833,37 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
   // 计算各 Tab 的显示数量（已加载数据中的分类 + 未加载的估算）
   // 全部数量使用 totalCount（来自 SW），其他分类使用已加载数据的数量
   const displayTotalCount = totalCount > 0 ? totalCount : tasks.length;
+  const taskRetentionHint = '这里只显示最近 100 个任务，更早的任务会自动移到“历史”中继续保留。';
+  const allTabLabel = (
+    <Tooltip content={taskRetentionHint} theme="light">
+      <span>全部 ({displayTotalCount})</span>
+    </Tooltip>
+  );
+  const archivedTabLabel = archivedCount === null ? '历史' : `历史 (${archivedCount})`;
+  const allLoadedText =
+    totalCount >= 100
+      ? `已加载最近 ${totalCount} 个任务，较早任务已移至“历史”`
+      : `已加载全部 ${totalCount} 个任务`;
 
   // Filter section with tabs and filters
   const filterSection = (
     <div className="task-queue-panel__filters-container">
       <Tabs value={activeTab} onChange={(value) => setActiveTab(value as string)}>
-        <TabPanel value="all" label={`全部 (${displayTotalCount})`} />
+        <TabPanel value="all" label={allTabLabel} />
         <TabPanel value="active" label={`生成中 (${activeTasks.length})`} />
         <TabPanel value="failed" label={`失败 (${failedTasks.length})`} />
         <TabPanel value="completed" label={`已完成 (${completedTasks.length})`} />
+        <TabPanel value="archived" label={archivedTabLabel} />
       </Tabs>
 
+      {activeTab !== 'archived' && (
       <div className="task-queue-panel__filters">
         {/* Simplified Type Filters */}
         <div className="task-queue-panel__type-filters">
           <Tooltip content={`全部 (${typeCounts.all})`} theme="light">
             <Button
               size="small"
-              variant={typeFilter === 'all' ? 'base' : 'text'}
+              variant="text"
               shape="square"
               onClick={() => setTypeFilter('all')}
               className={typeFilter === 'all' ? 'task-queue-panel__filter-btn--active' : ''}
@@ -574,7 +874,7 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
           <Tooltip content={`图片 (${typeCounts.image})`} theme="light">
             <Button
               size="small"
-              variant={typeFilter === 'image' ? 'base' : 'text'}
+              variant="text"
               shape="square"
               onClick={() => setTypeFilter('image')}
               className={typeFilter === 'image' ? 'task-queue-panel__filter-btn--active' : ''}
@@ -585,7 +885,7 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
           <Tooltip content={`视频 (${typeCounts.video})`} theme="light">
             <Button
               size="small"
-              variant={typeFilter === 'video' ? 'base' : 'text'}
+              variant="text"
               shape="square"
               onClick={() => setTypeFilter('video')}
               className={typeFilter === 'video' ? 'task-queue-panel__filter-btn--active' : ''}
@@ -593,10 +893,32 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
               <VideoIcon size="16px" />
             </Button>
           </Tooltip>
+          <Tooltip content={`音频 (${typeCounts.audio})`} theme="light">
+            <Button
+              size="small"
+              variant="text"
+              shape="square"
+              onClick={() => setTypeFilter('audio')}
+              className={typeFilter === 'audio' ? 'task-queue-panel__filter-btn--active' : ''}
+            >
+              <Music4 size={16} strokeWidth={1.9} />
+            </Button>
+          </Tooltip>
+          <Tooltip content={`文本 (${typeCounts.text})`} theme="light">
+            <Button
+              size="small"
+              variant="text"
+              shape="square"
+              onClick={() => setTypeFilter('text')}
+              className={typeFilter === 'text' ? 'task-queue-panel__filter-btn--active' : ''}
+            >
+              文
+            </Button>
+          </Tooltip>
           <Tooltip content={`角色 (${typeCounts.character})`} theme="light">
             <Button
               size="small"
-              variant={typeFilter === 'character' ? 'base' : 'text'}
+              variant="text"
               shape="square"
               onClick={() => setTypeFilter('character')}
               className={typeFilter === 'character' ? 'task-queue-panel__filter-btn--active' : ''}
@@ -648,6 +970,7 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
           </div>
         </div>
       </div>
+      )}
 
       {/* Batch action bar - shown when in selection mode */}
       {selectionMode && !isCharacterView && (
@@ -745,6 +1068,13 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
             showHeader={false}
             title=""
           />
+        ) : activeTab === 'archived' ? (
+          /* Archived Task List View */
+          <ArchivedTaskList
+            onPreviewOpen={handlePreviewOpen}
+            onDownload={handleDownload}
+            className="task-queue-panel__list"
+          />
         ) : (
           /* Task List View with Virtual Scrolling */
           <VirtualTaskList
@@ -756,6 +1086,7 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
             onDelete={handleDelete}
             onDownload={handleDownload}
             onInsert={handleInsert}
+            onCopy={handleCopy}
             onEdit={handleEdit}
             onPreviewOpen={handlePreviewOpen}
             onExtractCharacter={handleExtractCharacter}
@@ -764,6 +1095,8 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
             onLoadMore={loadMore}
             totalCount={totalCount}
             loadedCount={loadedCount}
+            allLoadedText={allLoadedText}
+            allLoadedHint={totalCount >= 100 ? taskRetentionHint : undefined}
             className="task-queue-panel__list"
             emptyContent={
               isLoading ? (
@@ -821,6 +1154,7 @@ export const TaskQueuePanel: React.FC<TaskQueuePanelProps> = ({
       <UnifiedMediaViewer
         visible={previewVisible}
         items={previewMediaItems}
+        initialMode={previewInitialMode}
         initialIndex={previewInitialIndex}
         onClose={handlePreviewClose}
         showThumbnails={true}

@@ -8,6 +8,7 @@
  * 此模块仅用于降级场景。
  */
 
+import { normalizeImageDataUrl } from '@aitu/utils';
 import { APP_DB_NAME, APP_DB_STORES } from '../app-database';
 
 // 使用主线程专用数据库
@@ -15,7 +16,13 @@ const DB_NAME = APP_DB_NAME;
 const TASKS_STORE = APP_DB_STORES.TASKS;
 
 // 使用与 SW 端一致的字符串字面量类型
-type SWTaskType = 'image' | 'video' | 'character' | 'inspiration_board' | 'chat';
+type SWTaskType =
+  | 'image'
+  | 'video'
+  | 'audio'
+  | 'character'
+  | 'inspiration_board'
+  | 'chat';
 type SWTaskStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
 
 /**
@@ -40,10 +47,33 @@ export interface SWTask {
     thumbnailUrls?: string[];
     format: string;
     size: number;
+    resultKind?: 'image' | 'video' | 'audio' | 'lyrics' | 'character' | 'chat';
     width?: number;
     height?: number;
     duration?: number;
     thumbnailUrl?: string;
+    previewImageUrl?: string;
+    title?: string;
+    lyricsText?: string;
+    lyricsTitle?: string;
+    lyricsTags?: string[];
+    providerTaskId?: string;
+    primaryClipId?: string;
+    clipIds?: string[];
+    clips?: Array<{
+      id?: string;
+      clipId?: string;
+      title?: string;
+      status?: string;
+      audioUrl: string;
+      imageUrl?: string;
+      imageLargeUrl?: string;
+      duration?: number | null;
+      modelName?: string;
+      majorModelVersion?: string;
+    }>;
+    chatResponse?: string;
+    toolCalls?: any[];
   };
   error?: {
     code: string;
@@ -57,6 +87,8 @@ export interface SWTask {
   insertedToCanvas?: boolean;
   /** 是否从远程同步（不应被恢复执行） */
   syncedFromRemote?: boolean;
+  /** 是否已归档（不参与活跃加载） */
+  archived?: boolean;
   /** 任务配置（可选，导入时可能没有） */
   config?: {
     apiKey: string;
@@ -207,8 +239,23 @@ class TaskStorageWriter {
   async completeTask(taskId: string, result: SWTask['result']): Promise<void> {
     const task = await this.getTask(taskId);
     if (task) {
+      const normalizedResult =
+        task.type === 'image' && result
+          ? {
+              ...result,
+              url: normalizeImageDataUrl(result.url),
+              urls: result.urls?.map((url) => normalizeImageDataUrl(url)),
+              thumbnailUrl: result.thumbnailUrl
+                ? normalizeImageDataUrl(result.thumbnailUrl)
+                : result.thumbnailUrl,
+              thumbnailUrls: result.thumbnailUrls?.map((url) =>
+                normalizeImageDataUrl(url)
+              ),
+            }
+          : result;
+
       task.status = 'completed';
-      task.result = result;
+      task.result = normalizedResult;
       task.completedAt = Date.now();
       task.updatedAt = Date.now();
       task.progress = 100;
@@ -321,6 +368,52 @@ class TaskStorageWriter {
       }
 
       transaction.onerror = () => reject(transaction.error);
+    });
+  }
+
+  /**
+   * 归档任务（标记 archived=true，不删除数据）
+   */
+  async archiveTask(taskId: string): Promise<void> {
+    const task = await this.getTask(taskId);
+    if (task) {
+      task.archived = true;
+      task.updatedAt = Date.now();
+      await this.saveTask(task);
+    }
+  }
+
+  /**
+   * 批量归档任务
+   */
+  async archiveTasks(taskIds: string[]): Promise<void> {
+    if (taskIds.length === 0) return;
+    const db = await this.getDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(TASKS_STORE, 'readwrite');
+      const store = tx.objectStore(TASKS_STORE);
+      const now = Date.now();
+      let processed = 0;
+      for (const id of taskIds) {
+        const getReq = store.get(id);
+        getReq.onsuccess = () => {
+          const task = getReq.result;
+          if (task) {
+            task.archived = true;
+            task.updatedAt = now;
+            store.put(task);
+          }
+          processed++;
+          if (processed === taskIds.length) {
+            // tx.oncomplete will resolve
+          }
+        };
+        getReq.onerror = () => {
+          processed++;
+        };
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
     });
   }
 

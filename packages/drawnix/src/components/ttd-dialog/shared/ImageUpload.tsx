@@ -374,13 +374,15 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
       </div>
 
       {/* Media Library Modal */}
-      <MediaLibraryModal
-        isOpen={showMediaLibrary}
-        onClose={() => setShowMediaLibrary(false)}
-        mode={SelectionMode.SELECT}
-        filterType={AssetType.IMAGE}
-        onSelect={handleMediaLibrarySelect}
-      />
+      {showMediaLibrary && (
+        <MediaLibraryModal
+          isOpen={showMediaLibrary}
+          onClose={() => setShowMediaLibrary(false)}
+          mode={SelectionMode.SELECT}
+          filterType={AssetType.IMAGE}
+          onSelect={handleMediaLibrarySelect}
+        />
+      )}
     </div>
   );
 };

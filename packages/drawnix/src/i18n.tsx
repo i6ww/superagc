@@ -187,6 +187,9 @@ export interface Translations {
 
   // Boolean operations
   'toolbar.boolean': string;
+  'toolbar.speak': string;
+  'toolbar.pauseSpeech': string;
+  'toolbar.resumeSpeech': string;
 }
 
 // Translation data
@@ -374,6 +377,9 @@ const translations: Record<Language, Translations> = {
 
     // Boolean operations
     'toolbar.boolean': '组合',
+    'toolbar.speak': '语音朗读',
+    'toolbar.pauseSpeech': '暂停朗读',
+    'toolbar.resumeSpeech': '继续朗读',
   },
   en: {
     // Toolbar items
@@ -558,6 +564,9 @@ const translations: Record<Language, Translations> = {
 
     // Boolean operations
     'toolbar.boolean': 'Boolean',
+    'toolbar.speak': 'Read Aloud',
+    'toolbar.pauseSpeech': 'Pause Reading',
+    'toolbar.resumeSpeech': 'Resume Reading',
   },
 };
 

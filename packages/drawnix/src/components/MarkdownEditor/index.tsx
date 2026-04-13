@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useCallback, memo, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useCallback, memo, useState, useContext } from 'react';
 import { editorViewCtx } from '@milkdown/kit/core';
 import { replaceAll } from '@milkdown/kit/utils';
 import { Crepe, CrepeFeature } from '@milkdown/crepe';
@@ -6,7 +6,11 @@ import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react';
 import '@milkdown/crepe/theme/common/style.css';
 import '@milkdown/crepe/theme/nord.css';
 import 'katex/dist/katex.min.css';
-import { Eye, Code2 } from 'lucide-react';
+import { Eye, Code2, ImagePlus } from 'lucide-react';
+import { AssetContext } from '../../contexts/asset-context-instance';
+import { AssetType, SelectionMode } from '../../types/asset.types';
+import { MediaLibraryModal } from '../media-library';
+import { assetEmbedPlugins } from './asset-embed-plugin';
 import './MarkdownEditor.css';
 
 /** 编辑器模式 */
@@ -29,11 +33,16 @@ export interface MarkdownEditorProps {
   showModeSwitch?: boolean;
   /** 初始编辑模式 */
   initialMode?: EditorMode;
+  /** 是否启用素材引用渲染 */
+  enableAssetEmbeds?: boolean;
+  /** 是否让内建图片插入入口支持素材库 */
+  enableAssetLibraryImagePicker?: boolean;
 }
 
 export interface MarkdownEditorRef {
   getMarkdown: () => string;
   setMarkdown: (markdown: string) => void;
+  insertMarkdown: (markdown: string) => void;
   focus: () => void;
   getMode: () => EditorMode;
   setMode: (mode: EditorMode) => void;
@@ -62,12 +71,13 @@ interface CrepeEditorCoreProps {
   placeholder?: string;
   readOnly?: boolean;
   editorRef: React.MutableRefObject<InternalEditorRef | null>;
+  enableAssetEmbeds?: boolean;
 }
 
 /**
  * 核心编辑器组件 - 使用 useEditor hook（必须在 MilkdownProvider 内部）
  */
-function CrepeEditorCore({ markdown, onChange, placeholder, readOnly, editorRef }: CrepeEditorCoreProps) {
+function CrepeEditorCore({ markdown, onChange, placeholder, readOnly, editorRef, enableAssetEmbeds }: CrepeEditorCoreProps) {
   const onChangeRef = useRef(onChange);
   useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
 
@@ -93,20 +103,20 @@ function CrepeEditorCore({ markdown, onChange, placeholder, readOnly, editorRef 
       },
       featureConfigs: {
         [CrepeFeature.Placeholder]: { text: placeholder || '开始编辑...' },
-        [CrepeFeature.Cursor]: {
-          color: '#3b82f6',
-          width: 4,
-        },
+        [CrepeFeature.Cursor]: { color: '#3b82f6', width: 4 },
         [CrepeFeature.ImageBlock]: {
           onUpload: handleImageUpload,
           inlineOnUpload: handleImageUpload,
           blockOnUpload: handleImageUpload,
         },
-        [CrepeFeature.Latex]: {
-          katexOptions: { strict: 'ignore' },
-        },
+        [CrepeFeature.Latex]: { katexOptions: { strict: 'ignore' } },
       },
     });
+
+    // 注册 asset-embed 插件（remark + schema + view）
+    if (enableAssetEmbeds) {
+      crepe.editor.use(assetEmbedPlugins);
+    }
 
     // 监听 markdown 变化
     crepe.on((listener) => {
@@ -134,7 +144,7 @@ function CrepeEditorCore({ markdown, onChange, placeholder, readOnly, editorRef 
     }
 
     editorRef.current = {
-      getMarkdown: () => { try { return crepe.getMarkdown?.() ?? ''; } catch { return ''; } },
+      getMarkdown: () => lastMarkdownRef.current,
       setMarkdown: (md: string) => {
         try { lastMarkdownRef.current = md; crepe.editor?.action(replaceAll(md)); } catch { /* 忽略 */ }
       },
@@ -162,8 +172,8 @@ function CrepeEditorCore({ markdown, onChange, placeholder, readOnly, editorRef 
     const crepe = crepeRef.current;
     if (!crepe) return;
     try {
-      const cur = crepe.getMarkdown?.();
-      if (cur !== undefined && markdown !== cur && markdown !== lastMarkdownRef.current) {
+      const cur = lastMarkdownRef.current;
+      if (markdown !== cur) {
         lastMarkdownRef.current = markdown;
         crepe.editor?.action(replaceAll(markdown));
       }
@@ -187,20 +197,40 @@ export const MarkdownEditor = memo(forwardRef<MarkdownEditorRef, MarkdownEditorP
       className = '',
       showModeSwitch = true,
       initialMode = 'wysiwyg',
+      enableAssetEmbeds = false,
+      enableAssetLibraryImagePicker = false,
     },
     ref
   ) {
+    const assetContext = useContext(AssetContext);
     const editorRef = useRef<InternalEditorRef | null>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const previewHostRef = useRef<HTMLDivElement>(null);
+    const activeImageInputRef = useRef<HTMLElement | null>(null);
     const [mode, setMode] = useState<EditorMode>(initialMode);
     const [sourceContent, setSourceContent] = useState(sourceMarkdown || markdown);
+    const [isImageAssetLibraryOpen, setIsImageAssetLibraryOpen] = useState(false);
+    const [showImageAssetLibraryOverlay, setShowImageAssetLibraryOverlay] = useState(false);
+    const sourceContentRef = useRef(sourceMarkdown || markdown);
+
+    const canUseAssetLibraryImagePicker = enableAssetLibraryImagePicker && Boolean(assetContext);
+
+    // 启用素材渲染时，确保资产已加载到 global store
+    useEffect(() => {
+      if (enableAssetEmbeds && assetContext?.loadAssets) {
+        void assetContext.loadAssets();
+      }
+    }, [enableAssetEmbeds, assetContext]);
+
+    useEffect(() => {
+      sourceContentRef.current = sourceContent;
+    }, [sourceContent]);
 
     const handleModeChange = useCallback((newMode: EditorMode) => {
       if (newMode === mode) return;
       if (newMode === 'source') {
         setSourceContent(sourceMarkdown || editorRef.current?.getMarkdown() || markdown);
       } else if (!sourceMarkdown) {
-        // 从源码模式切回 WYSIWYG，同步内容
         editorRef.current?.setMarkdown(sourceContent);
         onChange?.(sourceContent);
       }
@@ -213,13 +243,46 @@ export const MarkdownEditor = memo(forwardRef<MarkdownEditorRef, MarkdownEditorP
       onChange?.(v);
     }, [onChange]);
 
+    const insertMarkdown = useCallback((snippet: string) => {
+      if (!snippet) return;
+
+      const current = mode === 'source'
+        ? sourceContentRef.current
+        : (sourceMarkdown || editorRef.current?.getMarkdown() || sourceContentRef.current || markdown);
+
+      if (mode === 'source' && textareaRef.current) {
+        const textarea = textareaRef.current;
+        const start = textarea.selectionStart ?? current.length;
+        const end = textarea.selectionEnd ?? current.length;
+        const next = `${current.slice(0, start)}${snippet}${current.slice(end)}`;
+        setSourceContent(next);
+        onChange?.(next);
+        requestAnimationFrame(() => {
+          textarea.focus();
+          const caret = start + snippet.length;
+          textarea.setSelectionRange(caret, caret);
+        });
+        return;
+      }
+
+      const prefix = current && !current.endsWith('\n') ? '\n\n' : current ? '\n' : '';
+      const next = `${current}${prefix}${snippet}\n`;
+      setSourceContent(next);
+      editorRef.current?.setMarkdown(next);
+      onChange?.(next);
+    }, [markdown, mode, onChange, sourceMarkdown]);
+
     useImperativeHandle(ref, () => ({
-      getMarkdown: () => mode === 'source' ? sourceContent : (editorRef.current?.getMarkdown() || ''),
-      setMarkdown: (md: string) => { setSourceContent(md); editorRef.current?.setMarkdown(md); },
+      getMarkdown: () => mode === 'source' ? sourceContent : (editorRef.current?.getMarkdown() || sourceContent),
+      setMarkdown: (md: string) => {
+        setSourceContent(md);
+        editorRef.current?.setMarkdown(md);
+      },
+      insertMarkdown,
       focus: () => { mode === 'source' ? textareaRef.current?.focus() : editorRef.current?.focus(); },
       getMode: () => mode,
       setMode: handleModeChange,
-    }));
+    }), [handleModeChange, insertMarkdown, mode, sourceContent]);
 
     // 外部 markdown prop 变化时同步源码内容
     useEffect(() => {
@@ -227,12 +290,130 @@ export const MarkdownEditor = memo(forwardRef<MarkdownEditorRef, MarkdownEditorP
       if (src !== sourceContent) setSourceContent(src);
     }, [markdown, sourceMarkdown]);
 
+    const syncActiveImageHost = useCallback(() => {
+      const root = previewHostRef.current;
+      if (!root) {
+        activeImageInputRef.current = null;
+        setShowImageAssetLibraryOverlay(false);
+        return;
+      }
+
+      const activeElement = root.ownerDocument.activeElement;
+      const focusedHost = activeElement instanceof HTMLElement
+        ? activeElement.closest('.image-edit')
+        : null;
+      const nextHost = (focusedHost && root.contains(focusedHost))
+        ? focusedHost as HTMLElement
+        : root.querySelector<HTMLElement>('.image-edit');
+
+      activeImageInputRef.current = nextHost ?? null;
+      setShowImageAssetLibraryOverlay(Boolean(nextHost));
+    }, []);
+
+    const commitAssetToImageHost = useCallback((host: HTMLElement | null, assetId: string): boolean => {
+      if (!host) {
+        return false;
+      }
+
+      const container = host.querySelector<HTMLElement>('.link-input-area');
+      const target = container?.matches('input, textarea, [contenteditable="true"]')
+        ? container
+        : container?.querySelector<HTMLElement>('input, textarea, [contenteditable="true"]') ?? container;
+
+      if (!target) {
+        return false;
+      }
+
+      target.focus();
+
+      const nextValue = `asset://${assetId}`;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+        target.value = nextValue;
+      } else {
+        target.textContent = nextValue;
+      }
+
+      target.dispatchEvent(new Event('input', { bubbles: true }));
+
+      const confirmButton = host.querySelector<HTMLButtonElement>('.confirm');
+      if (confirmButton) {
+        confirmButton.click();
+        return true;
+      }
+
+      target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' }));
+      return true;
+    }, []);
+
+    useEffect(() => {
+      if (!canUseAssetLibraryImagePicker || readOnly || mode !== 'wysiwyg' || !previewHostRef.current) {
+        activeImageInputRef.current = null;
+        setShowImageAssetLibraryOverlay(false);
+        return;
+      }
+
+      const root = previewHostRef.current;
+      let frameId = 0;
+      const scheduleSync = () => {
+        cancelAnimationFrame(frameId);
+        frameId = requestAnimationFrame(syncActiveImageHost);
+      };
+
+      const handlePointerSync = (event: Event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) {
+          return;
+        }
+
+        const host = target.closest('.image-edit');
+        if (host && root.contains(host)) {
+          activeImageInputRef.current = host as HTMLElement;
+          setShowImageAssetLibraryOverlay(true);
+          return;
+        }
+
+        scheduleSync();
+      };
+
+      scheduleSync();
+
+      root.addEventListener('focusin', handlePointerSync);
+      root.addEventListener('click', handlePointerSync, true);
+      const observer = new MutationObserver(scheduleSync);
+      observer.observe(root, { childList: true, subtree: true });
+
+      return () => {
+        cancelAnimationFrame(frameId);
+        observer.disconnect();
+        root.removeEventListener('focusin', handlePointerSync);
+        root.removeEventListener('click', handlePointerSync, true);
+      };
+    }, [canUseAssetLibraryImagePicker, mode, readOnly, syncActiveImageHost]);
+
     return (
       <div
         className={`collimind-markdown-editor ${className}`}
         data-readonly={readOnly}
         data-mode={mode}
+        data-asset-embeds={enableAssetEmbeds}
       >
+        {canUseAssetLibraryImagePicker && showImageAssetLibraryOverlay && (
+          <button
+            type="button"
+            className="collimind-markdown-image-library-overlay"
+            style={{ right: showModeSwitch ? 68 : 8 }}
+            onClick={() => {
+              syncActiveImageHost();
+              if (activeImageInputRef.current) {
+                setIsImageAssetLibraryOpen(true);
+              }
+            }}
+          >
+            <ImagePlus className="collimind-icon-sm" />
+            <span>从素材库插图</span>
+          </button>
+        )}
+
         {showModeSwitch && (
           <div className="collimind-markdown-editor-mode-switch">
             <button
@@ -255,7 +436,10 @@ export const MarkdownEditor = memo(forwardRef<MarkdownEditorRef, MarkdownEditorP
         )}
 
         {/* WYSIWYG 编辑器 */}
-        <div style={{ display: mode === 'wysiwyg' ? 'contents' : 'none' }}>
+        <div
+          ref={previewHostRef}
+          style={{ display: mode === 'wysiwyg' ? 'contents' : 'none' }}
+        >
           <MilkdownProvider>
             <CrepeEditorCore
               markdown={markdown}
@@ -263,6 +447,7 @@ export const MarkdownEditor = memo(forwardRef<MarkdownEditorRef, MarkdownEditorP
               placeholder={placeholder}
               readOnly={readOnly}
               editorRef={editorRef}
+              enableAssetEmbeds={enableAssetEmbeds}
             />
           </MilkdownProvider>
         </div>
@@ -277,6 +462,28 @@ export const MarkdownEditor = memo(forwardRef<MarkdownEditorRef, MarkdownEditorP
             placeholder={placeholder}
             readOnly={readOnly || !!sourceMarkdown}
             spellCheck={false}
+          />
+        )}
+
+        {canUseAssetLibraryImagePicker && isImageAssetLibraryOpen && (
+          <MediaLibraryModal
+            isOpen={isImageAssetLibraryOpen}
+            onClose={() => {
+              setIsImageAssetLibraryOpen(false);
+              syncActiveImageHost();
+            }}
+            mode={SelectionMode.SELECT}
+            filterType={AssetType.IMAGE}
+            onSelect={(asset) => {
+              const host = activeImageInputRef.current ?? previewHostRef.current?.querySelector<HTMLElement>('.image-edit') ?? null;
+              if (!commitAssetToImageHost(host, asset.id)) {
+                setIsImageAssetLibraryOpen(false);
+                return;
+              }
+              setIsImageAssetLibraryOpen(false);
+              requestAnimationFrame(syncActiveImageHost);
+            }}
+            selectButtonText="插入素材库图片"
           />
         )}
       </div>

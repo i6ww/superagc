@@ -1634,7 +1634,7 @@ return (
 ### 重要规则
 - **UI 框架**: 使用 TDesign React，配置浅色主题
 - **Tooltips**: 始终使用 `theme='light'`
-- **品牌色一致性**: 覆盖第三方组件（如 TDesign Tag）的默认颜色以符合 AITU 品牌视觉
+- **品牌色一致性**: 覆盖第三方组件（如 TDesign Tag）的默认颜色以符合 Opentu 品牌视觉
   - **示例**: 处理中状态使用蓝紫色系 (`#5A4FCF`)
   - **CSS**: `.t-tag--theme-primary { background-color: rgba(90, 79, 207, 0.08); color: #5A4FCF; }`
 - **文件大小限制**: 单个文件不超过 500 行
@@ -2290,6 +2290,39 @@ interface LLMApiLog {
 **相关文件**：
 - `packages/drawnix/src/services/media-executor/llm-api-logger.ts` - 主线程版本
 - `apps/web/src/sw/task-queue/llm-api-logger.ts` - SW 版本
+
+### 模型参数偏好必须按模型作用域存储
+
+**场景**: 图片、视频、音频生成表单需要记忆不同模型的用户参数偏好。
+
+**核心原则**:
+- 优先使用 `selectionKey` 作为偏好作用域键，缺失时再回退 `modelId`
+- 不同供应商来源的同名模型不能共享参数
+- 回填优先级必须是：任务参数 / 外部显式初始化 > 模型偏好 > 模型默认值
+- 回填后必须重新做兼容性过滤，丢弃当前模型不支持的参数
+
+❌ **错误示例**:
+```typescript
+const key = `prefs:${model.id}`;
+localStorage.setItem(key, JSON.stringify(params));
+
+// provider-a::gemini-2.5-flash
+// provider-b::gemini-2.5-flash
+// 最终会读写同一个 key，导致参数串用
+```
+
+✅ **正确示例**:
+```typescript
+const scopeKey = model.selectionKey || model.id;
+scopedPreferences[scopeKey] = sanitizeSelectedParams(model.id, params);
+
+const restored =
+  explicitTaskParams ??
+  scopedPreferences[scopeKey] ??
+  getModelDefaultParams(model.id);
+```
+
+**原因**: 运行时模型发现后，同名模型可能来自不同供应商，参数能力并不完全相同。只按 `modelId` 记忆会让用户在切换供应商后看到错误回填，最终演变成隐蔽状态 bug。
 
 ### 中断任务延迟判定
 
@@ -6877,6 +6910,44 @@ import { UnifiedMediaViewer, type MediaItem } from '../shared/media-preview';
 
 ---
 
+#### 媒体封面/占位统一使用公共组件
+
+**场景**: 音频封面、音频缩略图、播放器封面等媒体入口需要处理无图、404 和加载失败。
+
+❌ **错误示例**:
+```tsx
+{previewImageUrl && !loadFailed ? (
+  <img src={previewImageUrl} onError={() => setLoadFailed(true)} />
+) : (
+  <div className="audio-fallback">
+    <Music4 />
+  </div>
+)}
+```
+
+✅ **正确示例**:
+```tsx
+<AudioCover
+  src={previewImageUrl}
+  fallbackSrc={posterUrl}
+  alt={title || 'Audio cover'}
+  imageClassName="player__cover-image"
+  fallbackClassName="player__cover-fallback"
+/>
+```
+
+**规则**:
+- 媒体封面加载失败兜底逻辑要收敛到公共组件，禁止在播放器、画布节点、预览器里重复维护一套 `onError + useState`
+- 默认封面视觉必须统一，后续改默认图时只改一处
+- 若存在 `thumbnailUrl -> 原图 URL` 的回退链路，应由公共组件统一支持
+- 业务组件只负责尺寸、布局、圆角样式，不负责重复实现失败状态机
+
+**原因**:
+- 音频相关展示入口分散，重复实现很容易出现“有的地方有占位，有的地方白屏/裂图”
+- 公共组件可以统一失败行为、减少重复代码，并降低后续视觉调整成本
+
+---
+
 #### 生成结果缩略图使用 contain 完整展示
 
 **场景**: 展示 AI 生成的图片/视频缩略图时（任务队列、生成历史、预览缩略图等）。
@@ -8933,4 +9004,3 @@ board.dblClick = (event: MouseEvent) => {
 - `board.pointerDown: (event: PointerEvent) => void`
 - `board.pointerMove: (event: PointerEvent) => void`
 - `board.pointerUp: (event: PointerEvent) => void`
-

@@ -10,13 +10,12 @@ import { PlaitTool, ToolDefinition } from '../../types/toolbox.types';
 import { ToolLoadState, ToolErrorType, ToolErrorEventDetail } from '../../types/tool-error.types';
 import { createRoot, Root } from 'react-dom/client';
 import React, { Suspense } from 'react';
-import { InternalToolComponents } from '../toolbox-drawer/InternalToolComponents';
 import { ToolProviderWrapper } from '../toolbox-drawer/ToolProviderWrapper';
 import { ToolTransforms } from '../../plugins/with-tool';
 import { toolWindowService } from '../../services/tool-window-service';
 import { BUILT_IN_TOOLS } from '../../constants/built-in-tools';
 import { processToolUrl, hasTemplateVariables } from '../../utils/url-template';
-import { geminiSettings } from '../../utils/settings-manager';
+import { toolRegistry } from '../../tools/registry';
 
 /**
  * 工具元素渲染生成器
@@ -286,7 +285,7 @@ export class ToolGenerator {
   private renderReactContent(element: PlaitTool, container?: HTMLElement): void {
     if (!element.component) return;
 
-    const Component = InternalToolComponents[element.component];
+    const Component = toolRegistry.resolveInternalComponent(element.component);
     if (!Component) {
       if (container) {
         container.innerHTML = `<div style="padding: 20px; color: #f5222d;">未找到组件: ${element.component}</div>`;
@@ -837,8 +836,9 @@ export class ToolGenerator {
    * 查找工具定义
    */
   private findToolDefinition(element: PlaitTool): ToolDefinition | undefined {
-    // 首先从内置工具中查找
-    const builtInTool = BUILT_IN_TOOLS.find(t => t.id === element.toolId);
+    const builtInTool =
+      toolRegistry.getManifestById(element.toolId)
+      || BUILT_IN_TOOLS.find((tool) => tool.id === element.toolId);
     if (builtInTool) {
       return builtInTool;
     }

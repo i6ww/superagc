@@ -38,6 +38,9 @@ export const AI_VIDEO_GENERATION_HISTORY_KEY = 'ai_video_generation_history';
 /** AI 图片生成模式记忆键（单图/批量） */
 export const AI_IMAGE_MODE_CACHE_KEY = 'ai-image-generation-mode';
 
+/** AI 输入栏模型选择记忆键（按类型保存最近一次手动选择） */
+export const AI_MODEL_SELECTION_CACHE_KEY = 'ai_model_selection_cache';
+
 // ====================================
 // 工具栏配置
 // ====================================
@@ -59,6 +62,7 @@ export const ALL_STORAGE_KEYS = [
   AI_IMAGE_GENERATION_HISTORY_KEY,
   AI_VIDEO_GENERATION_HISTORY_KEY,
   AI_IMAGE_MODE_CACHE_KEY,
+  AI_MODEL_SELECTION_CACHE_KEY,
   TOOLBAR_CONFIG_KEY,
 ] as const;
 

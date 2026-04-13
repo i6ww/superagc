@@ -46,6 +46,7 @@ import { MediaLibraryModal } from '../media-library/MediaLibraryModal';
 import { SelectionMode, Asset, AssetType } from '../../types/asset.types';
 import { insertImageFromUrl } from '../../data/image';
 import { insertVideoFromUrl } from '../../data/video';
+import { insertAudioFromUrl } from '../../data/audio';
 import { Popover, PopoverContent, PopoverTrigger } from '../popover/popover';
 import { FreehandShape } from '../../plugins/freehand/type';
 import { PenShape } from '../../plugins/pen/type';
@@ -264,6 +265,8 @@ export const CreationToolbar: React.FC<ToolbarSectionProps> = ({
         await insertImageFromUrl(board, asset.url);
       } else if (asset.type === AssetType.VIDEO) {
         await insertVideoFromUrl(board, asset.url);
+      } else if (asset.type === AssetType.AUDIO) {
+        await insertAudioFromUrl(board, asset.url, { title: asset.name });
       }
       MessagePlugin.success('素材已插入到画板');
     } catch (error) {
@@ -786,7 +789,7 @@ export const CreationToolbar: React.FC<ToolbarSectionProps> = ({
   );
 
   // 素材库弹窗
-  const mediaLibraryModal = (
+  const mediaLibraryModal = mediaLibraryOpen ? (
     <MediaLibraryModal
       isOpen={mediaLibraryOpen}
       onClose={handleCloseMediaLibrary}
@@ -794,7 +797,7 @@ export const CreationToolbar: React.FC<ToolbarSectionProps> = ({
       onSelect={handleInsertAsset}
       selectButtonText="插入"
     />
-  );
+  ) : null;
 
   if (embedded) {
     return (

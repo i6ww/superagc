@@ -20,7 +20,7 @@ import {
   Transforms,
   getViewportOrigination,
 } from '@plait/core';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useBoard } from '@plait-board/react-board';
 import { flip, offset, shift, useFloating } from '@floating-ui/react';
 import { Island } from '../../island';
@@ -59,8 +59,8 @@ import { PopupAlignmentButton } from './alignment-button';
 import { PopupDistributeButton } from './distribute-button';
 import { PopupBooleanButton } from './boolean-button';
 import { TextPropertyPanel } from './text-property-panel';
-import { AIImageIcon, AIVideoIcon, VideoFrameIcon, DuplicateIcon, TrashIcon, SplitImageIcon, DownloadIcon, MergeIcon, VideoMergeIcon } from '../../icons';
-import { Pencil, Presentation, Copy, Play } from 'lucide-react';
+import { AIImageIcon, AIVideoIcon, VideoFrameIcon, DuplicateIcon, TrashIcon, SplitImageIcon, DownloadIcon, MergeIcon, VideoMergeIcon, SaveFileIcon } from '../../icons';
+import { Pencil, Presentation, Copy, Play, Volume2, VolumeX } from 'lucide-react';
 import { useDrawnix, DialogType } from '../../../hooks/use-drawnix';
 import { useI18n } from '../../../i18n';
 import { ToolButton } from '../../tool-button';
@@ -74,7 +74,7 @@ import { insertVideoFrame } from '../../../utils/video-frame';
 import { isToolElement } from '../../../plugins/with-tool';
 import { isWorkZoneElement } from '../../../plugins/with-workzone';
 import { splitAndInsertImages } from '../../../utils/image-splitter';
-import { smartDownload, BatchDownloadItem } from '../../../utils/download-utils';
+import { smartDownload, BatchDownloadItem, buildDownloadFilename } from '../../../utils/download-utils';
 import { MessagePlugin } from 'tdesign-react';
 import { mergeVideos } from '../../../services/video-merge-webcodecs';
 import { ImageEditor } from '../../image-editor';
@@ -85,7 +85,30 @@ import { FrameSlideshow } from '../../project-drawer/FrameSlideshow';
 import { isCardElement } from '../../../types/card.types';
 import { duplicateFrame, focusFrame } from '../../../utils/frame-duplicate';
 import { isPlaitMind, findMindRootFromSelection } from '../../../services/ppt';
-import { openCardInKnowledgeBase } from '../../../utils/card-actions';
+import {
+  extractElementTextContent,
+  isPlainTextElement,
+  openCardInKnowledgeBase,
+  saveCardToKnowledgeBase,
+  sortElementsForContentMerge,
+  syncMergedCardKnowledgeBinding,
+} from '../../../utils/card-actions';
+import { isAudioNodeElement } from '../../../types/audio-node.types';
+import { getCanvasAudioPlaybackQueue } from '../../../data/audio';
+import { openMusicPlayerToolAndPlay } from '../../../services/tool-launch-service';
+import { useCanvasAudioPlayback } from '../../../hooks/useCanvasAudioPlayback';
+import {
+  AUDIO_PLAYLIST_CANVAS_AUDIO_ID,
+  AUDIO_PLAYLIST_CANVAS_AUDIO_LABEL,
+  AUDIO_PLAYLIST_CANVAS_READING_ID,
+  AUDIO_PLAYLIST_CANVAS_READING_LABEL,
+} from '../../../types/audio-playlist.types';
+import {
+  createCanvasReadingPlaybackSource,
+  createCanvasReadingPlaybackQueue,
+  getCanvasSpeechText,
+  type CanvasSpeechTextResult,
+} from './text-to-speech-utils';
 
 export const PopupToolbar = () => {
   const board = useBoard();
@@ -115,6 +138,11 @@ export const PopupToolbar = () => {
   // Frame 幻灯片播放状态
   const [showSlideshow, setShowSlideshow] = useState(false);
   const [slideshowFrameId, setSlideshowFrameId] = useState<string | undefined>();
+  const [speechTextResult, setSpeechTextResult] = useState<CanvasSpeechTextResult>({
+    text: '',
+    title: '',
+    source: null,
+  });
 
   // 保存 toolbar 和选中元素的位置信息，用于定位属性面板
   const [toolbarRect, setToolbarRect] = useState<{ top: number; left: number; width: number; height: number } | undefined>();
@@ -123,6 +151,56 @@ export const PopupToolbar = () => {
 
   // 初始化全局鼠标位置跟踪
   useGlobalMousePosition();
+  const playback = useCanvasAudioPlayback();
+  const activeReadingSourceId = playback.mediaType === 'reading'
+    ? playback.activeReadingSourceId
+    : undefined;
+  const isCurrentReadingSelection =
+    !!speechTextResult.sourceId
+    && !!activeReadingSourceId
+    && activeReadingSourceId.startsWith(speechTextResult.sourceId);
+  const speechSelectionKey = useMemo(
+    () => selectedElements.map((element) => element.id).sort().join('|'),
+    [selectedElements]
+  );
+  const speechActionLabel = isCurrentReadingSelection
+    ? playback.playing
+      ? language === 'zh'
+        ? '暂停朗读'
+        : 'Pause reading'
+      : language === 'zh'
+        ? '继续朗读'
+        : 'Resume reading'
+    : language === 'zh'
+      ? '语音朗读'
+      : 'Read aloud';
+
+  useEffect(() => {
+    if (selectedElements.length === 0 || movingOrDragging) {
+      setSpeechTextResult((prev) =>
+        prev.text || prev.source ? { text: '', title: '', source: null } : prev
+      );
+      return;
+    }
+
+    const updateSpeechText = () => {
+      const next = getCanvasSpeechText(board, selectedElements);
+      setSpeechTextResult((prev) =>
+        prev.text === next.text
+          && prev.source === next.source
+          && prev.title === next.title
+          && prev.sourceId === next.sourceId
+          ? prev
+          : next
+      );
+    };
+
+    updateSpeechText();
+    document.addEventListener('selectionchange', updateSpeechText);
+    return () => {
+      document.removeEventListener('selectionchange', updateSpeechText);
+    };
+  }, [board, speechSelectionKey, movingOrDragging]);
 
   // popup-toolbar 的显示逻辑
   const open =
@@ -168,7 +246,11 @@ export const PopupToolbar = () => {
     hasBoolean?: boolean; // 是否显示布尔组合按钮（多选时显示）
     hasMindmapToPPT?: boolean; // 是否显示思维导图转PPT按钮
     hasCardEdit?: boolean; // 是否显示 Card 编辑按钮（打开知识库）
+    hasCardSave?: boolean; // 是否显示 Card 保存到知识库按钮
+    hasContentMerge?: boolean; // 是否显示内容合并按钮
     hasFramePlay?: boolean; // 是否显示 Frame 幻灯片播放按钮
+    hasAudioPlayer?: boolean; // 是否显示在音乐播放器中播放按钮
+    hasTextToSpeech?: boolean; // 是否显示语音朗读按钮
   } = {
     fill: 'red',
   };
@@ -197,6 +279,9 @@ export const PopupToolbar = () => {
 
     // 检查是否选中了 Card 元素
     const hasCardSelected = selectedElements.some(element => isCardElement(element));
+    const hasTextOrCardOnlySelection =
+      selectedElements.length > 1 &&
+      selectedElements.every((element) => isCardElement(element) || isPlainTextElement(element));
 
     // 检查是否选中了包含图片的元素（单个或多个），但排除视频元素和 Card 元素
     const hasAIVideo =
@@ -241,19 +326,21 @@ export const PopupToolbar = () => {
     // 图片编辑按钮：选中单个非 SVG 图片时显示
     const hasImageEdit = isImageSelected;
 
-    // 下载按钮：选中图片或视频时显示
+    // 下载按钮：选中图片、视频或音频时显示
     const hasDownloadable =
       selectedElements.length > 0 &&
       !hasToolSelected &&
       selectedElements.some(element =>
         (PlaitDrawElement.isDrawElement(element) && PlaitDrawElement.isImage(element)) ||
-        isVideoElement(element)
+        isVideoElement(element) ||
+        isAudioNodeElement(element)
       ) &&
       !PlaitBoard.hasBeenTextEditing(board);
 
     // 合并按钮：选中多个元素，支持图片、文字、图形、线条、手绘等（排除视频和工具元素）
     const hasMergeable =
       selectedElements.length > 1 &&
+      !hasTextOrCardOnlySelection &&
       !hasVideoSelected &&
       !hasToolSelected &&
       selectedElements.every(element =>
@@ -356,6 +443,17 @@ export const PopupToolbar = () => {
     const hasCardEdit =
       selectedElements.length === 1 &&
       isCardElement(selectedElements[0]) &&
+      !!(selectedElements[0] as any).noteId &&
+      !PlaitBoard.hasBeenTextEditing(board);
+
+    const hasCardSave =
+      selectedElements.length === 1 &&
+      isCardElement(selectedElements[0]) &&
+      !(selectedElements[0] as any).noteId &&
+      !PlaitBoard.hasBeenTextEditing(board);
+
+    const hasContentMerge =
+      hasTextOrCardOnlySelection &&
       !PlaitBoard.hasBeenTextEditing(board);
 
     // Frame 播放按钮：选中单个 Frame 元素时显示
@@ -363,6 +461,16 @@ export const PopupToolbar = () => {
       selectedElements.length === 1 &&
       isFrameElement(selectedElements[0]) &&
       !PlaitBoard.hasBeenTextEditing(board);
+
+    const hasAudioPlayer =
+      selectedElements.length === 1 &&
+      isAudioNodeElement(selectedElements[0]) &&
+      !PlaitBoard.hasBeenTextEditing(board);
+
+    const hasTextToSpeech =
+      (typeof window !== 'undefined' && 'speechSynthesis' in window) &&
+      !PlaitBoard.hasBeenTextEditing(board) &&
+      speechTextResult.text.length > 0;
 
     state = {
       ...getElementState(board),
@@ -391,7 +499,11 @@ export const PopupToolbar = () => {
       hasBoolean,
       hasMindmapToPPT,
       hasCardEdit,
+      hasCardSave,
+      hasContentMerge,
       hasFramePlay,
+      hasAudioPlayer,
+      hasTextToSpeech,
     };
   }
 
@@ -408,6 +520,104 @@ export const PopupToolbar = () => {
       MessagePlugin.error(language === 'zh' ? '复制失败' : 'Copy failed', 2000);
     }
   };
+
+  const mergeContentSelection = async () => {
+    const sortedElements = sortElementsForContentMerge(board, selectedElements);
+    if (sortedElements.length < 2) return;
+
+    const hostElement = sortedElements[0];
+    const mergedContent = sortedElements
+      .map((element, index) => {
+        if (index === 0 && isCardElement(hostElement) && isCardElement(element)) {
+          return (element.body || '').trim();
+        }
+        return extractElementTextContent(element);
+      })
+      .filter(Boolean)
+      .join('\n\n')
+      .trim();
+
+    if (!mergedContent) {
+      MessagePlugin.warning(language === 'zh' ? '没有可合并的内容' : 'No content to merge');
+      return;
+    }
+
+    const linkedNoteIds = sortedElements.flatMap((element) =>
+      isCardElement(element) && element.noteId ? [element.noteId] : []
+    );
+
+    try {
+      const preservedNoteId = await syncMergedCardKnowledgeBinding(linkedNoteIds, mergedContent);
+
+      const mergedAwayIndexes = sortedElements
+        .slice(1)
+        .map((element) => board.children.findIndex((child) => child.id === element.id))
+        .filter((index) => index >= 0)
+        .sort((a, b) => b - a);
+
+      for (const index of mergedAwayIndexes) {
+        Transforms.removeNode(board, [index]);
+      }
+
+      let resultElement: PlaitElement | undefined;
+
+      if (isCardElement(hostElement)) {
+        const hostIndex = board.children.findIndex((child) => child.id === hostElement.id);
+        if (hostIndex < 0) {
+          throw new Error(language === 'zh' ? '合并目标不存在' : 'Merge target missing');
+        }
+
+        const updates: Partial<typeof hostElement> = { body: mergedContent };
+        if (preservedNoteId) {
+          updates.noteId = preservedNoteId;
+        }
+        Transforms.setNode(board, updates as any, [hostIndex]);
+        resultElement = board.children[hostIndex];
+      } else {
+        const hostRect = getRectangleByElements(board, [hostElement], false);
+        const hostIndex = board.children.findIndex((child) => child.id === hostElement.id);
+        if (hostIndex < 0) {
+          throw new Error(language === 'zh' ? '合并目标不存在' : 'Merge target missing');
+        }
+
+        const cardWidth = Math.max(hostRect.width, 320);
+        const cardHeight = Math.max(hostRect.height, 180);
+        const newCard = {
+          type: 'card',
+          id: `card-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`,
+          body: mergedContent,
+          fillColor: '#FA8C16',
+          points: [
+            [hostRect.x, hostRect.y],
+            [hostRect.x + cardWidth, hostRect.y + cardHeight],
+          ],
+          children: [],
+          ...(preservedNoteId ? { noteId: preservedNoteId } : {}),
+        };
+
+        Transforms.insertNode(board, newCard as any, [hostIndex]);
+        Transforms.removeNode(board, [hostIndex + 1]);
+        resultElement = board.children[hostIndex];
+      }
+
+      clearSelectedElement(board);
+      if (resultElement) {
+        addSelectedElement(board, resultElement);
+      }
+
+      MessagePlugin.success(
+        language === 'zh'
+          ? `已合并 ${sortedElements.length} 个元素`
+          : `Merged ${sortedElements.length} elements`
+      );
+    } catch (error: any) {
+      console.error('[PopupToolbar] Failed to merge content:', error);
+      MessagePlugin.error(
+        error?.message || (language === 'zh' ? '合并内容失败' : 'Failed to merge content')
+      );
+    }
+  };
+
   useEffect(() => {
     if (open) {
       const hasSelected = selectedElements.length > 0;
@@ -651,6 +861,49 @@ export const PopupToolbar = () => {
                 title={language === 'zh' ? '提示词' : 'Prompts'}
               />
             )}
+            {state.hasTextToSpeech && (
+              <ToolButton
+                className="text-to-speech"
+                key="text-to-speech"
+                type="icon"
+                icon={
+                  isCurrentReadingSelection && playback.playing ? (
+                    <VolumeX size={15} />
+                  ) : (
+                    <Volume2 size={15} />
+                  )
+                }
+                visible={true}
+                selected={isCurrentReadingSelection && playback.playing}
+                title={speechActionLabel}
+                aria-label={speechActionLabel}
+                data-track="toolbar_click_text_to_speech"
+                onPointerUp={() => {
+                  if (!speechTextResult.text) return;
+                  const readingSource = createCanvasReadingPlaybackSource(speechTextResult);
+                  if (!readingSource) return;
+                  const readingQueue = createCanvasReadingPlaybackQueue(board, speechTextResult);
+
+                  if (isCurrentReadingSelection) {
+                    if (playback.playing) {
+                      playback.pausePlayback();
+                    } else {
+                      void playback.resumePlayback();
+                    }
+                    return;
+                  }
+
+                  void openMusicPlayerToolAndPlay({
+                    source: readingSource,
+                    queue: readingQueue.length > 0 ? readingQueue : [readingSource],
+                    queueTab: {
+                      queueId: AUDIO_PLAYLIST_CANVAS_READING_ID,
+                      queueName: AUDIO_PLAYLIST_CANVAS_READING_LABEL,
+                    },
+                  });
+                }}
+              />
+            )}
             {/* 属性设置按钮 - 仅在选中包含文本的元素时显示 */}
             {state.hasText && (
               <ToolButton
@@ -752,8 +1005,28 @@ export const PopupToolbar = () => {
                 }}
               />
             )}
+            {state.hasCardSave && (
+              <ToolButton
+                className="card-save"
+                key="card-save"
+                type="icon"
+                icon={<SaveFileIcon size={15} />}
+                visible={true}
+                title={language === 'zh' ? '保存到知识库' : 'Save to Knowledge Base'}
+                aria-label={language === 'zh' ? '保存到知识库' : 'Save to Knowledge Base'}
+                data-track="toolbar_click_card_save"
+                onPointerUp={async () => {
+                  const cardElement = selectedElements[0] as any;
+                  if (!cardElement) return;
+                  const noteId = await saveCardToKnowledgeBase(board, cardElement, language as 'zh' | 'en');
+                  if (noteId) {
+                    MessagePlugin.success(language === 'zh' ? '已保存到知识库' : 'Saved to knowledge base');
+                  }
+                }}
+              />
+            )}
             {/* Card 复制按钮 - 选中 Card 时显示，点击复制卡片文本内容 */}
-            {state.hasCardEdit && (
+            {(state.hasCardEdit || state.hasCardSave) && (
               <ToolButton
                 className="card-copy"
                 key="card-copy"
@@ -768,6 +1041,21 @@ export const PopupToolbar = () => {
                 }}
                 onPointerUp={async () => {
                   await copyCardText(selectedElements[0] as any, 'card-copy');
+                }}
+              />
+            )}
+            {state.hasContentMerge && (
+              <ToolButton
+                className="content-merge"
+                key="content-merge"
+                type="icon"
+                icon={<MergeIcon />}
+                visible={true}
+                title={language === 'zh' ? '合并内容' : 'Merge Content'}
+                aria-label={language === 'zh' ? '合并内容' : 'Merge Content'}
+                data-track="toolbar_click_content_merge"
+                onPointerUp={() => {
+                  void mergeContentSelection();
                 }}
               />
             )}
@@ -904,6 +1192,20 @@ export const PopupToolbar = () => {
                       downloadItems.push({ url: element.url, type: 'image' });
                     } else if (isVideoElement(element) && (element as any).url) {
                       downloadItems.push({ url: (element as any).url, type: 'video' });
+                    } else if (isAudioNodeElement(element) && element.audioUrl) {
+                      downloadItems.push({
+                        url: element.audioUrl,
+                        type: 'audio',
+                        filename: buildDownloadFilename(element.title, 'audio', 'mp3'),
+                        audioMetadata: {
+                          title: element.title,
+                          prompt: element.prompt,
+                          tags: element.tags,
+                          coverUrl: element.previewImageUrl,
+                          artist: element.modelVersion || 'Aitu',
+                          album: 'Aitu Generated',
+                        },
+                      });
                     }
                   }
 
@@ -1296,6 +1598,42 @@ export const PopupToolbar = () => {
                 }}
               />
             )}
+            {state.hasAudioPlayer && (
+              <ToolButton
+                className="audio-player-play"
+                key="audio-player-play"
+                type="icon"
+                icon={<Play size={15} />}
+                visible={true}
+                title={language === 'zh' ? '在音乐播放器中播放' : 'Play in Music Player'}
+                aria-label={language === 'zh' ? '在音乐播放器中播放' : 'Play in Music Player'}
+                data-track="toolbar_click_audio_player_play"
+                onPointerUp={() => {
+                  const audioElement = selectedElements.find(el => isAudioNodeElement(el));
+                  if (!audioElement || !isAudioNodeElement(audioElement)) {
+                    return;
+                  }
+
+                  void openMusicPlayerToolAndPlay({
+                    source: {
+                      elementId: audioElement.id,
+                      audioUrl: audioElement.audioUrl,
+                      title: audioElement.title,
+                      duration: audioElement.duration,
+                      previewImageUrl: audioElement.previewImageUrl,
+                      providerTaskId: audioElement.providerTaskId,
+                      clipId: audioElement.clipId,
+                      clipIds: audioElement.clipIds,
+                    },
+                    queue: getCanvasAudioPlaybackQueue(board.children),
+                    queueTab: {
+                      queueId: AUDIO_PLAYLIST_CANVAS_AUDIO_ID,
+                      queueName: AUDIO_PLAYLIST_CANVAS_AUDIO_LABEL,
+                    },
+                  });
+                }}
+              />
+            )}
             <ToolButton
               className="duplicate"
               key={8}
@@ -1306,17 +1644,6 @@ export const PopupToolbar = () => {
               aria-label={t('general.duplicate')}
               data-track="toolbar_click_duplicate"
               onPointerUp={() => {
-                const isCard = selectedElements.length === 1 && isCardElement(selectedElements[0]);
-                console.log('[PopupToolbar] Duplicate clicked', { 
-                  selectedCount: selectedElements.length, 
-                  firstType: selectedElements[0]?.type,
-                  isCard 
-                });
-
-                if (isCard) {
-                  void copyCardText(selectedElements[0] as any, 'duplicate');
-                  return;
-                }
                 // 检查是否只选中了 Frame
                 const isOnlyFrameSelected =
                   selectedElements.length === 1 &&
@@ -1331,7 +1658,7 @@ export const PopupToolbar = () => {
                     focusFrame(board, clonedFrame);
                   }
                 } else {
-                  // 使用默认的复制逻辑
+                  // Card 也走标准 fragment 克隆逻辑，确保生成新元素
                   duplicateElements(board);
                 }
               }}

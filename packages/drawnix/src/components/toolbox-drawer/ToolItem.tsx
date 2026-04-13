@@ -9,7 +9,7 @@ import { Button, Tooltip } from 'tdesign-react';
 import { JumpIcon, DeleteIcon } from 'tdesign-icons-react';
 import { InsertToCanvasIcon } from '../icons';
 import { ToolDefinition } from '../../types/toolbox.types';
-import { BUILT_IN_TOOLS } from '../../constants/built-in-tools';
+import { toolRegistry } from '../../tools/registry';
 
 export interface ToolItemProps {
   /** 工具定义 */
@@ -44,7 +44,7 @@ export const ToolItem: React.FC<ToolItemProps> = ({
   onDelete
 }) => {
   // 判断是否为内置工具（内置工具不能编辑/删除）
-  const isBuiltInTool = BUILT_IN_TOOLS.some(t => t.id === tool.id);
+  const isBuiltInTool = toolRegistry.isBuiltInTool(tool.id);
   const isCustomTool = !isBuiltInTool;
 
   /**
@@ -68,11 +68,21 @@ export const ToolItem: React.FC<ToolItemProps> = ({
     onOpenWindow?.(tool);
   }, [tool, onOpenWindow]);
 
+  /**
+   * 点击卡片整体，默认以弹窗方式打开
+   */
+  const handleCardClick = useCallback((e: React.MouseEvent) => {
+    // 如果点击的是操作按钮区域，不触发卡片点击
+    if ((e.target as HTMLElement).closest('.tool-item__actions')) return;
+    onOpenWindow?.(tool);
+  }, [tool, onOpenWindow]);
+
   return (
     <div
       className="tool-item"
       data-track="toolbox_click_tool"
       data-tool-id={tool.id}
+      onClick={handleCardClick}
     >
       <div className="tool-item__icon">{renderIcon(tool.icon)}</div>
       <div className="tool-item__content">

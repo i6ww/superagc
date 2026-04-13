@@ -10,7 +10,7 @@
 /**
  * 模型类型
  */
-export type ModelType = 'image' | 'video' | 'text';
+export type ModelType = 'image' | 'video' | 'text' | 'audio';
 
 /**
  * 模型厂商
@@ -19,14 +19,26 @@ export enum ModelVendor {
   GEMINI = 'GEMINI',
   FLUX = 'FLUX',
   MIDJOURNEY = 'MIDJOURNEY',
+  SUNO = 'SUNO',
   GPT = 'GPT',
+  GROK = 'GROK',
+  QWEN = 'QWEN',
+  GLM = 'GLM',
+  MINIMAX = 'MINIMAX',
+  MISTRAL = 'MISTRAL',
+  LLAMA = 'LLAMA',
   VEO = 'VEO',
   SORA = 'SORA',
+  RUNWAY = 'RUNWAY',
+  PIKA = 'PIKA',
   KLING = 'KLING',
+  HUNYUAN = 'HUNYUAN',
+  STEPFUN = 'STEPFUN',
   DEEPSEEK = 'DEEPSEEK',
   ANTHROPIC = 'ANTHROPIC',
   GOOGLE = 'GOOGLE',
   DOUBAO = 'DOUBAO',
+  OTHER = 'OTHER',
 }
 
 /**
@@ -36,14 +48,26 @@ export const VENDOR_NAMES: Record<ModelVendor, string> = {
   [ModelVendor.GEMINI]: 'Gemini',
   [ModelVendor.FLUX]: 'Flux',
   [ModelVendor.MIDJOURNEY]: 'Midjourney',
+  [ModelVendor.SUNO]: 'Suno',
   [ModelVendor.GPT]: 'GPT',
+  [ModelVendor.GROK]: 'Grok',
+  [ModelVendor.QWEN]: 'Qwen',
+  [ModelVendor.GLM]: 'GLM',
+  [ModelVendor.MINIMAX]: 'MiniMax',
+  [ModelVendor.MISTRAL]: 'Mistral',
+  [ModelVendor.LLAMA]: 'Llama',
   [ModelVendor.VEO]: 'Veo',
   [ModelVendor.SORA]: 'Sora',
+  [ModelVendor.RUNWAY]: 'Runway',
+  [ModelVendor.PIKA]: 'Pika',
   [ModelVendor.KLING]: 'Kling',
+  [ModelVendor.HUNYUAN]: 'Hunyuan',
+  [ModelVendor.STEPFUN]: 'StepFun',
   [ModelVendor.DEEPSEEK]: 'DeepSeek',
   [ModelVendor.ANTHROPIC]: 'Anthropic',
   [ModelVendor.GOOGLE]: 'Google',
   [ModelVendor.DOUBAO]: '即梦',
+  [ModelVendor.OTHER]: '其它',
 };
 
 /**
@@ -69,6 +93,14 @@ export interface ParamConfig {
   options?: Array<{ value: string; label: string }>;
   /** 默认值 */
   defaultValue?: string;
+  /** 数值最小值（number 类型时使用） */
+  min?: number;
+  /** 数值最大值（number 类型时使用） */
+  max?: number;
+  /** 数值步进（number 类型时使用） */
+  step?: number;
+  /** 是否要求整数（number 类型时使用） */
+  integer?: boolean;
   /** 兼容的模型 ID 列表（空数组表示所有模型都兼容） */
   compatibleModels: string[];
   /** 兼容的模型标签列表（任一命中则视为兼容，用于减少硬编码模型 ID） */
@@ -76,6 +108,8 @@ export interface ParamConfig {
   /** 适用的模型类型 */
   modelType: ModelType;
 }
+
+export const SORA_MODE_PARAM_ID = 'sora_mode';
 
 /**
  * 图片模型默认参数
@@ -129,6 +163,98 @@ export interface ModelConfig {
   videoDefaults?: VideoModelDefaults;
   /** 模型标签（用于参数兼容匹配的非硬编码方式） */
   tags?: string[];
+  /** 内置模型的人工推荐分，用于展示排序 */
+  recommendedScore?: number;
+  /** 运行时来源供应商 ID（仅动态模型选择场景使用） */
+  sourceProfileId?: string | null;
+  /** 运行时来源供应商名称（仅动态模型选择场景使用） */
+  sourceProfileName?: string | null;
+  /** 选择器中用于区分同名模型来源的唯一键 */
+  selectionKey?: string;
+}
+
+const BUILT_IN_MODEL_RECOMMENDATION_SCORES: Readonly<Record<string, number>> = {
+  'claude-opus-4-6': 98,
+  'gpt-5.4': 97,
+  'gpt-5-pro': 96,
+  'grok-4': 95,
+  'deepseek-v3.2': 94,
+  'deepseek-v3': 93,
+  'grok-4.2': 92,
+  'doubao-seed-1-6-thinking-250715': 91,
+  'gpt-5.2': 90,
+  'gpt-5.1': 89,
+  'gpt-5-chat-latest': 88,
+  'gemini-2.5-pro-all': 87,
+  'claude-sonnet-4-5-20250929-thinking': 86,
+  'gemini-3.1-pro-preview-thinking': 85,
+  'claude-opus-4-5-20251101': 84,
+  'gpt-5.4-mini': 83,
+  'gemini-3.1-pro-preview': 82,
+  'gemini-3-pro-preview-thinking': 81,
+  'deepseek-v3.2-thinking': 80,
+  'gemini-3-pro-preview': 79,
+  'claude-sonnet-4-5-20250929': 78,
+  'deepseek-r1': 77,
+  'claude-sonnet-4-6': 76,
+
+  'gemini-3-pro-image-preview-async': 98,
+  'gemini-3-pro-image-preview-2k-async': 97,
+  'gemini-2.5-flash-image-vip': 96,
+  'gemini-2.5-flash-image': 95,
+  'doubao-seedream-4-0-250828': 94,
+  'gemini-3.1-flash-image-preview': 93,
+  'gemini-3-pro-image-preview': 92,
+  'gpt-image-1.5': 91,
+  'gemini-3-pro-image-preview-vip': 90,
+  'gemini-3-pro-image-preview-2k-vip': 89,
+  'gpt-4o-image': 88,
+  'gpt-image-1': 87,
+  'qwen-image-2.0': 86,
+  'gemini-3-pro-image-preview-2k': 85,
+  'gemini-3-pro-image-preview-4k-vip': 84,
+  'gemini-3.1-flash-image-preview-4k': 83,
+  'gemini-3.1-flash-image-preview-2k': 82,
+  'gemini-3-pro-image-preview-4k-async': 45,
+  'doubao-seedream-4-5-251128': 44,
+  'seedream-v4': 43,
+  'kling_image': 42,
+  'gemini-3-pro-image-preview-4k': 41,
+
+  'kling_video': 98,
+  'veo3.1': 97,
+  'veo3-fast-frames': 96,
+  'veo3-pro': 95,
+  'veo3': 84,
+  'veo3-fast': 83,
+  'veo3.1-4k': 82,
+  'sora-2': 60,
+  'sora-2-pro': 59,
+  'sora-2-4s': 58,
+  'sora-2-8s': 57,
+  'sora-2-12s': 56,
+  'sora-2-15s': 55,
+  'kling-video-o1': 54,
+  'kling-video-o1-edit': 53,
+  'veo3-pro-frames': 52,
+  'veo3-frames': 51,
+  'veo3.1-pro': 50,
+  'veo3.1-pro-4k': 49,
+  'veo3.1-components': 48,
+  'veo3.1-components-4k': 47,
+};
+
+function applyBuiltInRecommendedScores(models: ModelConfig[]): ModelConfig[] {
+  return models.map((model) => {
+    const recommendedScore = BUILT_IN_MODEL_RECOMMENDATION_SCORES[model.id];
+    if (recommendedScore === undefined) {
+      return model;
+    }
+    return {
+      ...model,
+      recommendedScore,
+    };
+  });
 }
 
 // ============================================
@@ -142,6 +268,7 @@ export const MODEL_TYPE_COLORS = {
   image: '#E53935', // 红色
   video: '#FF9800', // 橙色
   text: '#4CAF50', // 绿色
+  audio: '#1E88E5', // 蓝色
 } as const;
 
 // ============================================
@@ -240,6 +367,30 @@ export const IMAGE_MODEL_MORE_OPTIONS: ModelConfig[] = [
     tags: ['new'],
   },
   {
+    id: 'gemini-3.1-flash-image-preview-2k',
+    label: 'gemini-3.1-flash-image-preview-2k (nano-banana-2-2k)',
+    shortLabel: 'nano-banana-2-2k',
+    shortCode: 'nb22k',
+    description: 'Gemini 3.1 Flash 图片模型（2K）',
+    type: 'image',
+    vendor: ModelVendor.GEMINI,
+    supportsTools: true,
+    imageDefaults: IMAGE_2K_DEFAULT_PARAMS,
+    tags: ['new'],
+  },
+  {
+    id: 'gemini-3.1-flash-image-preview-4k',
+    label: 'gemini-3.1-flash-image-preview-4k (nano-banana-2-4k)',
+    shortLabel: 'nano-banana-2-4k',
+    shortCode: 'nb24k',
+    description: 'Gemini 3.1 Flash 图片模型（4K）',
+    type: 'image',
+    vendor: ModelVendor.GEMINI,
+    supportsTools: true,
+    imageDefaults: IMAGE_4K_DEFAULT_PARAMS,
+    tags: ['new'],
+  },
+  {
     id: 'mj-imagine',
     label: 'midjourney imagine',
     shortLabel: 'midjourney',
@@ -288,28 +439,6 @@ export const IMAGE_MODEL_MORE_OPTIONS: ModelConfig[] = [
     shortLabel: 'flux-2-flex',
     shortCode: 'f2f',
     description: 'Flux 2 Flex 灵活图片生成',
-    type: 'image',
-    vendor: ModelVendor.FLUX,
-    supportsTools: false,
-    imageDefaults: IMAGE_DEFAULT_PARAMS,
-  },
-  {
-    id: 'flux-kontext-pro',
-    label: 'Flux Kontext Pro',
-    shortLabel: 'kontext-pro',
-    shortCode: 'fkp',
-    description: 'Flux Kontext Pro 多参考图编辑',
-    type: 'image',
-    vendor: ModelVendor.FLUX,
-    supportsTools: false,
-    imageDefaults: IMAGE_DEFAULT_PARAMS,
-  },
-  {
-    id: 'flux-kontext-max',
-    label: 'Flux Kontext Max',
-    shortLabel: 'kontext-max',
-    shortCode: 'fkm',
-    description: 'Flux Kontext Max 多参考图编辑（最高质量）',
     type: 'image',
     vendor: ModelVendor.FLUX,
     supportsTools: false,
@@ -439,6 +568,60 @@ export const IMAGE_MODEL_MORE_OPTIONS: ModelConfig[] = [
     imageDefaults: IMAGE_2K_DEFAULT_PARAMS,
     tags: ['seedream'],
   },
+  {
+    id: 'seedream-v4',
+    label: 'Seedream V4',
+    shortLabel: 'Seedream V4',
+    shortCode: 'sdv4',
+    description: '即梦 Seedream V4 图片生成',
+    type: 'image',
+    vendor: ModelVendor.DOUBAO,
+    supportsTools: false,
+    imageDefaults: IMAGE_2K_DEFAULT_PARAMS,
+    tags: ['seedream', 'new'],
+  },
+  {
+    id: 'gpt-image-1',
+    label: 'GPT Image 1',
+    shortCode: 'gpt1',
+    description: 'OpenAI GPT Image 1 图片生成',
+    type: 'image',
+    vendor: ModelVendor.GPT,
+    supportsTools: true,
+    imageDefaults: IMAGE_DEFAULT_PARAMS,
+  },
+  {
+    id: 'gpt-4o-image',
+    label: 'GPT-4o Image',
+    shortCode: 'g4oi',
+    description: 'OpenAI 多模态图片模型',
+    type: 'image',
+    vendor: ModelVendor.GPT,
+    supportsTools: true,
+    imageDefaults: IMAGE_DEFAULT_PARAMS,
+    tags: ['new'],
+  },
+  {
+    id: 'qwen-image-2.0',
+    label: 'Qwen Image 2.0',
+    shortCode: 'qwi2',
+    description: '通义千问图片生成模型',
+    type: 'image',
+    vendor: ModelVendor.QWEN,
+    supportsTools: true,
+    imageDefaults: IMAGE_DEFAULT_PARAMS,
+    tags: ['new'],
+  },
+  {
+    id: 'kling_image',
+    label: 'Kling Image',
+    shortCode: 'kimg',
+    description: 'Kling 文生图模型',
+    type: 'image',
+    vendor: ModelVendor.KLING,
+    supportsTools: false,
+    imageDefaults: IMAGE_DEFAULT_PARAMS,
+  },
 ];
 
 /** 异步图片模型 ID 列表 */
@@ -458,10 +641,10 @@ export function isAsyncImageModel(modelId?: string): boolean {
 /**
  * 所有图片模型
  */
-export const IMAGE_MODELS: ModelConfig[] = [
+export const IMAGE_MODELS: ModelConfig[] = applyBuiltInRecommendedScores([
   ...IMAGE_MODEL_VIP_OPTIONS,
   ...IMAGE_MODEL_MORE_OPTIONS,
-];
+]);
 
 // ============================================
 // 视频模型配置
@@ -505,12 +688,12 @@ const SEEDANCE_DEFAULT_PARAMS: VideoModelDefaults = {
 /**
  * 视频模型配置
  */
-export const VIDEO_MODELS: ModelConfig[] = [
+export const VIDEO_MODELS: ModelConfig[] = applyBuiltInRecommendedScores([
   {
-    id: 'kling-v1-6',
-    label: 'Kling V1.6',
-    shortCode: 'k16',
-    description: '5s/10s 视频，支持文生视频和图生视频',
+    id: 'kling_video',
+    label: 'Kling',
+    shortCode: 'kling',
+    description: 'Kling 标准视频能力，版本通过 model_name 选择',
     type: 'video',
     vendor: ModelVendor.KLING,
     supportsTools: true,
@@ -700,7 +883,83 @@ export const VIDEO_MODELS: ModelConfig[] = [
     vendor: ModelVendor.DOUBAO,
     videoDefaults: SEEDANCE_DEFAULT_PARAMS,
   },
-];
+  {
+    id: 'veo3-fast',
+    label: 'Veo 3 Fast',
+    shortCode: 'v3f',
+    description: '8秒快速视频生成',
+    type: 'video',
+    vendor: ModelVendor.VEO,
+    supportsTools: true,
+    videoDefaults: VEO_DEFAULT_PARAMS,
+  },
+  {
+    id: 'veo3-frames',
+    label: 'Veo 3 Frames',
+    shortCode: 'v3fr',
+    description: '8秒视频，支持帧控制',
+    type: 'video',
+    vendor: ModelVendor.VEO,
+    supportsTools: true,
+    videoDefaults: VEO_DEFAULT_PARAMS,
+    tags: ['new'],
+  },
+  {
+    id: 'veo3-fast-frames',
+    label: 'Veo 3 Fast Frames',
+    shortCode: 'v3ff',
+    description: '8秒快速视频，支持帧控制',
+    type: 'video',
+    vendor: ModelVendor.VEO,
+    supportsTools: true,
+    videoDefaults: VEO_DEFAULT_PARAMS,
+    tags: ['new'],
+  },
+  {
+    id: 'veo3-pro-frames',
+    label: 'Veo 3 Pro Frames',
+    shortCode: 'v3pf',
+    description: '8秒高质量视频，支持帧控制',
+    type: 'video',
+    vendor: ModelVendor.VEO,
+    supportsTools: true,
+    videoDefaults: VEO_DEFAULT_PARAMS,
+  },
+  {
+    id: 'kling-video-o1',
+    label: 'Kling Video O1',
+    shortCode: 'kvo1',
+    description: 'Kling Video O1 智能视频生成',
+    type: 'video',
+    vendor: ModelVendor.KLING,
+    supportsTools: true,
+    videoDefaults: KLING_DEFAULT_PARAMS,
+  },
+  {
+    id: 'kling-video-o1-edit',
+    label: 'Kling Video O1 Edit',
+    shortCode: 'kvo1e',
+    description: 'Kling Video O1 视频编辑',
+    type: 'video',
+    vendor: ModelVendor.KLING,
+    supportsTools: true,
+    videoDefaults: KLING_DEFAULT_PARAMS,
+  },
+  {
+    id: 'sora-2-15s',
+    label: 'Sora 2 · 15s',
+    shortCode: 's215',
+    description: '15秒固定时长，模型名已包含时长',
+    type: 'video',
+    vendor: ModelVendor.SORA,
+    supportsTools: true,
+    videoDefaults: {
+      duration: '15',
+      size: '1280x720',
+      aspectRatio: '16:9',
+    },
+  },
+]);
 
 // ============================================
 // 文本模型配置
@@ -709,12 +968,40 @@ export const VIDEO_MODELS: ModelConfig[] = [
 /**
  * 文本/Agent 模型配置
  */
-export const TEXT_MODELS: ModelConfig[] = [
+export const TEXT_MODELS: ModelConfig[] = applyBuiltInRecommendedScores([
   {
     id: 'deepseek-v3.2',
     label: 'DeepSeek V3.2',
     shortCode: 'ds32',
     description: 'DeepSeek 最新大语言模型，性价比高',
+    type: 'text',
+    vendor: ModelVendor.DEEPSEEK,
+    supportsTools: true,
+  },
+  {
+    id: 'deepseek-v3.2-thinking',
+    label: 'DeepSeek V3.2 Thinking',
+    shortCode: 'ds32t',
+    description: 'DeepSeek V3.2 推理增强版',
+    type: 'text',
+    vendor: ModelVendor.DEEPSEEK,
+    supportsTools: true,
+    tags: ['new'],
+  },
+  {
+    id: 'deepseek-v3',
+    label: 'DeepSeek V3',
+    shortCode: 'ds3',
+    description: 'DeepSeek 通用模型',
+    type: 'text',
+    vendor: ModelVendor.DEEPSEEK,
+    supportsTools: true,
+  },
+  {
+    id: 'deepseek-r1',
+    label: 'DeepSeek R1',
+    shortCode: 'dsr1',
+    description: 'DeepSeek 推理模型',
     type: 'text',
     vendor: ModelVendor.DEEPSEEK,
     supportsTools: true,
@@ -730,6 +1017,17 @@ export const TEXT_MODELS: ModelConfig[] = [
     supportsTools: true,
   },
   {
+    id: 'claude-opus-4-6',
+    label: 'Claude Opus 4.6',
+    shortCode: 'op46',
+    description: 'Anthropic 最新旗舰模型',
+    type: 'text',
+    vendor: ModelVendor.ANTHROPIC,
+    isVip: true,
+    supportsTools: true,
+    tags: ['new'],
+  },
+  {
     id: 'claude-sonnet-4-5-20250929',
     label: 'Claude Sonnet 4.5',
     shortCode: 'sn45',
@@ -740,10 +1038,31 @@ export const TEXT_MODELS: ModelConfig[] = [
     supportsTools: true,
   },
   {
-    id: 'gemini-2.5-flash',
-    label: 'Gemini 2.5 Flash',
-    shortCode: 'g25f',
-    description: 'Google 快速响应模型，适合日常任务',
+    id: 'claude-sonnet-4-5-20250929-thinking',
+    label: 'Claude Sonnet 4.5 Thinking',
+    shortCode: 'sn45t',
+    description: 'Anthropic 推理增强版',
+    type: 'text',
+    vendor: ModelVendor.ANTHROPIC,
+    isVip: true,
+    supportsTools: true,
+  },
+  {
+    id: 'claude-sonnet-4-6',
+    label: 'Claude Sonnet 4.6',
+    shortCode: 'sn46',
+    description: 'Anthropic 最新均衡模型',
+    type: 'text',
+    vendor: ModelVendor.ANTHROPIC,
+    isVip: true,
+    supportsTools: true,
+    tags: ['new'],
+  },
+  {
+    id: 'gemini-2.5-pro-all',
+    label: 'Gemini 2.5 Pro All',
+    shortCode: 'g25pa',
+    description: 'Google 全功能专业版模型',
     type: 'text',
     vendor: ModelVendor.GOOGLE,
     supportsTools: true,
@@ -758,7 +1077,151 @@ export const TEXT_MODELS: ModelConfig[] = [
     isVip: true,
     supportsTools: true,
   },
-];
+  {
+    id: 'gemini-3-pro-preview-thinking',
+    label: 'Gemini 3 Pro Preview Thinking',
+    shortCode: 'g3ppt',
+    description: 'Google 预览推理增强版',
+    type: 'text',
+    vendor: ModelVendor.GOOGLE,
+    isVip: true,
+    supportsTools: true,
+    tags: ['new'],
+  },
+  {
+    id: 'gpt-5.4',
+    label: 'GPT-5.4',
+    shortCode: 'g54',
+    description: 'OpenAI 最新旗舰模型',
+    type: 'text',
+    vendor: ModelVendor.GPT,
+    isVip: true,
+    supportsTools: true,
+  },
+  {
+    id: 'gpt-5.1',
+    label: 'GPT-5.1',
+    shortCode: 'g51',
+    description: 'OpenAI 旗舰模型',
+    type: 'text',
+    vendor: ModelVendor.GPT,
+    isVip: true,
+    supportsTools: true,
+    tags: ['new'],
+  },
+  {
+    id: 'gpt-5.4-mini',
+    label: 'GPT-5.4 Mini',
+    shortCode: 'g54m',
+    description: 'OpenAI 轻量高性价比模型',
+    type: 'text',
+    vendor: ModelVendor.GPT,
+    supportsTools: true,
+    tags: ['new'],
+  },
+  {
+    id: 'gpt-5-pro',
+    label: 'GPT-5 Pro',
+    shortCode: 'g5p',
+    description: 'OpenAI 高能力 Pro 模型',
+    type: 'text',
+    vendor: ModelVendor.GPT,
+    isVip: true,
+    supportsTools: true,
+    tags: ['new'],
+  },
+  {
+    id: 'gpt-5-chat-latest',
+    label: 'GPT-5 Chat Latest',
+    shortCode: 'g5cl',
+    description: 'OpenAI GPT-5 最新聊天别名',
+    type: 'text',
+    vendor: ModelVendor.GPT,
+    supportsTools: true,
+    tags: ['new'],
+  },
+  {
+    id: 'gpt-5.2',
+    label: 'GPT-5.2',
+    shortCode: 'g52',
+    description: 'OpenAI 新一代旗舰模型',
+    type: 'text',
+    vendor: ModelVendor.GPT,
+    isVip: true,
+    supportsTools: true,
+    tags: ['new'],
+  },
+  {
+    id: 'grok-4',
+    label: 'Grok 4',
+    shortCode: 'gk4',
+    description: 'xAI 最新旗舰模型',
+    type: 'text',
+    vendor: ModelVendor.GROK,
+    isVip: true,
+    supportsTools: true,
+  },
+  {
+    id: 'grok-4.2',
+    label: 'Grok 4.2',
+    shortCode: 'gk42',
+    description: 'xAI 最新 Grok 模型',
+    type: 'text',
+    vendor: ModelVendor.GROK,
+    isVip: true,
+    supportsTools: true,
+    tags: ['new'],
+  },
+  {
+    id: 'gemini-3.1-pro-preview',
+    label: 'Gemini 3.1 Pro Preview',
+    shortCode: 'g31pp',
+    description: 'Google Gemini 3.1 Pro 最新预览版',
+    type: 'text',
+    vendor: ModelVendor.GOOGLE,
+    isVip: true,
+    supportsTools: true,
+  },
+  {
+    id: 'gemini-3.1-pro-preview-thinking',
+    label: 'Gemini 3.1 Pro Preview Thinking',
+    shortCode: 'g31pt',
+    description: 'Google Gemini 3.1 Pro 推理增强版',
+    type: 'text',
+    vendor: ModelVendor.GOOGLE,
+    isVip: true,
+    supportsTools: true,
+    tags: ['new'],
+  },
+  {
+    id: 'doubao-seed-1-6-thinking-250715',
+    label: '豆包 Seed 1.6 Thinking',
+    shortCode: 'dbt',
+    description: '豆包最新思考模型',
+    type: 'text',
+    vendor: ModelVendor.DOUBAO,
+    supportsTools: true,
+  },
+]);
+
+/**
+ * 音频模型
+ *
+ * 注意：Suno 实际执行使用 submit/fetch 规则与 mv 字段，
+ * 这里保留的是可供路由与默认预设选择的逻辑音频入口。
+ */
+export const AUDIO_MODELS: ModelConfig[] = applyBuiltInRecommendedScores([
+  {
+    id: 'suno_music',
+    label: 'Suno Music',
+    shortLabel: 'Suno 音乐',
+    shortCode: 'suno',
+    description: 'Suno 音乐生成入口（通过 mv 决定实际版本）',
+    type: 'audio',
+    vendor: ModelVendor.SUNO,
+    tags: ['audio', 'music', 'suno'],
+  },
+]);
 
 // ============================================
 // 所有模型
@@ -779,7 +1242,46 @@ export const ALL_MODELS: ModelConfig[] = [
   ...IMAGE_MODELS,
   ...VIDEO_MODELS,
   ...TEXT_MODELS,
+  ...AUDIO_MODELS,
 ];
+
+let runtimeModels: ModelConfig[] = [];
+
+function mergeModels(
+  staticModels: ModelConfig[],
+  discoveredModels: ModelConfig[]
+): ModelConfig[] {
+  const merged = [...discoveredModels];
+  const seen = new Set(discoveredModels.map((model) => model.id));
+  for (const model of staticModels) {
+    if (!seen.has(model.id)) {
+      merged.push(model);
+    }
+  }
+  return merged;
+}
+
+export function setRuntimeModelConfigs(models: ModelConfig[]): void {
+  runtimeModels = Array.isArray(models) ? [...models] : [];
+}
+
+export function clearRuntimeModelConfigs(): void {
+  runtimeModels = [];
+}
+
+export function getRuntimeModelConfigs(type?: ModelType): ModelConfig[] {
+  return type
+    ? runtimeModels.filter((model) => model.type === type)
+    : [...runtimeModels];
+}
+
+export function getStaticModelsByType(type: ModelType): ModelConfig[] {
+  return ALL_MODELS.filter((model) => model.type === type);
+}
+
+export function getStaticModelConfig(modelId: string): ModelConfig | undefined {
+  return ALL_MODELS.find((model) => model.id === modelId);
+}
 
 // ============================================
 // 辅助函数
@@ -789,14 +1291,17 @@ export const ALL_MODELS: ModelConfig[] = [
  * 根据类型获取模型列表
  */
 export function getModelsByType(type: ModelType): ModelConfig[] {
-  return ALL_MODELS.filter((model) => model.type === type);
+  return mergeModels(getStaticModelsByType(type), getRuntimeModelConfigs(type));
 }
 
 /**
  * 获取模型配置
  */
 export function getModelConfig(modelId: string): ModelConfig | undefined {
-  return ALL_MODELS.find((model) => model.id === modelId);
+  return (
+    runtimeModels.find((model) => model.id === modelId) ||
+    getStaticModelConfig(modelId)
+  );
 }
 
 /**
@@ -810,7 +1315,9 @@ export function getModelType(modelId: string): ModelType | undefined {
  * 获取模型 ID 列表
  */
 export function getModelIds(type?: ModelType): string[] {
-  const models = type ? getModelsByType(type) : ALL_MODELS;
+  const models = type
+    ? getModelsByType(type)
+    : mergeModels(ALL_MODELS, getRuntimeModelConfigs());
   return models.map((model) => model.id);
 }
 
@@ -926,6 +1433,14 @@ export const TEXT_MODEL_SELECT_OPTIONS = TEXT_MODELS.map((model) => ({
 }));
 
 /**
+ * 音频模型选项（用于 Select 组件）
+ */
+export const AUDIO_MODEL_SELECT_OPTIONS = AUDIO_MODELS.map((model) => ({
+  label: model.label,
+  value: model.id,
+}));
+
+/**
  * 默认图片模型 ID
  */
 export const DEFAULT_IMAGE_MODEL_ID = 'gemini-3-pro-image-preview-vip';
@@ -976,6 +1491,18 @@ export function getDefaultTextModel(): string {
  */
 export const DEFAULT_TEXT_MODEL = DEFAULT_TEXT_MODEL_ID;
 
+/**
+ * 默认音频模型 ID
+ */
+export const DEFAULT_AUDIO_MODEL_ID = 'suno_music';
+
+/**
+ * 获取默认音频模型 ID
+ */
+export function getDefaultAudioModel(): string {
+  return DEFAULT_AUDIO_MODEL_ID;
+}
+
 // ============================================
 // 参数配置（用于 SmartSuggestionPanel）
 // ============================================
@@ -984,6 +1511,8 @@ export const DEFAULT_TEXT_MODEL = DEFAULT_TEXT_MODEL_ID;
 const VEO_MODEL_IDS = [
   'veo3',
   'veo3-pro',
+  'veo3-fast',
+  'veo3-pro-frames',
   'veo3.1',
   'veo3.1-pro',
   'veo3.1-components',
@@ -1002,7 +1531,7 @@ const SORA_2_MODEL_IDS = ['sora-2'];
 const SORA_2_PRO_MODEL_IDS = ['sora-2-pro'];
 
 /** Sora 2 固定时长模型（模型名已包含时长，不传 seconds） */
-const SORA_2_FIXED_MODEL_IDS = ['sora-2-4s', 'sora-2-8s', 'sora-2-12s'];
+const SORA_2_FIXED_MODEL_IDS = ['sora-2-4s', 'sora-2-8s', 'sora-2-12s', 'sora-2-15s'];
 
 /** Seedance 视频模型 ID */
 const SEEDANCE_MODEL_IDS = [
@@ -1086,6 +1615,20 @@ export const VIDEO_PARAMS: ParamConfig[] = [
     compatibleModels: SORA_2_PRO_MODEL_IDS,
     modelType: 'video',
   },
+  {
+    id: SORA_MODE_PARAM_ID,
+    label: '调用方式',
+    shortLabel: '方式',
+    description: '切换 Sora 的前端时长方案',
+    valueType: 'enum',
+    options: [
+      { value: 'web', label: '网页' },
+      { value: 'api', label: 'API' },
+    ],
+    defaultValue: 'web',
+    compatibleModels: [...SORA_2_MODEL_IDS, ...SORA_2_PRO_MODEL_IDS],
+    modelType: 'video',
+  },
   // Veo 标清和 Sora 2 尺寸参数（720p）
   {
     id: 'size',
@@ -1098,7 +1641,11 @@ export const VIDEO_PARAMS: ParamConfig[] = [
       { value: '720x1280', label: '竖屏 9:16 (720x1280)' },
     ],
     defaultValue: '1280x720',
-    compatibleModels: [...VEO_MODEL_IDS, ...SORA_2_MODEL_IDS, ...SORA_2_FIXED_MODEL_IDS],
+    compatibleModels: [
+      ...VEO_MODEL_IDS,
+      ...SORA_2_MODEL_IDS,
+      ...SORA_2_FIXED_MODEL_IDS,
+    ],
     modelType: 'video',
   },
   // Veo 4K 尺寸参数（4K 分辨率）
@@ -1184,6 +1731,280 @@ export const VIDEO_PARAMS: ParamConfig[] = [
     defaultValue: '16:9',
     compatibleModels: SEEDANCE_MODEL_IDS,
     modelType: 'video',
+  },
+  {
+    id: 'duration',
+    label: '视频时长',
+    shortLabel: '时长',
+    description: '生成视频的时长（秒）',
+    valueType: 'enum',
+    options: [
+      { value: '5', label: '5秒' },
+      { value: '10', label: '10秒' },
+    ],
+    defaultValue: '5',
+    compatibleModels: ['kling_video'],
+    modelType: 'video',
+  },
+  {
+    id: 'size',
+    label: '视频尺寸',
+    shortLabel: '尺寸',
+    description: '生成视频的画面比例',
+    valueType: 'enum',
+    options: [
+      { value: '1280x720', label: '横屏 16:9 (1280x720)' },
+      { value: '720x1280', label: '竖屏 9:16 (720x1280)' },
+      { value: '1024x1024', label: '方形 1:1 (1024x1024)' },
+    ],
+    defaultValue: '1280x720',
+    compatibleModels: ['kling_video'],
+    modelType: 'video',
+  },
+  {
+    id: 'model_name',
+    label: 'Kling 版本',
+    shortLabel: '版本',
+    description: 'Kling 标准视频能力的执行版本',
+    valueType: 'enum',
+    options: [
+      { value: 'kling-v3', label: 'V3' },
+      { value: 'kling-v2-6', label: 'V2.6' },
+      { value: 'kling-v2-1', label: 'V2.1' },
+      { value: 'kling-v1-6', label: 'V1.6' },
+      { value: 'kling-v1-5', label: 'V1.5' },
+    ],
+    defaultValue: 'kling-v1-6',
+    compatibleModels: ['kling_video'],
+    modelType: 'video',
+  },
+  {
+    id: 'klingAction2',
+    label: 'Kling 模式',
+    shortLabel: '模式',
+    description: '显式指定文生视频或图生视频；留空则自动判断',
+    valueType: 'enum',
+    options: [
+      { value: 'text2video', label: '文生视频' },
+      { value: 'image2video', label: '图生视频' },
+    ],
+    compatibleModels: ['kling_video'],
+    modelType: 'video',
+  },
+  {
+    id: 'mode',
+    label: '生成模式',
+    shortLabel: '表现',
+    description: 'Kling 生成模式',
+    valueType: 'enum',
+    options: [
+      { value: 'std', label: 'std 高性能' },
+      { value: 'pro', label: 'pro 高表现' },
+    ],
+    compatibleModels: ['kling_video'],
+    modelType: 'video',
+  },
+  {
+    id: 'cfg_scale',
+    label: '自由度',
+    shortLabel: 'CFG',
+    description: '取值范围 0 到 1，值越大相关性越强',
+    valueType: 'number',
+    min: 0,
+    max: 1,
+    step: 0.01,
+    compatibleModels: ['kling_video'],
+    modelType: 'video',
+  },
+  {
+    id: 'negative_prompt',
+    label: '负向提示词',
+    shortLabel: '负向',
+    description: '可选，补充不希望出现的内容',
+    valueType: 'string',
+    compatibleModels: ['kling_video'],
+    modelType: 'video',
+  },
+  {
+    id: 'camera_control_type',
+    label: '运镜协议',
+    shortLabel: '协议',
+    description: 'camera_control.type，常用值如 simple',
+    valueType: 'string',
+    compatibleModels: ['kling_video'],
+    modelType: 'video',
+  },
+  {
+    id: 'camera_horizontal',
+    label: '水平运镜',
+    shortLabel: '水平',
+    description: '取值范围 -10 到 10，且必须为整数',
+    valueType: 'number',
+    min: -10,
+    max: 10,
+    step: 1,
+    integer: true,
+    compatibleModels: ['kling_video'],
+    modelType: 'video',
+  },
+  {
+    id: 'camera_vertical',
+    label: '垂直运镜',
+    shortLabel: '垂直',
+    description: '取值范围 -10 到 10，且必须为整数',
+    valueType: 'number',
+    min: -10,
+    max: 10,
+    step: 1,
+    integer: true,
+    compatibleModels: ['kling_video'],
+    modelType: 'video',
+  },
+  {
+    id: 'camera_pan',
+    label: '水平摇镜',
+    shortLabel: 'Pan',
+    description: '取值范围 -10 到 10，且必须为整数',
+    valueType: 'number',
+    min: -10,
+    max: 10,
+    step: 1,
+    integer: true,
+    compatibleModels: ['kling_video'],
+    modelType: 'video',
+  },
+  {
+    id: 'camera_tilt',
+    label: '垂直摇镜',
+    shortLabel: 'Tilt',
+    description: '取值范围 -10 到 10，且必须为整数',
+    valueType: 'number',
+    min: -10,
+    max: 10,
+    step: 1,
+    integer: true,
+    compatibleModels: ['kling_video'],
+    modelType: 'video',
+  },
+  {
+    id: 'camera_roll',
+    label: '旋转运镜',
+    shortLabel: 'Roll',
+    description: '取值范围 -10 到 10，且必须为整数',
+    valueType: 'number',
+    min: -10,
+    max: 10,
+    step: 1,
+    integer: true,
+    compatibleModels: ['kling_video'],
+    modelType: 'video',
+  },
+  {
+    id: 'camera_zoom',
+    label: '变焦',
+    shortLabel: 'Zoom',
+    description: '取值范围 -10 到 10，且必须为整数',
+    valueType: 'number',
+    min: -10,
+    max: 10,
+    step: 1,
+    integer: true,
+    compatibleModels: ['kling_video'],
+    modelType: 'video',
+  },
+];
+
+/**
+ * 音频参数配置
+ */
+export const AUDIO_PARAMS: ParamConfig[] = [
+  {
+    id: 'sunoAction',
+    label: 'Suno 动作',
+    shortLabel: '动作',
+    description: '选择生成音乐还是歌词',
+    valueType: 'enum',
+    options: [
+      { value: 'lyrics', label: '生成歌词' },
+      { value: 'music', label: '生成音乐' },
+    ],
+    defaultValue: 'lyrics',
+    compatibleModels: ['suno_music'],
+    compatibleTags: ['suno', 'audio', 'music'],
+    modelType: 'audio',
+  },
+  {
+    id: 'mv',
+    label: 'Suno 版本',
+    shortLabel: '版本',
+    description: 'Suno 音乐生成版本',
+    valueType: 'enum',
+    options: [
+      { value: 'chirp-v5-5', label: 'v5.5' },
+      { value: 'chirp-v5', label: 'v5.0' },
+      { value: 'chirp-v4-5', label: 'v4.5' },
+      { value: 'chirp-v4', label: 'v4.0' },
+      { value: 'chirp-v3-0', label: 'v3.0' },
+      { value: 'chirp-v3-5', label: 'v3.5' },
+    ],
+    defaultValue: 'chirp-v5-5',
+    compatibleModels: ['suno_music'],
+    compatibleTags: ['suno', 'audio', 'music'],
+    modelType: 'audio',
+  },
+  {
+    id: 'title',
+    label: '歌曲标题',
+    shortLabel: '标题',
+    description: '可选，设置歌曲标题',
+    valueType: 'string',
+    compatibleModels: ['suno_music'],
+    compatibleTags: ['suno', 'audio', 'music'],
+    modelType: 'audio',
+  },
+  {
+    id: 'tags',
+    label: '风格标签',
+    shortLabel: '风格',
+    description: '可选，使用逗号分隔多个风格标签',
+    valueType: 'string',
+    compatibleModels: ['suno_music'],
+    compatibleTags: ['suno', 'audio', 'music'],
+    modelType: 'audio',
+  },
+  {
+    id: 'continueSource',
+    label: '续写来源',
+    shortLabel: '续写',
+    description: '选择普通续写还是基于上传音频续写',
+    valueType: 'enum',
+    options: [
+      { value: 'clip', label: '已有 clip' },
+      { value: 'upload', label: '上传音频' },
+    ],
+    compatibleModels: ['suno_music'],
+    compatibleTags: ['suno', 'audio', 'music'],
+    modelType: 'audio',
+  },
+  {
+    id: 'continueClipId',
+    label: '续写 Clip ID',
+    shortLabel: 'Clip',
+    description: '续写已有歌曲时填写 clip ID',
+    valueType: 'string',
+    compatibleModels: ['suno_music'],
+    compatibleTags: ['suno', 'audio', 'music'],
+    modelType: 'audio',
+  },
+  {
+    id: 'continueAt',
+    label: '续写起点秒数',
+    shortLabel: '起点',
+    description: '从第几秒开始续写',
+    valueType: 'number',
+    compatibleModels: ['suno_music'],
+    compatibleTags: ['suno', 'audio', 'music'],
+    modelType: 'audio',
   },
 ];
 
@@ -1297,7 +2118,10 @@ export const IMAGE_PARAMS: ParamConfig[] = [
       { value: '4k', label: '4K' },
     ],
     defaultValue: '2k',
-    compatibleModels: ['doubao-seedream-4-0-250828', 'doubao-seedream-4-5-251128'],
+    compatibleModels: [
+      'doubao-seedream-4-0-250828',
+      'doubao-seedream-4-5-251128',
+    ],
     modelType: 'image',
   },
   // Seedream 5.0 lite 图片质量（2K/3K）
@@ -1325,10 +2149,13 @@ export const IMAGE_PARAMS: ParamConfig[] = [
     options: [
       { value: '1k', label: '1K' },
       { value: '2k', label: '2K' },
-      { value: '4k', label: '4K' }
+      { value: '4k', label: '4K' },
     ],
     defaultValue: '1k',
-    compatibleModels: ['gemini-3.1-flash-image-preview', 'gemini-3-pro-image-preview'],
+    compatibleModels: [
+      'gemini-3.1-flash-image-preview',
+      'gemini-3-pro-image-preview',
+    ],
     modelType: 'image',
   },
   {
@@ -1441,7 +2268,51 @@ export const IMAGE_PARAMS: ParamConfig[] = [
 /**
  * 所有参数配置
  */
-export const ALL_PARAMS: ParamConfig[] = [...VIDEO_PARAMS, ...IMAGE_PARAMS];
+export const ALL_PARAMS: ParamConfig[] = [
+  ...VIDEO_PARAMS,
+  ...IMAGE_PARAMS,
+  ...AUDIO_PARAMS,
+  {
+    id: 'temperature',
+    label: 'Temperature',
+    shortLabel: '温度',
+    description: '控制文本生成的发散程度',
+    valueType: 'number',
+    defaultValue: '0.7',
+    min: 0,
+    max: 2,
+    step: 0.1,
+    compatibleModels: [],
+    modelType: 'text',
+  },
+  {
+    id: 'top_p',
+    label: 'Top P',
+    shortLabel: '采样',
+    description: '控制 nucleus sampling 范围',
+    valueType: 'number',
+    defaultValue: '1',
+    min: 0,
+    max: 1,
+    step: 0.05,
+    compatibleModels: [],
+    modelType: 'text',
+  },
+  {
+    id: 'max_tokens',
+    label: 'Max Tokens',
+    shortLabel: '长度',
+    description: '限制文本输出长度',
+    valueType: 'number',
+    defaultValue: '4096',
+    min: 1,
+    max: 32768,
+    step: 1,
+    integer: true,
+    compatibleModels: [],
+    modelType: 'text',
+  },
+];
 
 /**
  * 根据模型类型获取参数列表
@@ -1464,13 +2335,19 @@ export function getCompatibleParams(modelId: string): ParamConfig[] {
   if (modelConfig.vendor) modelTags.add(modelConfig.vendor.toLowerCase());
   const idLower = modelConfig.id.toLowerCase();
   if (idLower.includes('seedream')) modelTags.add('seedream');
-  if (idLower.startsWith('mj') || idLower.includes('midjourney')) modelTags.add('mj');
+  if (idLower.startsWith('mj') || idLower.includes('midjourney'))
+    modelTags.add('mj');
   if (idLower.includes('gemini')) modelTags.add('gemini');
   if (idLower.includes('gpt')) modelTags.add('gpt');
   if (idLower.includes('flux')) modelTags.add('flux');
   if (idLower.includes('veo')) modelTags.add('veo');
   if (idLower.includes('sora')) modelTags.add('sora');
   if (idLower.includes('seedance')) modelTags.add('seedance');
+  if (idLower.includes('suno') || idLower.includes('chirp')) {
+    modelTags.add('suno');
+    modelTags.add('audio');
+    modelTags.add('music');
+  }
   // 这里不再自动按 doubao 分类，避免与 seedream 重复；若需要可通过 tags 显式声明
 
   return ALL_PARAMS.filter((param) => {

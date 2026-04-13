@@ -137,6 +137,7 @@ describe('Media Executor Module', () => {
       expect(typeof executor.generateImage).toBe('function');
       expect(typeof executor.generateVideo).toBe('function');
       expect(typeof executor.aiAnalyze).toBe('function');
+      expect(typeof executor.generateText).toBe('function');
     });
   });
 

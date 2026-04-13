@@ -106,6 +106,27 @@ function logError(message) {
   log(`  ✗ ${message}`, 'red');
 }
 
+function formatExecError(error) {
+  if (!error) {
+    return '未知错误';
+  }
+
+  const stderr =
+    typeof error.stderr === 'string'
+      ? error.stderr.trim()
+      : Buffer.isBuffer(error.stderr)
+      ? error.stderr.toString('utf-8').trim()
+      : '';
+  const stdout =
+    typeof error.stdout === 'string'
+      ? error.stdout.trim()
+      : Buffer.isBuffer(error.stdout)
+      ? error.stdout.toString('utf-8').trim()
+      : '';
+
+  return stderr || stdout || error.message || '未知错误';
+}
+
 function exec(command, options = {}) {
   log(`    执行: ${command.substring(0, 80)}${command.length > 80 ? '...' : ''}`, 'gray');
   try {
@@ -154,20 +175,54 @@ function shouldKeepOnServer(filename) {
  * 检查 npm 包的指定版本是否已存在
  * @param {string} packageName 包名
  * @param {string} version 版本号
- * @returns {boolean} 是否存在
+ * @returns {{ exists: boolean, checked: boolean, error?: string }} 检查结果
  */
 function checkNpmVersionExists(packageName, version) {
-  try {
-    // 使用 npm view 命令检查版本是否存在
-    execSync(`npm view ${packageName}@${version} version`, {
-      stdio: 'pipe',
-      encoding: 'utf-8',
-    });
-    return true; // 命令成功执行，版本存在
-  } catch (error) {
-    // 命令失败，版本不存在
-    return false;
+  const maxAttempts = 2;
+  const timeoutMs = 10000;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      execSync(`npm view ${packageName}@${version} version --registry https://registry.npmjs.org`, {
+        stdio: 'pipe',
+        encoding: 'utf-8',
+        timeout: timeoutMs,
+      });
+      return { exists: true, checked: true };
+    } catch (error) {
+      const errorMessage = formatExecError(error);
+      const isVersionMissing =
+        error.status === 1 &&
+        /E404|404|not found|No match found/i.test(errorMessage);
+
+      if (isVersionMissing) {
+        return { exists: false, checked: true };
+      }
+
+      const isRetriable =
+        error.signal === 'SIGTERM' ||
+        /ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND/i.test(errorMessage);
+
+      if (isRetriable && attempt < maxAttempts) {
+        logWarning(
+          `npm 版本检查失败，第 ${attempt}/${maxAttempts} 次重试中: ${errorMessage}`
+        );
+        continue;
+      }
+
+      return {
+        exists: false,
+        checked: false,
+        error: errorMessage,
+      };
+    }
   }
+
+  return {
+    exists: false,
+    checked: false,
+    error: 'npm 版本检查失败，已达到最大重试次数',
+  };
 }
 
 /**
@@ -863,7 +918,14 @@ async function main() {
   // 在开始部署前检查版本是否需要升级
   if (!skipNpm) {
     log(`\n🔍 检查版本 ${CONFIG.packageName}@${version} 是否已存在于 npm...`, 'gray');
-    if (checkNpmVersionExists(CONFIG.packageName, version)) {
+    const versionCheck = checkNpmVersionExists(CONFIG.packageName, version);
+    if (!versionCheck.checked) {
+      logError(`无法检查 npm 版本状态: ${versionCheck.error}`);
+      logWarning('请检查网络、npm 登录状态，或使用 --skip-npm 跳过 npm 发布');
+      process.exit(1);
+    }
+
+    if (versionCheck.exists) {
       // 版本已存在，需要升级版本
       log(`    版本 ${version} 已存在，需要升级版本`, 'yellow');
       try {

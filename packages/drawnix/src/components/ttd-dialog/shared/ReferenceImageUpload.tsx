@@ -568,13 +568,15 @@ export const ReferenceImageUpload: React.FC<ReferenceImageUploadProps> = ({
 
         {slotLabels ? renderSlotMode() : (multiple ? renderGridMode() : renderSingleMode())}
 
-        <MediaLibraryModal
-          isOpen={showMediaLibrary}
-          onClose={() => setShowMediaLibrary(false)}
-          mode={SelectionMode.SELECT}
-          filterType={AssetType.IMAGE}
-          onSelect={handleMediaLibrarySelect}
-        />
+        {showMediaLibrary && (
+          <MediaLibraryModal
+            isOpen={showMediaLibrary}
+            onClose={() => setShowMediaLibrary(false)}
+            mode={SelectionMode.SELECT}
+            filterType={AssetType.IMAGE}
+            onSelect={handleMediaLibrarySelect}
+          />
+        )}
       </div>
     </>
   );

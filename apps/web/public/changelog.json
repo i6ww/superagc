@@ -1,6 +1,263 @@
 {
   "versions": [
     {
+      "version": "0.6.21",
+      "date": "2026-04-13",
+      "changes": {
+        "features": [
+          "知识库素材嵌入 — Milkdown 自定义节点插件"
+        ],
+        "fixes": [
+          "修复媒体库弹窗条件渲染和音频封面URL处理",
+          "收口关闭态工具箱与素材库弹窗挂载，修复用户页 Hook 崩溃",
+          "iframe 环境下打开 AI 图片生成弹窗 Maximum update depth exceeded",
+          "避免 Milkdown 在 editorView 缺失时读取 markdown"
+        ],
+        "improvements": []
+      },
+      "type": "patch",
+      "highlights": "知识库素材嵌入 — Milkdown 自定义节点插件"
+    },
+    {
+      "version": "0.6.20",
+      "date": "2026-04-13",
+      "changes": {
+        "features": [
+          "模型测试性价比评分 + 选择器收藏/淘汰标记"
+        ],
+        "fixes": [
+          "统一音频下载封面写入逻辑"
+        ],
+        "improvements": []
+      },
+      "type": "patch",
+      "highlights": "模型测试性价比评分 + 选择器收藏/淘汰标记"
+    },
+    {
+      "version": "0.6.19",
+      "date": "2026-04-12",
+      "changes": {
+        "features": [
+          "增强错误处理与iframe测试支持",
+          "音乐播放器支持知识库语音快捷操作",
+          "右键菜单动态展示模型描述和文档链接",
+          "集成供应商模型价格信息展示",
+          "优化画布 Markdown 卡片与知识库联动",
+          "增加内置模型推荐分并统一排序",
+          "多选框增加全选/清除，修复测试本组模型数不一致",
+          "更新默认模型至 Gemini 3.1 Pro Preview 并改进模型基准测试",
+          "模型测试历史会话增加搜索与模态筛选"
+        ],
+        "fixes": [
+          "防白屏 — 全局错误边界 + 统一错误恢复 UI + 日志导出",
+          "统一播放器速率控制并隔离播放缓存音频",
+          "收敛 AI 媒体缓存语义与远程缓存去重",
+          "补齐任务队列归档提示与历史数量",
+          "override TDesign Tooltip default max-width to display larger video",
+          "修复GitHub同步上下文未提供时的错误处理"
+        ],
+        "improvements": []
+      },
+      "type": "patch",
+      "highlights": "增强错误处理与iframe测试支持"
+    },
+    {
+      "version": "0.6.18",
+      "date": "2026-04-11",
+      "changes": {
+        "features": [
+          "历史版本路径支持 + 未知元素类型容错",
+          "优化模型批测入口与模型结果导出",
+          "生成步骤交互优化 + 字段精简",
+          "refine model benchmark batch selection",
+          "add model benchmark workbench",
+          "视频上传预览 + 生成页重新分析 + UI 优化",
+          "脚本表单优化 + 生成链路增强",
+          "长视频分段拼接全套优化",
+          "AI 文本生成结果统一以 Markdown Card 方式插入画布",
+          "新增视频分析工具 + 重构 MCP 队列逻辑为公共模块"
+        ],
+        "fixes": [
+          "补齐推荐模型选择与默认分组去重",
+          "收敛模型测试弹窗启动与状态同步",
+          "设置弹窗单模型测试带入当前模型",
+          "修复设置弹窗激活后仍被测试弹窗遮挡",
+          "修复多窗口最新激活未置顶",
+          "ensure rawData is persisted and improve JSON display styling",
+          "修复 generateContent 路由与超时问题",
+          "收紧 API key 错误判定，避免误开设置面板",
+          "修复 AI 文本插入为普通文本 + Card 换行丢失 + 选中带标题",
+          "修复模型搜索供应商展示与中文输入误选",
+          "保留远程媒体原始 URL 语义",
+          "深度用户页面加载内存溢出优化"
+        ],
+        "improvements": []
+      },
+      "type": "patch",
+      "highlights": "历史版本路径支持 + 未知元素类型容错"
+    },
+    {
+      "version": "0.6.17",
+      "date": "2026-04-09",
+      "changes": {
+        "features": [
+          "优化音乐播放器布局与队列体验",
+          "统一音乐播放器，始终显示播放列表标签栏，新增\"全部语音\"标签",
+          "增加 TTS 播报设置入口",
+          "add canvas text read-aloud",
+          "route audio entries into music player playback",
+          "增加音频播放列表与收藏能力",
+          "素材库支持音频展示、缓存与拖拽插入"
+        ],
+        "fixes": [
+          "保持画布朗读在播放器切换时不中断",
+          "音乐播放器时间展示回退\\n\\n问题描述：音乐播放器列表在拿不到音频时长时展示 --:--，无法向用户提供有效时间信息。\\n修复思路：新增统一时间副标题格式化，优先展示解析/已有时长，缺失时回退展示素材生成时间。\\n更新代码架构：在 MusicPlayerTool 收敛音频时间展示策略，并为素材列表补充元数据时长解析链路。",
+          "修复音乐播放器最小化误触发底层播放控件\\n\\n问题描述:\\n- 点击音乐播放器右上角最小化按钮时，事件会继续落到底层画布播放控件\\n- 导致播放器最小化的同时误触发暂停/播放，交互结果与用户预期不一致\\n\\n修复思路:\\n- 在最小化按钮上阻止 pointer/click 事件冒泡与默认行为\\n- 使用 requestAnimationFrame 延后一帧执行最小化，避免同一点击链路被底层控件消费\\n\\n更新代码架构:\\n- 收敛到音乐播放器工具内部按钮事件处理，不改播放服务与队列模型\\n- 维持现有播放器/画布控件职责边界，仅修复 UI 事件穿透问题",
+          "为无标题 markdown 卡片显示默认标题",
+          "markdown 元素按文本参与提示词",
+          "保持 Agent 分类切模型不降级为文本",
+          "优化设置弹窗小屏适配",
+          "allow create menu on system playlist tabs",
+          "dedupe local canvas files and media library",
+          "过滤辅助缓存条目避免封面图显示为独立素材",
+          "修复本地拖入音频的标题和封面显示",
+          "修复音频素材详情面板展示问题",
+          "修复 Suno 参数下拉框不显示及版本默认值问题"
+        ],
+        "improvements": []
+      },
+      "type": "patch",
+      "highlights": "优化音乐播放器布局与队列体验"
+    },
+    {
+      "version": "0.6.16",
+      "date": "2026-04-08",
+      "changes": {
+        "features": [],
+        "fixes": [
+          "修复 Suno 默认动作与 release 卡死问题"
+        ],
+        "improvements": []
+      },
+      "type": "patch",
+      "highlights": "修复 Suno 默认动作与 release 卡死问题"
+    },
+    {
+      "version": "0.6.15",
+      "date": "2026-04-08",
+      "changes": {
+        "features": [
+          "优化播放器定位、高度、拖拽和垂直布局",
+          "完善音频预览与下载体验",
+          "sort models by freshness and persist model-scoped generation preferences",
+          "add provider config shortcut"
+        ],
+        "fixes": [],
+        "improvements": []
+      },
+      "type": "patch",
+      "highlights": "优化播放器定位、高度、拖拽和垂直布局"
+    },
+    {
+      "version": "0.6.14",
+      "date": "2026-04-08",
+      "changes": {
+        "features": [
+          "支持 Suno 歌词任务与厂商识别能力",
+          "恢复被误删掉代码",
+          "恢复被误删掉代码",
+          "增加 Stitch 设计工作流资产与规范",
+          "增加画布音频节点与播放能力",
+          "接入音频生成任务与工作流链路",
+          "增加音频模态与 Suno 路由基础",
+          "增加 Kling 参数适配",
+          "增加 Kling 能力路由",
+          "优化至形状可导出",
+          "优化至适配画笔",
+          "优化移动端设置与供应商配置体验",
+          "增强文本多模态识图与供应商模型路由体验",
+          "完善多供应商模型协议路由与 Sora 视频适配",
+          "优化模型选择器供应商与厂商分层展示",
+          "优化设置页模型发现与配置体验",
+          "重构设置页并修复配置持久化"
+        ],
+        "fixes": [
+          "persist dropdown selections and correct type fallback",
+          "修复 web 端音频任务类型检查失败",
+          "优化音频节点内容布局与信息层级",
+          "优化移动端音频播放器并恢复桌面端展示",
+          "补充媒体任务兼容与路由回归",
+          "完善音频入口与任务展示体验",
+          "优化 Kling 参数展示"
+        ],
+        "improvements": [
+          "checkpoint current local changes",
+          "featL：优化导出",
+          "实现多供应商模型配置与按模型来源路由",
+          "实现模型获取与按需添加流程"
+        ]
+      },
+      "type": "patch",
+      "highlights": "支持 Suno 歌词任务与厂商识别能力"
+    },
+    {
+      "version": "0.6.12",
+      "date": "2026-03-31",
+      "changes": {
+        "features": [
+          "隐藏原生滚动条",
+          "重建多供应商模型路由与移动端配置体验"
+        ],
+        "fixes": [
+          "修复多供应商分支构建类型错误",
+          "修复缩略图地址钩子语法错误"
+        ],
+        "improvements": []
+      },
+      "type": "patch",
+      "highlights": "隐藏原生滚动条"
+    },
+    {
+      "version": "0.6.11",
+      "date": "2026-03-18",
+      "changes": {
+        "features": [],
+        "fixes": [],
+        "improvements": [
+          "fixed: 兼容base64图片返回",
+          "fixed:修复部署失败",
+          "fixed:修复素材库删除的bug",
+          "fixed:修复素材库删除的bug"
+        ]
+      },
+      "type": "patch",
+      "highlights": "构建修复与稳定性改进"
+    },
+    {
+      "version": "0.6.10",
+      "date": "2026-03-16",
+      "changes": {
+        "features": [
+          "修改部署失败的问题",
+          "添加导出ppt的功能",
+          "持久化 AI 生成参数偏好",
+          "添加页面刷新后视频任务恢复和工作流同步机制",
+          "优化画布上插入内容让其可滚动",
+          "优化agent回答文本框",
+          "优化知识库对话ai回答内容将其渲染为对应的markdown格式&优化skill生成的内容让外层文本框高度自适应内容高度"
+        ],
+        "fixes": [
+          "修复切换画板时刷新页面丢失当前画板的问题"
+        ],
+        "improvements": [
+          "更新构建时间戳",
+          "feat：优化文本框高度"
+        ]
+      },
+      "type": "patch",
+      "highlights": "修改部署失败的问题"
+    },
+    {
       "version": "0.6.9",
       "date": "2026-03-08",
       "changes": {

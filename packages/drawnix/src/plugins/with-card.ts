@@ -205,8 +205,9 @@ export const withCard: PlaitPlugin = (board: PlaitBoard) => {
       if (cardElements.length > 0) {
         const insertedCards: PlaitCard[] = [];
         cardElements.forEach(card => {
+          const { noteId: _noteId, ...cardWithoutNote } = card;
           const newCard: PlaitCard = {
-            ...card,
+            ...cardWithoutNote,
             id: idCreator(),
             points: card.points.map(p => [targetPoint[0] + p[0], targetPoint[1] + p[1]]) as [Point, Point],
           };

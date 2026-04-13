@@ -8,14 +8,17 @@
  */
 
 import type { MCPTool, MCPResult, MCPExecuteOptions, MCPTaskResult } from '../types';
-import { videoAPIService } from '../../services/video-api-service';
-import { taskQueueService } from '../../services/task-queue';
 import { TaskType } from '../../types/task.types';
 import type { VideoModel } from '../../types/video.types';
 import { VIDEO_MODEL_CONFIGS } from '../../constants/video-model-config';
 import { getDefaultVideoModel } from '../../constants/model-config';
-import { geminiSettings } from '../../utils/settings-manager';
+import { geminiSettings, type ModelRef } from '../../utils/settings-manager';
 import { normalizeToClosestVideoSize } from '../../services/media-api/utils';
+import {
+  getAdapterContextFromSettings,
+  resolveAdapterForInvocation,
+} from '../../services/model-adapters';
+import { createQueueTask, validatePrompt, wrapApiError, toUploadedImages } from './shared/queue-utils';
 
 /**
  * 获取当前使用的视频模型名称
@@ -56,12 +59,16 @@ export interface VideoGenerationParams {
   prompt: string;
   /** 视频模型 */
   model?: VideoModel;
+  /** 模型来源引用（用于多供应商路由） */
+  modelRef?: ModelRef | null;
   /** 视频时长（秒） */
   seconds?: string;
   /** 视频尺寸 */
   size?: string;
   /** 参考图片 URL 列表 */
   referenceImages?: string[];
+  /** 额外参数，透传给视频模型适配器 */
+  params?: Record<string, unknown>;
   /** 生成数量（仅 queue 模式支持） */
   count?: number;
   /** 批次 ID（批量生成时） */
@@ -81,58 +88,47 @@ async function executeAsync(params: VideoGenerationParams): Promise<MCPResult> {
   const {
     prompt,
     model = 'veo3',
+    modelRef,
     seconds = '8',
     size = '1280x720',
     referenceImages,
+    params: extraParams,
   } = params;
 
-  if (!prompt || typeof prompt !== 'string') {
-    return {
-      success: false,
-      error: '缺少必填参数 prompt',
-      type: 'error',
-    };
-  }
+  const promptError = validatePrompt(prompt);
+  if (promptError) return promptError;
 
   try {
-    // console.log('[VideoGenerationTool] Generating video with params:', {
-    //   prompt: prompt.substring(0, 100) + (prompt.length > 100 ? '...' : ''),
-    //   model,
-    //   seconds,
-    //   size,
-    //   referenceImages: referenceImages?.length || 0,
-    // });
+    const requestedModel = model as string;
+    const adapter = resolveAdapterForInvocation(
+      'video',
+      requestedModel,
+      modelRef || null
+    );
 
-    // 准备参考图片
-    let inputReferences: Array<{ type: 'url'; url: string }> | undefined;
-    if (referenceImages && referenceImages.length > 0) {
-      inputReferences = referenceImages.map((url) => ({
-        type: 'url' as const,
-        url,
-      }));
+    if (!adapter || adapter.kind !== 'video') {
+      return {
+        success: false,
+        error: `未找到可用的视频适配器: ${requestedModel}`,
+        type: 'error',
+      };
     }
 
-    // 调用视频生成 API（带轮询）
-    const result = await videoAPIService.generateVideoWithPolling(
+    const duration = seconds ? Number(seconds) : undefined;
+    const result = await adapter.generateVideo(
+      getAdapterContextFromSettings('video', modelRef || requestedModel),
       {
-        model: model as VideoModel,
         prompt,
-        seconds,
         size,
-        inputReferences: inputReferences as any,
-      },
-      {
-        interval: 5000, // 每 5 秒轮询一次
-        onProgress: (progress, status) => {
-          // console.log(`[VideoGenerationTool] Progress: ${progress}% (${status})`);
-        },
+        model: requestedModel,
+        modelRef: modelRef || null,
+        duration: Number.isFinite(duration) ? duration : undefined,
+        referenceImages,
+        params: extraParams,
       }
     );
 
-    // console.log('[VideoGenerationTool] Generation completed:', result);
-
-    // 提取视频 URL
-    const videoUrl = result.video_url || result.url;
+    const videoUrl = result.url;
     if (!videoUrl) {
       return {
         success: false,
@@ -145,7 +141,7 @@ async function executeAsync(params: VideoGenerationParams): Promise<MCPResult> {
       success: true,
       data: {
         url: videoUrl,
-        format: 'mp4',
+        format: result.format || 'mp4',
         prompt,
         model,
         seconds,
@@ -155,141 +151,36 @@ async function executeAsync(params: VideoGenerationParams): Promise<MCPResult> {
     };
   } catch (error: any) {
     console.error('[VideoGenerationTool] Generation failed:', error);
-
-    // 提取更详细的错误信息
-    let errorMessage = error.message || '视频生成失败';
-    if (error.apiErrorBody) {
-      errorMessage = `${errorMessage} - ${JSON.stringify(error.apiErrorBody)}`;
-    }
-
-    return {
-      success: false,
-      error: errorMessage,
-      type: 'error',
-    };
+    return wrapApiError(error, '视频生成失败');
   }
 }
 
-/**
- * 创建任务加入队列（queue 模式）
- * 支持批量创建任务（通过 count 参数）
- */
-function executeQueue(params: VideoGenerationParams, options: MCPExecuteOptions): MCPTaskResult {
-  const {
-    prompt, model = 'veo3', seconds, size, referenceImages, count = 1,
-    // 批量参数（可能从工作流步骤传入）
-    batchId: paramsBatchId, batchIndex: paramsBatchIndex, batchTotal: paramsBatchTotal, globalIndex: paramsGlobalIndex,
-  } = params;
+/** 视频任务队列配置 */
+function getVideoQueueConfig(params: VideoGenerationParams) {
+  const model = (params.model || 'veo3') as VideoModel;
+  const modelConfig = VIDEO_MODEL_CONFIGS[model] || VIDEO_MODEL_CONFIGS['veo3'];
+  const uploadedImages = toUploadedImages(params.referenceImages);
 
-  if (!prompt || typeof prompt !== 'string') {
-    return {
-      success: false,
-      error: '缺少必填参数 prompt',
-      type: 'error',
-    };
-  }
-
-  try {
-    // 获取模型默认配置
-    const modelConfig = VIDEO_MODEL_CONFIGS[model as VideoModel] || VIDEO_MODEL_CONFIGS['veo3'];
-
-    // 将参考图片转换为 uploadedImages 格式
-    const uploadedImages = referenceImages?.map((url, index) => ({
-      type: 'url' as const,
-      url,
-      name: `reference-${index + 1}`,
-    }));
-
-    // 批量参数：优先使用 params 中的（工作流场景），否则根据 count 生成
-    const actualCount = Math.min(Math.max(1, count), 10); // 限制 1-10 个
-    const batchId = paramsBatchId || (actualCount > 1 ? `batch_${Date.now()}` : options.batchId);
-    const batchIndex = paramsBatchIndex;
-    const batchTotal = paramsBatchTotal || (actualCount > 1 ? actualCount : undefined);
-    const globalIndex = paramsGlobalIndex || options.globalIndex;
-
-    const createdTasks: any[] = [];
-
-    // 如果是重试，复用原有任务
-    if (options.retryTaskId) {
-      taskQueueService.retryTask(options.retryTaskId);
-      const task = taskQueueService.getTask(options.retryTaskId);
-      if (!task) {
-        throw new Error(`重试任务不存在: ${options.retryTaskId}`);
-      }
-      createdTasks.push(task);
-    } else if (paramsBatchId && typeof paramsBatchIndex === 'number') {
-      // 工作流场景：每个步骤创建一个任务，批量信息已从工作流传入
-      // 使用 typeof 检查确保即使 batchIndex 为 0 也能正确处理
-      const task = taskQueueService.createTask(
-        {
-          prompt,
-          size: size || '16x9',
-          duration: parseInt(seconds || modelConfig.defaultDuration, 10),
-          model,
-          uploadedImages: uploadedImages && uploadedImages.length > 0 ? uploadedImages : undefined,
-          referenceImages: referenceImages && referenceImages.length > 0 ? referenceImages : undefined,
-          // 使用工作流传入的批量参数
-          batchId,
-          batchIndex,
-          batchTotal,
-          globalIndex,
-          // 自动插入画布
-          autoInsertToCanvas: true,
-        },
-        TaskType.VIDEO
-      );
-      createdTasks.push(task);
-    } else {
-      // 直接调用场景（如弹窗）：根据 count 创建多个任务
-      for (let i = 0; i < actualCount; i++) {
-        const task = taskQueueService.createTask(
-          {
-            prompt,
-            size: size || '16x9',
-            duration: parseInt(seconds || modelConfig.defaultDuration, 10),
-            model,
-            uploadedImages: uploadedImages && uploadedImages.length > 0 ? uploadedImages : undefined,
-            referenceImages: referenceImages && referenceImages.length > 0 ? referenceImages : undefined,
-            // 批量参数
-            batchId: batchId,
-            batchIndex: i + 1,
-            batchTotal: actualCount,
-            globalIndex: globalIndex ? globalIndex + i : i + 1,
-            // 自动插入画布
-            autoInsertToCanvas: true,
-          },
-          TaskType.VIDEO
-        );
-        createdTasks.push(task);
-      }
-    }
-
-    const firstTask = createdTasks[0];
-
-    return {
-      success: true,
-      data: {
-        taskId: firstTask.id,
-        taskIds: createdTasks.map(t => t.id),
-        prompt,
-        size: size || '16x9',
-        duration: parseInt(seconds || modelConfig.defaultDuration, 10),
-        model,
-        count: actualCount,
-      },
-      type: 'video',
-      taskId: firstTask.id,
-      task: firstTask,
-    };
-  } catch (error: any) {
-    console.error('[VideoGenerationTool] Failed to create task:', error);
-
-    return {
-      success: false,
-      error: error.message || '创建任务失败',
-      type: 'error',
-    };
-  }
+  return {
+    taskType: TaskType.VIDEO,
+    resultType: 'video' as const,
+    getDefaultModel: getCurrentVideoModel,
+    logPrefix: 'VideoGenerationTool',
+    buildTaskPayload: () => ({
+      prompt: params.prompt,
+      size: params.size || '16x9',
+      duration: parseInt(params.seconds || modelConfig.defaultDuration, 10),
+      model,
+      modelRef: params.modelRef || null,
+      uploadedImages: uploadedImages && uploadedImages.length > 0 ? uploadedImages : undefined,
+      referenceImages: params.referenceImages && params.referenceImages.length > 0 ? params.referenceImages : undefined,
+      params: params.params,
+    }),
+    buildResultData: () => ({
+      size: params.size || '16x9',
+      duration: parseInt(params.seconds || modelConfig.defaultDuration, 10),
+    }),
+  };
 }
 
 /**
@@ -340,6 +231,58 @@ export const videoGenerationTool: MCPTool = {
         description: '参考图片 URL 列表，用于图生视频',
         items: {
           type: 'string',
+        },
+      },
+      params: {
+        type: 'object',
+        description: '额外模型参数，Kling 可用字段包括 model_name、klingAction2、mode、cfg_scale、negative_prompt 与 camera_*；其中 cfg_scale 取值 0 到 1，camera_* 取值 -10 到 10 且需为整数',
+        properties: {
+          model_name: {
+            type: 'string',
+            enum: ['kling-v3', 'kling-v2-6', 'kling-v2-1', 'kling-v1-6', 'kling-v1-5'],
+          },
+          klingAction2: {
+            type: 'string',
+            enum: ['text2video', 'image2video'],
+          },
+          mode: {
+            type: 'string',
+            enum: ['std', 'pro'],
+          },
+          cfg_scale: {
+            type: 'number',
+            description: 'Kling 自由度，取值范围 0 到 1',
+          },
+          negative_prompt: {
+            type: 'string',
+          },
+          camera_control_type: {
+            type: 'string',
+          },
+          camera_horizontal: {
+            type: 'number',
+            description: 'Kling 水平运镜，取值范围 -10 到 10，且必须为整数',
+          },
+          camera_vertical: {
+            type: 'number',
+            description: 'Kling 垂直运镜，取值范围 -10 到 10，且必须为整数',
+          },
+          camera_pan: {
+            type: 'number',
+            description: 'Kling 水平摇镜，取值范围 -10 到 10，且必须为整数',
+          },
+          camera_tilt: {
+            type: 'number',
+            description: 'Kling 垂直摇镜，取值范围 -10 到 10，且必须为整数',
+          },
+          camera_roll: {
+            type: 'number',
+            description: 'Kling 旋转运镜，取值范围 -10 到 10，且必须为整数',
+          },
+          camera_zoom: {
+            type: 'number',
+            description: 'Kling 变焦，取值范围 -10 到 10，且必须为整数',
+          },
         },
       },
       count: {
@@ -420,11 +363,7 @@ export const videoGenerationTool: MCPTool = {
     };
 
     if (mode === 'queue') {
-      // 队列模式：直接使用 taskQueueService
-      // taskQueueService 会根据 SW 可用性自动选择正确的服务
-      // - SW 模式：任务提交到 SW 后台执行
-      // - 降级模式：任务在主线程立即执行
-      return executeQueue(typedParams, options || {});
+      return createQueueTask(typedParams, options || {}, getVideoQueueConfig(typedParams));
     }
 
     return executeAsync(typedParams);

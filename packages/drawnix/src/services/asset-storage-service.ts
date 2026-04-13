@@ -73,17 +73,18 @@ export class ValidationError extends AssetStorageError {
  */
 class AssetStorageService {
   private store: LocalForage | null = null;
-  private migrationDone: boolean = false;
+  private migrationDone = false;
 
-  /**
-   * 计算 Blob 内容的哈希值
-   * 使用 SHA-256 算法生成唯一标识
-   */
-  private async computeContentHash(blob: Blob): Promise<string> {
+  private async calculateBlobChecksum(blob: Blob): Promise<string> {
     const arrayBuffer = await blob.arrayBuffer();
     const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  private getFileExtension(mimeType: string): string {
+    const slashIndex = mimeType.indexOf('/');
+    return slashIndex >= 0 ? mimeType.slice(slashIndex + 1) : 'bin';
   }
 
   /**
@@ -122,7 +123,7 @@ class AssetStorageService {
         try {
           const cachedBlob = await unifiedCacheService.getCachedBlob(stored.url);
           if (cachedBlob) {
-            const oldHash = await this.computeContentHash(cachedBlob);
+            const oldHash = await this.calculateBlobChecksum(cachedBlob);
             
             // 更新旧素材的 contentHash
             stored.contentHash = oldHash;
@@ -148,9 +149,16 @@ class AssetStorageService {
    * 生成素材的缓存 URL（用于本地上传的素材）
    * 使用稳定的 URL 格式，便于统一缓存服务管理
    */
-  private generateAssetUrl(assetId: string, mimeType: string): string {
-    const extension = mimeType.split('/')[1] || 'bin';
-    return `${ASSET_URL_PREFIX}${assetId}.${extension}`;
+  private generateAssetUrl(contentHash: string, mimeType: string): string {
+    const extension = this.getFileExtension(mimeType);
+    const resolvedExtension = extension !== 'bin'
+      ? extension
+      : mimeType.startsWith('video/')
+      ? 'mp4'
+      : mimeType.startsWith('audio/')
+      ? 'mp3'
+      : 'png';
+    return `${ASSET_URL_PREFIX}content-${contentHash}.${resolvedExtension}`;
   }
 
   /**
@@ -201,12 +209,14 @@ class AssetStorageService {
 
           // 迁移旧版数据（包含 blobData 的格式）
           if (this.isLegacyFormat(item)) {
+            const contentHash = await this.calculateBlobChecksum(item.blobData);
             // 生成新的 URL
-            const assetUrl = this.generateAssetUrl(item.id, item.mimeType);
+            const assetUrl = this.generateAssetUrl(contentHash, item.mimeType);
 
             // 将 Blob 数据迁移到统一缓存
-            const cacheType = item.type === 'IMAGE' ? 'image' : 'video';
+            const cacheType = item.type === 'IMAGE' ? 'image' : item.type === 'AUDIO' ? 'audio' : 'video';
             await unifiedCacheService.cacheMediaFromBlob(assetUrl, item.blobData, cacheType, {
+              contentHash,
               taskId: item.id,
               prompt: item.prompt,
               model: item.modelName,
@@ -222,6 +232,7 @@ class AssetStorageService {
               mimeType: item.mimeType,
               createdAt: item.createdAt,
               size: item.size,
+              contentHash,
               prompt: item.prompt,
               modelName: item.modelName,
             };
@@ -271,7 +282,7 @@ class AssetStorageService {
 
     // 计算内容哈希用于去重
     // console.log('[AssetStorageService] Computing content hash...');
-    const contentHash = await this.computeContentHash(data.blob);
+    const contentHash = await this.calculateBlobChecksum(data.blob);
     // console.log('[AssetStorageService] Content hash:', contentHash.substring(0, 16) + '...');
 
     // 检查是否已存在相同内容的素材
@@ -307,12 +318,13 @@ class AssetStorageService {
     try {
       // 生成稳定的素材 URL
       const assetId = crypto.randomUUID();
-      const assetUrl = this.generateAssetUrl(assetId, data.mimeType);
+      const assetUrl = this.generateAssetUrl(contentHash, data.mimeType);
       // console.log('[AssetStorageService] Generated asset URL:', assetUrl);
 
       // 使用统一缓存服务缓存媒体
-      const cacheType = data.type === 'IMAGE' ? 'image' : 'video';
+      const cacheType = data.type === 'IMAGE' ? 'image' : data.type === 'AUDIO' ? 'audio' : 'video';
       await unifiedCacheService.cacheMediaFromBlob(assetUrl, data.blob, cacheType, {
+        contentHash,
         taskId: assetId,
         prompt: data.prompt,
         model: data.modelName,
@@ -328,6 +340,7 @@ class AssetStorageService {
         mimeType: data.mimeType,
         createdAt: Date.now(),
         size: data.blob.size,
+        contentHash,
         prompt: data.prompt,
         modelName: data.modelName,
       };
@@ -612,6 +625,7 @@ class AssetStorageService {
       const keys = await this.store!.keys();
       let imageCount = 0;
       let videoCount = 0;
+      let audioCount = 0;
       let localCount = 0;
       let aiGeneratedCount = 0;
       let totalSize = 0;
@@ -622,6 +636,7 @@ class AssetStorageService {
           // 统计类型
           if (stored.type === 'IMAGE') imageCount++;
           if (stored.type === 'VIDEO') videoCount++;
+          if (stored.type === 'AUDIO') audioCount++;
 
           // 统计来源
           if (stored.source === 'LOCAL') localCount++;
@@ -636,6 +651,7 @@ class AssetStorageService {
         totalAssets: keys.length,
         imageCount,
         videoCount,
+        audioCount,
         localCount,
         aiGeneratedCount,
         totalSize,
@@ -686,7 +702,9 @@ class AssetStorageService {
     const blob = new Blob([bytes], { type: mimeType });
 
     // 确定素材类型
-    const assetType = mimeType.startsWith('video/') ? AssetType.VIDEO : AssetType.IMAGE;
+    const assetType = mimeType.startsWith('video/') ? AssetType.VIDEO
+      : mimeType.startsWith('audio/') ? AssetType.AUDIO
+      : AssetType.IMAGE;
 
     // 生成默认文件名
     const extension = mimeType.split('/')[1] || 'bin';
@@ -706,6 +724,7 @@ class AssetStorageService {
       assetId: asset.id,
     };
   }
+
 }
 
 // 导出单例实例

@@ -41,12 +41,13 @@ export function validateMimeType(
   const allowedTypes = [
     ...ASSET_CONSTANTS.ALLOWED_IMAGE_TYPES,
     ...ASSET_CONSTANTS.ALLOWED_VIDEO_TYPES,
+    ...ASSET_CONSTANTS.ALLOWED_AUDIO_TYPES,
   ];
 
   if (!allowedTypes.includes(mimeType as any)) {
     return {
       valid: false,
-      error: `不支持的文件类型: ${mimeType}。只支持图片（JPG, PNG, GIF, WebP）和视频（MP4, WebM, OGG）。`,
+      error: `不支持的文件类型: ${mimeType}。只支持图片（JPG, PNG, GIF, WebP）、视频（MP4, WebM, OGG）和音频（MP3, WAV, OGG, AAC, FLAC）。`,
     };
   }
   return { valid: true };
@@ -59,6 +60,7 @@ export function validateMimeType(
 export function getAssetType(mimeType: string): AssetType | null {
   if (mimeType.startsWith('image/')) return 'IMAGE' as AssetType;
   if (mimeType.startsWith('video/')) return 'VIDEO' as AssetType;
+  if (mimeType.startsWith('audio/')) return 'AUDIO' as AssetType;
   return null;
 }
 
@@ -147,6 +149,8 @@ export function generateAssetNameFromPrompt(
   const format =
     type === 'IMAGE'
       ? ASSET_CONSTANTS.DEFAULT_IMAGE_NAME_FORMAT
+      : type === 'AUDIO'
+      ? ASSET_CONSTANTS.DEFAULT_AUDIO_NAME_FORMAT
       : ASSET_CONSTANTS.DEFAULT_VIDEO_NAME_FORMAT;
 
   return format.replace('{timestamp}', timestamp);

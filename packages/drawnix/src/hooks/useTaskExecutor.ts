@@ -7,7 +7,10 @@
  */
 
 import { useEffect, useRef } from 'react';
-import { taskQueueService, legacyTaskQueueService } from '../services/task-queue';
+import {
+  taskQueueService,
+  legacyTaskQueueService,
+} from '../services/task-queue';
 import { generationAPIService } from '../services/generation-api-service';
 import { characterAPIService } from '../services/character-api-service';
 import { characterStorageService } from '../services/character-storage-service';
@@ -16,6 +19,7 @@ import { Task, TaskStatus, TaskType } from '../types/task.types';
 import { CharacterStatus } from '../types/character.types';
 import { isTaskTimeout } from '../utils/task-utils';
 import { isAsyncImageModel } from '../constants/model-config';
+import { classifyApiCredentialError } from '../utils/api-auth-error-event';
 
 /**
  * 从 API 错误体中提取原始错误消息
@@ -46,6 +50,7 @@ function getFriendlyErrorMessage(error: any): string {
   const message = error?.message || String(error);
   const apiErrorBody = error?.apiErrorBody || '';
   const httpStatus = error?.httpStatus;
+  const credentialErrorKind = classifyApiCredentialError(error);
 
   // 首先尝试从 API 错误体中提取原始错误消息
   const apiErrorMessage = extractApiErrorMessage(apiErrorBody);
@@ -108,9 +113,17 @@ function getFriendlyErrorMessage(error: any): string {
     return '请求过于频繁，请稍后重试';
   }
 
+  if (credentialErrorKind === 'invalid') {
+    return 'API Key 无效或已过期，请重新配置';
+  }
+
+  if (credentialErrorKind === 'missing') {
+    return '缺少 API Key，请先在设置中配置';
+  }
+
   // 认证错误
   if (message.includes('401') || httpStatus === 401) {
-    return 'API 认证失败，请检查 API Key 配置';
+    return '接口返回 401，请检查鉴权方式、账号权限或服务端策略';
   }
 
   // 权限错误（非额度问题）
@@ -206,6 +219,56 @@ export function useTaskExecutor(): void {
       tryExecuteNext();
     };
 
+    const resumeAudioTask = async (task: Task) => {
+      const taskId = task.id;
+      const remoteId = task.remoteId!;
+
+      if (executingTasksRef.current.has(taskId)) {
+        return;
+      }
+
+      executingTasksRef.current.add(taskId);
+
+      try {
+        const result = await generationAPIService.resumeAudioGeneration(
+          taskId,
+          remoteId,
+          task.params.modelRef || task.params.model || null
+        );
+
+        if (!isActive) return;
+
+        legacyTaskQueueService.updateTaskStatus(taskId, TaskStatus.COMPLETED, {
+          result,
+        });
+      } catch (error: any) {
+        if (!isActive) return;
+
+        const errorCode = error.httpStatus
+          ? `HTTP_${error.httpStatus}`
+          : error.name || 'ERROR';
+        const errorMessage = getFriendlyErrorMessage(error);
+        const originalErrorInfo =
+          error.fullResponse ||
+          error.apiErrorBody ||
+          error.message ||
+          String(error);
+
+        legacyTaskQueueService.updateTaskStatus(taskId, TaskStatus.FAILED, {
+          error: {
+            code: errorCode,
+            message: errorMessage,
+            details: {
+              originalError: originalErrorInfo,
+              timestamp: Date.now(),
+            },
+          },
+        });
+      } finally {
+        onTaskFinished(taskId);
+      }
+    };
+
     // Function to resume an async image task that has a remoteId
     const resumeAsyncImageTask = async (task: Task) => {
       const taskId = task.id;
@@ -220,7 +283,8 @@ export function useTaskExecutor(): void {
       try {
         const result = await generationAPIService.resumeAsyncImageGeneration(
           taskId,
-          remoteId
+          remoteId,
+          task.params.modelRef || task.params.model || null
         );
 
         if (!isActive) return;
@@ -304,8 +368,7 @@ export function useTaskExecutor(): void {
             sourceModel: model,
           },
           {
-            onStatusChange: (status: CharacterStatus) => {
-            },
+            onStatusChange: (_status: CharacterStatus) => undefined,
           }
         );
 
@@ -338,7 +401,6 @@ export function useTaskExecutor(): void {
           },
           remoteId: result.characterId,
         });
-
       } catch (error: any) {
         if (!isActive) return;
 
@@ -369,7 +431,6 @@ export function useTaskExecutor(): void {
             details: errorDetails,
           },
         });
-
       } finally {
         onTaskFinished(taskId);
       }
@@ -403,6 +464,14 @@ export function useTaskExecutor(): void {
         return;
       }
 
+      if (
+        task.type === TaskType.AUDIO &&
+        task.remoteId &&
+        task.status === TaskStatus.PROCESSING
+      ) {
+        return resumeAudioTask(task);
+      }
+
       // Prevent duplicate execution
       if (executingTasksRef.current.has(taskId)) {
         return;
@@ -427,7 +496,6 @@ export function useTaskExecutor(): void {
         legacyTaskQueueService.updateTaskStatus(taskId, TaskStatus.COMPLETED, {
           result,
         });
-
 
         // Register image/video metadata in unified cache
         if (result.url) {
@@ -477,7 +545,6 @@ export function useTaskExecutor(): void {
             details: errorDetails,
           },
         });
-
       } finally {
         onTaskFinished(taskId);
       }
@@ -487,7 +554,7 @@ export function useTaskExecutor(): void {
     const enqueueTask = (task: Task) => {
       if (executingTasksRef.current.has(task.id)) return;
       // 避免重复入队
-      if (pendingQueueRef.current.some(t => t.id === task.id)) return;
+      if (pendingQueueRef.current.some((t) => t.id === task.id)) return;
 
       if (executingTasksRef.current.size < MAX_CONCURRENT_TASKS) {
         executeTask(task);
@@ -511,19 +578,28 @@ export function useTaskExecutor(): void {
       const resumableTasks = tasks.filter(
         (task) =>
           task.type === TaskType.IMAGE &&
-            task.remoteId &&
-            task.status === TaskStatus.PROCESSING &&
-            isAsyncImageModel(task.params.model)
+          task.remoteId &&
+          task.status === TaskStatus.PROCESSING &&
+          isAsyncImageModel(task.params.model)
+      );
+      const resumableAudioTasks = tasks.filter(
+        (task) =>
+          task.type === TaskType.AUDIO &&
+          task.remoteId &&
+          task.status === TaskStatus.PROCESSING
       );
 
       console.warn(
-        `[TaskExecutor] processPendingTasks: ${tasks.length} total, ${pendingTasks.length} pending, ${resumableTasks.length} resumable, ${executingTasksRef.current.size} executing`
+        `[TaskExecutor] processPendingTasks: ${tasks.length} total, ${pendingTasks.length} pending, ${resumableTasks.length} resumable-image, ${resumableAudioTasks.length} resumable-audio, ${executingTasksRef.current.size} executing`
       );
 
       pendingTasks.forEach((task) => {
         enqueueTask(task);
       });
       resumableTasks.forEach((task) => {
+        enqueueTask(task);
+      });
+      resumableAudioTasks.forEach((task) => {
         enqueueTask(task);
       });
     };
@@ -581,6 +657,13 @@ export function useTaskExecutor(): void {
             task.type === TaskType.IMAGE &&
             task.status === TaskStatus.PROCESSING &&
             isAsyncImageModel(task.params.model)
+          ) {
+            enqueueTask(task);
+          } else if (
+            !executingTasksRef.current.has(task.id) &&
+            task.remoteId &&
+            task.type === TaskType.AUDIO &&
+            task.status === TaskStatus.PROCESSING
           ) {
             enqueueTask(task);
           }

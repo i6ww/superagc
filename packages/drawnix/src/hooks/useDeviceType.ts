@@ -119,7 +119,20 @@ export function useDeviceType(): DeviceInfo {
   const [deviceInfo, setDeviceInfo] = useState<DeviceInfo>(getDeviceInfo);
 
   const updateDeviceInfo = useCallback(() => {
-    setDeviceInfo(getDeviceInfo());
+    setDeviceInfo(prev => {
+      const next = getDeviceInfo();
+      // 值相同时返回旧引用，避免不必要的重渲染
+      if (
+        prev.type === next.type &&
+        prev.viewportWidth === next.viewportWidth &&
+        prev.viewportHeight === next.viewportHeight &&
+        prev.isPortrait === next.isPortrait &&
+        prev.isTouchDevice === next.isTouchDevice
+      ) {
+        return prev;
+      }
+      return next;
+    });
   }, []);
 
   useEffect(() => {

@@ -380,11 +380,27 @@ describe('ai-input-parser', () => {
 
         expect(result).toMatchObject({
           scenario: 'agent_flow',
-          generationType: 'text',
+          generationType: 'agent',
           prompt: '请帮我生成一张赛博朋克风格的城市夜景图',
           count: 1,
           hasExtraContent: true,
         });
+      });
+
+      it('文本生成场景 - 显式文本模式应直接生成', () => {
+        const result = parseAIInput('', createSelection([], 1), {
+          generationType: 'text',
+          modelId: 'deepseek-v3.2',
+        });
+
+        expect(result).toMatchObject({
+          scenario: 'direct_generation',
+          generationType: 'text',
+          modelId: 'deepseek-v3.2',
+          count: 1,
+          hasExtraContent: false,
+        });
+        expect(result.prompt).toContain('结构化文本');
       });
 
       it('多图融合场景', () => {

@@ -5,8 +5,18 @@
  * 负责元数据管理、智能图片传递、缓存满处理等功能
  */
 
+import {
+  calculateBlobChecksum,
+  getFileExtension,
+  isDataURL,
+  normalizeImageDataUrl,
+} from '@aitu/utils';
 import { getDataURL } from '../data/blob';
 import { swChannelClient } from './sw-channel/client';
+import {
+  AI_GENERATED_AUDIO_URL_PREFIX,
+  isVirtualMediaUrl,
+} from '../utils/virtual-media-url';
 
 // ==================== 常量定义 ====================
 
@@ -23,6 +33,48 @@ const LEGACY_DB_NAMES = {
 
 /** Service Worker 图片缓存名称 */
 const IMAGE_CACHE_NAME = 'drawnix-images';
+
+const VOLATILE_REMOTE_CACHE_QUERY_PARAMS = new Set([
+  '_t',
+  'cache_buster',
+  'v',
+  'timestamp',
+  'nocache',
+  '_cb',
+  't',
+  'retry',
+  '_retry',
+  'rand',
+  '_force',
+  'bypass_sw',
+  'direct_fetch',
+  'thumbnail',
+  'expires',
+  'signature',
+  'sig',
+  'token',
+  'policy',
+  'x-amz-algorithm',
+  'x-amz-credential',
+  'x-amz-date',
+  'x-amz-expires',
+  'x-amz-security-token',
+  'x-amz-signature',
+  'x-amz-signedheaders',
+  'x-goog-algorithm',
+  'x-goog-credential',
+  'x-goog-date',
+  'x-goog-expires',
+  'x-goog-signature',
+  'x-goog-signedheaders',
+  'ossaccesskeyid',
+  'x-oss-security-token',
+  'x-oss-signature-version',
+  'x-oss-credential',
+  'x-oss-date',
+  'x-oss-expires',
+  'x-oss-signature',
+]);
 
 /** 缓存策略常量 */
 export const CACHE_CONSTANTS = {
@@ -45,7 +97,21 @@ export type CacheProgressCallback = (progress: number) => void;
 // ==================== 类型定义 ====================
 
 /** 缓存媒体类型 */
-export type CacheMediaType = 'image' | 'video';
+export type CacheMediaType = 'image' | 'video' | 'audio';
+
+export interface CacheMediaFromBlobOptions {
+  metadata?: {
+    taskId?: string;
+    prompt?: string;
+    model?: string;
+    [key: string]: any;
+  };
+  contentHash?: string;
+  cachedAt?: number;
+  lastUsed?: number;
+}
+
+type CacheMediaMetadata = NonNullable<CacheMediaFromBlobOptions['metadata']>;
 
 /** 缓存条目元数据 */
 export interface CachedMedia {
@@ -57,6 +123,8 @@ export interface CachedMedia {
   mimeType: string;
   /** 文件大小（字节） */
   size: number;
+  /** 文件内容哈希（本地文件去重主键） */
+  contentHash?: string;
   /** 缓存时间戳 */
   cachedAt: number;
   /** 最后使用时间戳 */
@@ -75,6 +143,7 @@ export interface CachedMedia {
 export interface CacheInfo {
   isCached: boolean;
   cachedAt?: number;
+  lastUsed?: number;
   age?: number; // 毫秒
   size?: number;
   metadata?: CachedMedia['metadata'];
@@ -200,12 +269,16 @@ class UnifiedCacheService {
   }
 
   /**
-   * 刷新内存中的缓存状态
+   * 刷新内存中的缓存状态（限制加载数量避免内存溢出）
    */
   private async refreshCacheState(): Promise<void> {
     try {
       const urls = await this.getAllCachedUrls();
-      this.cachedUrls = new Set(urls);
+      // 只保留最近的 1000 条，避免深度用户内存溢出
+      const MAX_CACHED_URLS = 1000;
+      this.cachedUrls = new Set(
+        urls.length > MAX_CACHED_URLS ? urls.slice(-MAX_CACHED_URLS) : urls
+      );
       this.notifyListeners();
     } catch (error) {
       console.error('[UnifiedCache] Failed to refresh cache state:', error);
@@ -252,6 +325,44 @@ class UnifiedCacheService {
       request.onsuccess = () => resolve();
       request.onerror = () => reject(request.error);
     });
+  }
+
+  private buildContentAddressedUrl(
+    type: CacheMediaType,
+    contentHash: string,
+    mimeType?: string
+  ): string {
+    const extension = getFileExtension('', mimeType);
+    const resolvedExtension = extension !== 'bin'
+      ? extension
+      : type === 'video'
+      ? 'mp4'
+      : type === 'audio'
+      ? 'mp3'
+      : 'png';
+    if (type === 'audio') {
+      return `${AI_GENERATED_AUDIO_URL_PREFIX}content-${contentHash}.${resolvedExtension}`;
+    }
+    return `/__aitu_cache__/${type}/content-${contentHash}.${resolvedExtension}`;
+  }
+
+  private normalizeRemoteCacheUrl(url: string): string {
+    if (!url || url.startsWith('/') || url.startsWith('blob:') || url.startsWith('data:')) {
+      return url;
+    }
+
+    try {
+      const parsed = new URL(url);
+      const keys = Array.from(parsed.searchParams.keys());
+      for (const key of keys) {
+        if (VOLATILE_REMOTE_CACHE_QUERY_PARAMS.has(key.toLowerCase())) {
+          parsed.searchParams.delete(key);
+        }
+      }
+      return parsed.toString();
+    } catch {
+      return url;
+    }
   }
 
   /**
@@ -375,11 +486,12 @@ class UnifiedCacheService {
     }
   ): Promise<void> {
     try {
-      const existing = await this.getItem(url);
+      const normalizedUrl = this.normalizeRemoteCacheUrl(url);
+      const existing = await this.getItem(normalizedUrl);
       const now = Date.now();
 
       const item: CachedMedia = {
-        url,
+        url: normalizedUrl,
         type: 'image',
         mimeType: existing?.mimeType || 'image/png',
         size: existing?.size || 0,
@@ -392,7 +504,7 @@ class UnifiedCacheService {
       };
 
       await this.putItem(item);
-      this.cachedUrls.add(url);
+      this.cachedUrls.add(normalizedUrl);
       this.notifyListeners();
 
       // console.log('[UnifiedCache] Image metadata registered:', { url, taskId: metadata.taskId });
@@ -417,9 +529,16 @@ class UnifiedCacheService {
     } = options;
 
     try {
+      const normalizedUrl = normalizeImageDataUrl(url);
+      if (isDataURL(normalizedUrl)) {
+        return { type: 'base64', value: normalizedUrl };
+      }
+
+      url = normalizedUrl;
+
       // 检查是否为虚拟 URL（素材库本地 URL）
       // 虚拟 URL 必须转换为 base64，因为大模型无法访问本地虚拟路径
-      const isVirtualUrl = url.startsWith('/asset-library/') || url.startsWith('/__aitu_cache__/');
+      const isVirtualUrl = isVirtualMediaUrl(url);
 
       // 1. 查询缓存信息
       const info = await this.getCacheInfo(url);
@@ -581,6 +700,7 @@ class UnifiedCacheService {
       return {
         isCached: true,
         cachedAt: item.cachedAt,
+        lastUsed: item.lastUsed,
         age,
         size: item.size,
         metadata: item.metadata,
@@ -894,9 +1014,25 @@ class UnifiedCacheService {
     url: string,
     blob: Blob,
     type: CacheMediaType,
-    metadata?: { taskId?: string; prompt?: string; model?: string }
+    options?: CacheMediaMetadata | CacheMediaFromBlobOptions
   ): Promise<string> {
     try {
+      const normalizedOptions =
+        options && !('metadata' in options) && !('cachedAt' in options) && !('lastUsed' in options)
+          ? { metadata: options }
+          : options;
+      const cachedAt =
+        typeof normalizedOptions?.cachedAt === 'number' && Number.isFinite(normalizedOptions.cachedAt)
+          ? normalizedOptions.cachedAt
+          : Date.now();
+      const lastUsed =
+        typeof normalizedOptions?.lastUsed === 'number' && Number.isFinite(normalizedOptions.lastUsed)
+          ? normalizedOptions.lastUsed
+          : cachedAt;
+      const contentHash =
+        normalizedOptions?.contentHash ||
+        await calculateBlobChecksum(blob);
+
       // 1. 将 blob 放入 Cache API（通过创建 Response）
       if (typeof caches !== 'undefined') {
         const cache = await caches.open(IMAGE_CACHE_NAME);
@@ -904,7 +1040,8 @@ class UnifiedCacheService {
           headers: {
             'Content-Type': blob.type || 'application/octet-stream',
             'Content-Length': blob.size.toString(),
-            'sw-cache-date': Date.now().toString(), // 记录添加时间，用于素材库排序
+            'sw-cache-date': lastUsed.toString(), // 记录最近访问时间，用于素材库排序
+            'sw-cache-created-at': cachedAt.toString(),
             'sw-image-size': blob.size.toString(),
           },
         });
@@ -932,15 +1069,15 @@ class UnifiedCacheService {
       }
 
       // 2. 存储元数据到 IndexedDB
-      const now = Date.now();
       const item: CachedMedia = {
         url,
         type,
         mimeType: blob.type || (type === 'video' ? 'video/mp4' : 'image/png'),
         size: blob.size,
-        cachedAt: now,
-        lastUsed: now,
-        metadata: metadata || {},
+        contentHash,
+        cachedAt,
+        lastUsed,
+        metadata: normalizedOptions?.metadata || {},
       };
 
       await this.putItem(item);
@@ -963,7 +1100,7 @@ class UnifiedCacheService {
   async getCachedBlob(url: string): Promise<Blob | null> {
     try {
       // 检查是否为虚拟 URL（素材库本地 URL 或缓存 URL）
-      const isVirtualUrl = url.startsWith('/asset-library/') || url.startsWith('/__aitu_cache__/');
+      const isVirtualUrl = isVirtualMediaUrl(url);
 
       // 如果是 taskId（不是完整 URL）或虚拟 URL，直接从 Cache API 获取
       if (isVirtualUrl || (!url.startsWith('http') && !url.startsWith('blob:') && !url.startsWith('/'))) {
@@ -988,6 +1125,38 @@ class UnifiedCacheService {
       console.error('[UnifiedCache] Failed to get cached blob:', error);
       return null;
     }
+  }
+
+  async cacheLocalMediaByContent(
+    blob: Blob,
+    type: CacheMediaType,
+    metadata?: CacheMediaMetadata
+  ): Promise<{ url: string; contentHash: string; reused: boolean }> {
+    const contentHash = await calculateBlobChecksum(blob);
+    const canonicalUrl = this.buildContentAddressedUrl(type, contentHash, blob.type);
+    const existing = await this.getItem(canonicalUrl);
+
+    if (existing) {
+      if (metadata && Object.keys(metadata).length > 0) {
+        await this.updateCachedMedia(canonicalUrl, { metadata });
+      }
+      return {
+        url: canonicalUrl,
+        contentHash,
+        reused: true,
+      };
+    }
+
+    await this.cacheMediaFromBlob(canonicalUrl, blob, type, {
+      metadata,
+      contentHash,
+    });
+
+    return {
+      url: canonicalUrl,
+      contentHash,
+      reused: false,
+    };
   }
 
   /**

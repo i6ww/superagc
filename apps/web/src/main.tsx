@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import * as ReactDOM from 'react-dom/client';
 import * as Sentry from '@sentry/react';
 import App from './app/app';
+import { ErrorBoundary } from './app/ErrorBoundary';
 import { initCrashLogger } from './crash-logger';
 import './utils/permissions-policy-fix';
 import {
@@ -381,6 +382,8 @@ const root = ReactDOM.createRoot(
 );
 root.render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>
 );

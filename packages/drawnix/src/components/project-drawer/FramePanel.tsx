@@ -6,7 +6,6 @@
  */
 
 import React, { useMemo, useCallback, useState, useEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
 import classNames from 'classnames';
 import { Input, Button, MessagePlugin, Tooltip, Loading } from 'tdesign-react';
 import { SearchIcon, EditIcon, DeleteIcon, ViewListIcon, AddIcon, PlayCircleIcon, ImageIcon, LayersIcon, FileCopyIcon } from 'tdesign-icons-react';
@@ -37,6 +36,13 @@ import {
 import { getImageRegion, type PPTFrameMeta } from '../../services/ppt';
 import { duplicateFrame, focusFrame } from '../../utils/frame-duplicate';
 import { useI18n } from '../../i18n';
+import { DownloadIcon } from '../icons';
+import { exportAllPPTFrames, exportFramesToPPT } from '../../services/ppt/ppt-export-service';
+import {
+  ContextMenu,
+  useContextMenuState,
+  type ContextMenuEntry,
+} from '../shared';
 
 interface FrameInfo {
   frame: PlaitFrame;
@@ -62,12 +68,13 @@ export const FramePanel: React.FC = () => {
   const [generatingImageIds, setGeneratingImageIds] = useState<Set<string>>(new Set());
   const [isGeneratingAll, setIsGeneratingAll] = useState(false);
   const bgFileInputRef = useRef<HTMLInputElement>(null);
-  const [contextMenu, setContextMenu] = useState<{
-    visible: boolean;
-    x: number;
-    y: number;
-    frameInfo: FrameInfo;
-  } | null>(null);
+  const {
+    contextMenu,
+    open: openContextMenu,
+    close: closeContextMenu,
+  } = useContextMenuState<FrameInfo>();
+  const [isExportingAllPPT, setIsExportingAllPPT] = useState(false);
+  const [exportingFrameId, setExportingFrameId] = useState<string | null>(null);
 
   // 监听画布变化，强制刷新 Frame 列表
   // FramePanel 在 BoardContext（Wrapper）外部渲染，无法通过 BoardContext 的 v 版本号触发重渲染
@@ -329,42 +336,18 @@ export const FramePanel: React.FC = () => {
     [getDragProps, rootIndexMap, noop]
   );
 
-  const closeContextMenu = useCallback(() => {
-    setContextMenu(null);
-  }, []);
-
-  useEffect(() => {
-    if (contextMenu?.visible) {
-      const handleClick = () => closeContextMenu();
-      document.addEventListener('click', handleClick);
-      document.addEventListener('contextmenu', handleClick);
-      return () => {
-        document.removeEventListener('click', handleClick);
-        document.removeEventListener('contextmenu', handleClick);
-      };
-    }
-    return undefined;
-  }, [contextMenu?.visible, closeContextMenu]);
-
   const handleContextMenu = useCallback(
     (e: React.MouseEvent, frameInfo: FrameInfo) => {
       e.preventDefault();
       e.stopPropagation();
       setSelectedFrameKey(frameInfo.listKey);
-      setContextMenu({
-        visible: true,
-        x: e.clientX,
-        y: e.clientY,
-        frameInfo,
-      });
+      openContextMenu(e, frameInfo);
     },
-    []
+    [openContextMenu]
   );
 
   const handleContextMenuAction = useCallback(
-    (action: 'rename' | 'duplicate' | 'delete') => {
-      if (!contextMenu) return;
-      const frameInfo = contextMenu.frameInfo;
+    (action: 'rename' | 'duplicate' | 'delete', frameInfo: FrameInfo) => {
       if (action === 'rename') {
         setEditingKey(frameInfo.listKey);
         setEditingName(frameInfo.frame.name);
@@ -377,8 +360,31 @@ export const FramePanel: React.FC = () => {
       }
       closeContextMenu();
     },
-    [contextMenu, handleDelete, handleDuplicate, closeContextMenu]
+    [handleDelete, handleDuplicate, closeContextMenu]
   );
+
+  const contextMenuItems = useMemo<ContextMenuEntry<FrameInfo>[]>(() => [
+    {
+      key: 'rename',
+      label: '重命名',
+      icon: <EditIcon />,
+      onSelect: (frameInfo) => handleContextMenuAction('rename', frameInfo),
+    },
+    {
+      key: 'duplicate',
+      label: '复制',
+      icon: <FileCopyIcon />,
+      onSelect: (frameInfo) => handleContextMenuAction('duplicate', frameInfo),
+    },
+    { key: 'divider-1', type: 'divider' },
+    {
+      key: 'delete',
+      label: '删除',
+      icon: <DeleteIcon />,
+      danger: true,
+      onSelect: (frameInfo) => handleContextMenuAction('delete', frameInfo),
+    },
+  ], [handleContextMenuAction]);
 
   // 统计有配图提示词的 Frame 数量
   const framesWithImagePrompt = useMemo(() => {
@@ -517,8 +523,8 @@ export const FramePanel: React.FC = () => {
     let failCount = 0;
 
     try {
-      // 并行生成所有图片
-      const promises = framesToGenerate.map(async (frameInfo) => {
+      // 必须串行：并行 insertMediaIntoFrame 会用 childrenCountBefore 定位新节点，竞态会导致 frameId 绑错页、导出时配图挤在同一页
+      for (const frameInfo of framesToGenerate) {
         const frameId = frameInfo.frame.id;
         setGeneratingImageIds((prev) => new Set(prev).add(frameId));
 
@@ -568,9 +574,7 @@ export const FramePanel: React.FC = () => {
             return next;
           });
         }
-      });
-
-      await Promise.all(promises);
+      }
 
       if (successCount > 0 && failCount === 0) {
         MessagePlugin.success(`已为 ${successCount} 个页面生成配图`);
@@ -583,6 +587,51 @@ export const FramePanel: React.FC = () => {
       setIsGeneratingAll(false);
     }
   }, [board, frames, isGeneratingAll]);
+
+  // 导出所有 Frame 为一个 PPT 文件
+  const handleExportAllPPT = useCallback(async () => {
+    if (!board) return;
+    if (frames.length === 0) {
+      MessagePlugin.info('当前没有可导出的 Frame');
+      return;
+    }
+
+    if (isExportingAllPPT) return;
+    setIsExportingAllPPT(true);
+    try {
+      await exportAllPPTFrames(board, { fileName: 'aitu-ppt' });
+      MessagePlugin.success(`已导出 ${frames.length} 页 PPT`);
+    } catch (error) {
+      console.error('[FramePanel] Export all PPT failed:', error);
+      MessagePlugin.error('PPT 导出失败');
+    } finally {
+      setIsExportingAllPPT(false);
+    }
+  }, [board, isExportingAllPPT, frames]);
+
+  // 导出单个 Frame 为 PPT 文件
+  const handleExportSinglePPT = useCallback(
+    async (frameInfo: FrameInfo, e?: React.MouseEvent) => {
+      e?.stopPropagation();
+      if (!board) return;
+
+      if (exportingFrameId) return;
+      setExportingFrameId(frameInfo.frame.id);
+      try {
+        await exportFramesToPPT(board, [frameInfo.frame], {
+          fileName: frameInfo.frame.name || 'slide',
+        });
+        MessagePlugin.success(`已导出「${frameInfo.frame.name}」为 PPT`);
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error('[FramePanel] Export single PPT failed:', error);
+        MessagePlugin.error('PPT 导出失败');
+      } finally {
+        setExportingFrameId(null);
+      }
+    },
+    [board, exportingFrameId]
+  );
 
   if (!board) {
     return (
@@ -638,6 +687,23 @@ export const FramePanel: React.FC = () => {
               icon={isGeneratingAll ? <Loading size="small" /> : <ImageIcon />}
               disabled={isGeneratingAll}
               onClick={handleGenerateAllImages}
+            />
+          </Tooltip>
+        )}
+        {frames.length > 0 && (
+          <Tooltip
+            content={isExportingAllPPT ? '正在导出 PPT...' : '导出所有 PPT 页面'}
+            theme="light"
+          >
+            <Button
+              variant="outline"
+              size="small"
+              shape="square"
+              icon={
+                isExportingAllPPT ? <Loading size="small" /> : <DownloadIcon size={16} />
+              }
+              disabled={isExportingAllPPT}
+              onClick={handleExportAllPPT}
             />
           </Tooltip>
         )}
@@ -748,6 +814,25 @@ export const FramePanel: React.FC = () => {
                 </div>
 
                 <div className="frame-panel__item-actions">
+                  <Tooltip
+                    content={exportingFrameId === info.frame.id ? '正在导出 PPT...' : '导出单页 PPT'}
+                    theme="light"
+                  >
+                    <Button
+                      variant="text"
+                      size="small"
+                      shape="square"
+                      icon={
+                        exportingFrameId === info.frame.id ? (
+                          <Loading size="small" />
+                        ) : (
+                          <DownloadIcon size={16} />
+                        )
+                      }
+                      onClick={(e) => handleExportSinglePPT(info, e as unknown as React.MouseEvent)}
+                      disabled={exportingFrameId === info.frame.id}
+                    />
+                  </Tooltip>
                   {info.pptMeta?.imagePrompt && (
                     <Tooltip content={generatingImageIds.has(info.frame.id) ? '生成中...' : '生成配图'} theme="light">
                       <Button
@@ -784,32 +869,11 @@ export const FramePanel: React.FC = () => {
         </div>
       )}
 
-      {contextMenu?.visible && createPortal(
-        <div
-          className="project-drawer-context-menu"
-          style={{
-            position: 'fixed',
-            left: contextMenu.x,
-            top: contextMenu.y,
-            zIndex: 10000,
-          }}
-        >
-          <div className="project-drawer-context-menu__item" onClick={() => handleContextMenuAction('rename')}>
-            <EditIcon />
-            <span>重命名</span>
-          </div>
-          <div className="project-drawer-context-menu__item" onClick={() => handleContextMenuAction('duplicate')}>
-            <FileCopyIcon />
-            <span>复制</span>
-          </div>
-          <div className="project-drawer-context-menu__divider" />
-          <div className="project-drawer-context-menu__item project-drawer-context-menu__item--danger" onClick={() => handleContextMenuAction('delete')}>
-            <DeleteIcon />
-            <span>删除</span>
-          </div>
-        </div>,
-        document.body
-      )}
+      <ContextMenu
+        state={contextMenu}
+        items={contextMenuItems}
+        onClose={closeContextMenu}
+      />
 
       {/* 添加 Frame 弹窗 */}
       <AddFrameDialog
