@@ -1,6 +1,6 @@
 {
   "version": "0.6.24",
-  "buildTime": "2026-04-13T09:30:04.140Z",
+  "buildTime": "2026-04-13T09:30:06.963Z",
   "gitCommit": "unknown",
   "changelog": [
     "移除视频尺寸 Select 以绕开 TDesign Option 更新环",
