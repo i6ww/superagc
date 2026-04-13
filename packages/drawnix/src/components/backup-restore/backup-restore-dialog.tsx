@@ -299,7 +299,7 @@ export const BackupRestoreDialog = ({
               >
                 <div className="backup-restore-dialog__option-content">
                   <span className="backup-restore-dialog__option-title">素材库</span>
-                  <span className="backup-restore-dialog__option-desc">包含所有本地上传的图片和视频</span>
+                  <span className="backup-restore-dialog__option-desc">包含所有本地上传的图片、视频和音频</span>
                 </div>
               </Checkbox>
 
@@ -316,7 +316,7 @@ export const BackupRestoreDialog = ({
             </div>
 
             <div className="backup-restore-dialog__time-range">
-              <div className="backup-restore-dialog__time-range-title">图片导出时间范围（可选）</div>
+              <div className="backup-restore-dialog__time-range-title">素材导出时间范围（可选）</div>
               <div className="backup-restore-dialog__time-range-row">
                 <label className="backup-restore-dialog__time-range-field">
                   <span>开始时间</span>
