@@ -17,6 +17,7 @@ import {
   getDefaultPromptPreset,
   modelBenchmarkService,
   rankBenchmarkEntries,
+  computeValueScore,
   type BenchmarkCompareMode,
   type BenchmarkModality,
   type BenchmarkRankingMode,
@@ -72,6 +73,7 @@ const RANKING_LABELS: Record<BenchmarkRankingMode, string> = {
   speed: '速度优先',
   cost: '成本优先',
   balanced: '综合平衡',
+  'value-for-money': '性价比',
 };
 
 const SESSION_STATUS_LABELS: Record<string, string> = {
@@ -1853,6 +1855,13 @@ function ModelBenchmarkWorkbench({}: ModelBenchmarkWorkbenchProps) {
                         {entry.estimatedCost === null
                           ? '未知'
                           : `¥${entry.estimatedCost.toFixed(4)}`}
+                      </span>
+                      <span>
+                        性价比{' '}
+                        {(() => {
+                          const vs = computeValueScore(entry);
+                          return vs === null ? '—' : `${vs}/10`;
+                        })()}
                       </span>
                     </div>
 

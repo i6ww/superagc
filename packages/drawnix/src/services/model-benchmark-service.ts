@@ -18,6 +18,7 @@ import {
 } from './model-adapters';
 import {
   BENCHMARK_PROMPT_PRESETS,
+  computeValueScore,
   getDefaultPromptPreset,
   rankBenchmarkEntries,
   resolvePromptPreset,
@@ -105,6 +106,13 @@ export interface ModelBenchmarkStoreState {
   sessions: ModelBenchmarkSession[];
   activeSessionId: string | null;
   ready: boolean;
+}
+
+export interface ModelBenchmarkSummary {
+  hasFavorite: boolean;
+  hasRejected: boolean;
+  bestValueScore: number | null;
+  latestUserScore: number | null;
 }
 
 export interface CreateBenchmarkSessionInput {
@@ -531,6 +539,30 @@ class ModelBenchmarkService {
     return null;
   }
 
+  getModelBenchmarkSummary(modelId: string): ModelBenchmarkSummary {
+    let hasFavorite = false;
+    let hasRejected = false;
+    let bestValueScore: number | null = null;
+    let latestUserScore: number | null = null;
+
+    for (const session of this.state$.value.sessions) {
+      for (const entry of session.entries) {
+        if (entry.modelId !== modelId) continue;
+        if (entry.favorite) hasFavorite = true;
+        if (entry.rejected) hasRejected = true;
+        if (latestUserScore === null && entry.userScore != null) {
+          latestUserScore = entry.userScore;
+        }
+        const vs = computeValueScore(entry);
+        if (vs !== null && (bestValueScore === null || vs > bestValueScore)) {
+          bestValueScore = vs;
+        }
+      }
+    }
+
+    return { hasFavorite, hasRejected, bestValueScore, latestUserScore };
+  }
+
   setActiveSession(sessionId: string | null) {
     this.mutate((state) => ({
       ...state,
@@ -809,7 +841,7 @@ export function buildBenchmarkTarget(
   };
 }
 
-export { BENCHMARK_PROMPT_PRESETS, getDefaultPromptPreset, rankBenchmarkEntries };
+export { BENCHMARK_PROMPT_PRESETS, getDefaultPromptPreset, rankBenchmarkEntries, computeValueScore };
 export { resolvePromptPreset as resolveBenchmarkPromptPreset };
 
 export const modelBenchmarkService = new ModelBenchmarkService();

@@ -25,6 +25,7 @@ import {
 import { ModelVendorMark } from '../shared/ModelVendorBrand';
 import { VendorTabPanel, type VendorTab } from '../shared/VendorTabPanel';
 import { ModelHealthBadge } from '../shared/ModelHealthBadge';
+import { ModelBenchmarkBadge } from '../shared/ModelBenchmarkBadge';
 import { useFormattedModelPrice, useModelMeta } from '../../hooks/use-model-pricing';
 import { Z_INDEX } from '../../constants/z-index';
 import { useSelectableModels } from '../../hooks/use-runtime-models';
@@ -385,6 +386,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = React.memo(
                             </span>
                           ) : null}
                           <ModelHealthBadge modelId={model.id} />
+                          <ModelBenchmarkBadge modelId={model.id} />
                           <ModelSelectorPriceTag model={model} />
                         </div>
                         {itemDescription ? (

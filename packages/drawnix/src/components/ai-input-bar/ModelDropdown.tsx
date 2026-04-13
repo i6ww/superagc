@@ -42,6 +42,7 @@ import {
 } from '../shared';
 import './model-dropdown.scss';
 import { ModelHealthBadge } from '../shared/ModelHealthBadge';
+import { ModelBenchmarkBadge } from '../shared/ModelBenchmarkBadge';
 import { useFormattedModelPrice, useModelMeta } from '../../hooks/use-model-pricing';
 import { modelPricingService } from '../../utils/model-pricing-service';
 import { KeyboardDropdown } from './KeyboardDropdown';
@@ -1043,6 +1044,7 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
                                 </span>
                               )}
                               <ModelHealthBadge modelId={model.id} />
+                              <ModelBenchmarkBadge modelId={model.id} />
                               <ModelDropdownPriceTag model={model} />
                             </div>
                             {model.description ? (

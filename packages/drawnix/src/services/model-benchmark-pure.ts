@@ -1,7 +1,7 @@
 import type { ModelType } from '../constants/model-config';
 
 export type BenchmarkModality = ModelType;
-export type BenchmarkRankingMode = 'speed' | 'cost' | 'balanced';
+export type BenchmarkRankingMode = 'speed' | 'cost' | 'balanced' | 'value-for-money';
 
 export interface BenchmarkPromptPreset {
   id: string;
@@ -160,6 +160,13 @@ export function rankBenchmarkEntries<T extends BenchmarkRankableEntry>(
     if (left.status === 'completed' && right.status !== 'completed') return -1;
     if (left.status !== 'completed' && right.status === 'completed') return 1;
 
+    if (rankingMode === 'value-for-money') {
+      const leftScore = computeValueScore(left);
+      const rightScore = computeValueScore(right);
+      const delta = (rightScore ?? -1) - (leftScore ?? -1);
+      if (delta !== 0) return delta;
+    }
+
     if (rankingMode === 'cost') {
       const costDelta = compareNullableNumber(
         left.estimatedCost,
@@ -186,4 +193,29 @@ export function rankBenchmarkEntries<T extends BenchmarkRankableEntry>(
     return compareNullableNumber(left.totalDurationMs, right.totalDurationMs);
   });
   return ranked;
+}
+
+/**
+ * 计算性价比分数（1-10）
+ * 可用性 = userScore(默认3) × 20 + 速度加成(最多20)，上限100
+ * 性价比 = 可用性 / (cost × 1000 + 1)，映射到 1-10
+ */
+export function computeValueScore(
+  entry: BenchmarkRankableEntry,
+  priceFallback?: number | null
+): number | null {
+  if (entry.status !== 'completed') return null;
+
+  const userScore = entry.userScore ?? 3;
+  const duration = entry.totalDurationMs;
+  const speedBonus = duration != null
+    ? Math.max(0, 1 - duration / 120000) * 20
+    : 0;
+  const usability = Math.min(100, userScore * 20 + speedBonus);
+
+  const cost = entry.estimatedCost ?? priceFallback ?? null;
+  if (cost === null) return null;
+
+  const raw = usability / (cost * 1000 + 1);
+  return Math.min(10, Math.max(1, Math.round(raw)));
 }
