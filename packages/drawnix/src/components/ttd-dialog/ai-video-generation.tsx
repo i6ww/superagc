@@ -446,7 +446,9 @@ const AIVideoGeneration = ({
 
   const { language } = useI18n();
   const { createTask } = useTaskQueue();
+  const isModelControlled = selectedModel !== undefined;
   const renderCountRef = React.useRef(0);
+  const lastSyncedSelectedSelectionKeyRef = React.useRef<string | null>(null);
   renderCountRef.current += 1;
   logAIVideoTrace('render', {
     renderCount: renderCountRef.current,
@@ -471,6 +473,14 @@ const AIVideoGeneration = ({
 
   // Sync model from global settings changes (from header dropdown)
   useEffect(() => {
+    if (isModelControlled) {
+      logAIVideoTrace('skip settings listener in controlled mode', {
+        selectedModel,
+        selectedModelRef,
+      });
+      return;
+    }
+
     const handleSettingsChange = (newSettings: any) => {
       const newModel = newSettings.videoModelName || 'veo3';
       if (newModel !== currentModel) {
@@ -500,7 +510,14 @@ const AIVideoGeneration = ({
     });
     geminiSettings.addListener(handleSettingsChange);
     return () => geminiSettings.removeListener(handleSettingsChange);
-  }, [currentModel, currentModelRef, visibleVideoModels]);
+  }, [
+    currentModel,
+    currentModelRef,
+    isModelControlled,
+    selectedModel,
+    selectedModelRef,
+    visibleVideoModels,
+  ]);
 
   useEffect(() => {
     if (visibleVideoModels.length === 0) return;
@@ -510,14 +527,26 @@ const AIVideoGeneration = ({
       currentModelRef
     );
     if (!matchedModel) {
+      const fallback = visibleVideoModels[0];
+      const nextRef = getModelRefFromConfig(fallback);
       logAIVideoTrace('visible models reconcile', {
         currentModel,
         currentModelRef,
-        fallbackModel: visibleVideoModels[0]?.id || null,
-        fallbackModelRef: getModelRefFromConfig(visibleVideoModels[0]),
+        fallbackModel: fallback?.id || null,
+        fallbackModelRef: nextRef,
       });
-      setCurrentModel(visibleVideoModels[0].id);
-      setCurrentModelRef(getModelRefFromConfig(visibleVideoModels[0]));
+      setCurrentModel(fallback.id);
+      setCurrentModelRef((prev) => {
+        if (
+          prev &&
+          nextRef &&
+          prev.profileId === nextRef.profileId &&
+          prev.modelId === nextRef.modelId
+        ) {
+          return prev;
+        }
+        return nextRef;
+      });
     }
   }, [currentModel, currentModelRef, visibleVideoModels]);
 
@@ -527,35 +556,47 @@ const AIVideoGeneration = ({
       return;
     }
 
-    const currentSelectionKey = getSelectionKey(currentModel, currentModelRef);
     const nextSelectionKey = getSelectionKey(selectedModel, selectedModelRef);
-
-    if (currentSelectionKey !== nextSelectionKey) {
-      logAIVideoTrace('selectedModel prop sync', {
-        currentSelectionKey,
-        nextSelectionKey,
-        currentModel,
-        currentModelRef,
-        selectedModel,
-        selectedModelRef,
-      });
-      setCurrentModel(selectedModel);
-      const matchedModel = findMatchingSelectableModel(
-        visibleVideoModels,
-        selectedModel,
-        selectedModelRef
-      );
-      const nextModelRef =
-        getModelRefFromConfig(matchedModel) || selectedModelRef || null;
-      logAIVideoTrace('selectedModel prop sync -> setCurrentModelRef', {
-        matchedModelId: matchedModel?.id || null,
-        nextModelRef,
-      });
-      setCurrentModelRef(nextModelRef);
+    if (lastSyncedSelectedSelectionKeyRef.current === nextSelectionKey) {
+      return;
     }
+
+    lastSyncedSelectedSelectionKeyRef.current = nextSelectionKey;
+    logAIVideoTrace('selectedModel prop sync', {
+      currentSelectionKey: getSelectionKey(currentModel, currentModelRef),
+      nextSelectionKey,
+      currentModel,
+      currentModelRef,
+      selectedModel,
+      selectedModelRef,
+    });
+    setCurrentModel((prev) => (prev === selectedModel ? prev : selectedModel));
+    const matchedModel = findMatchingSelectableModel(
+      visibleVideoModels,
+      selectedModel,
+      selectedModelRef
+    );
+    const nextModelRef =
+      getModelRefFromConfig(matchedModel) || selectedModelRef || null;
+    logAIVideoTrace('selectedModel prop sync -> setCurrentModelRef', {
+      matchedModelId: matchedModel?.id || null,
+      nextModelRef,
+    });
+    setCurrentModelRef((prev) => {
+      if (
+        prev &&
+        nextModelRef &&
+        prev.profileId === nextModelRef.profileId &&
+        prev.modelId === nextModelRef.modelId
+      ) {
+        return prev;
+      }
+      if (!prev && !nextModelRef) {
+        return prev;
+      }
+      return nextModelRef;
+    });
   }, [
-    currentModel,
-    currentModelRef,
     selectedModel,
     selectedModelRef,
     visibleVideoModels,
