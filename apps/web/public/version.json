@@ -1,12 +1,8 @@
 {
-  "version": "0.6.21",
-  "buildTime": "2026-04-13T07:34:41.131Z",
+  "version": "0.6.22",
+  "buildTime": "2026-04-13T08:16:35.421Z",
   "gitCommit": "unknown",
   "changelog": [
-    "iframe 环境下打开 AI 图片生成弹窗 Maximum update depth exceeded",
-    "避免 Milkdown 在 editorView 缺失时读取 markdown",
-    "收口关闭态工具箱与素材库弹窗挂载，修复用户页 Hook 崩溃",
-    "知识库素材嵌入 — Milkdown 自定义节点插件",
-    "修复媒体库弹窗条件渲染和音频封面URL处理"
+    "收口 AI 视频弹窗参数回写循环"
   ]
 }

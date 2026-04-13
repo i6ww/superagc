@@ -1,6 +1,19 @@
 {
   "versions": [
     {
+      "version": "0.6.22",
+      "date": "2026-04-13",
+      "changes": {
+        "features": [],
+        "fixes": [
+          "收口 AI 视频弹窗参数回写循环"
+        ],
+        "improvements": []
+      },
+      "type": "patch",
+      "highlights": "收口 AI 视频弹窗参数回写循环"
+    },
+    {
       "version": "0.6.21",
       "date": "2026-04-13",
       "changes": {

@@ -1,3 +1,17 @@
+## 0.6.22 (2026-04-13)
+
+### 🩹 Fixes
+
+- 收口 AI 视频弹窗参数回写循环 ([6baf3e06](https://github.com/ljquan/aitu/commit/6baf3e06))
+
+### 🔧 Chores
+
+- 更新应用版本至0.6.21并刷新构建时间 ([252a203b](https://github.com/ljquan/aitu/commit/252a203b))
+
+### ❤️  Thank You
+
+- liquid <ljquan@qq.com>
+
 ## 0.6.21 (2026-04-13)
 
 ### 🚀 Features
