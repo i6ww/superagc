@@ -1,6 +1,21 @@
 {
   "versions": [
     {
+      "version": "0.6.20",
+      "date": "2026-04-13",
+      "changes": {
+        "features": [
+          "模型测试性价比评分 + 选择器收藏/淘汰标记"
+        ],
+        "fixes": [
+          "统一音频下载封面写入逻辑"
+        ],
+        "improvements": []
+      },
+      "type": "patch",
+      "highlights": "模型测试性价比评分 + 选择器收藏/淘汰标记"
+    },
+    {
       "version": "0.6.19",
       "date": "2026-04-12",
       "changes": {

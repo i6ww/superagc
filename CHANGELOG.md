@@ -1,3 +1,17 @@
+## 0.6.20 (2026-04-13)
+
+### 🚀 Features
+
+- 模型测试性价比评分 + 选择器收藏/淘汰标记 ([e3b694ac](https://github.com/ljquan/aitu/commit/e3b694ac))
+
+### 🩹 Fixes
+
+- 统一音频下载封面写入逻辑 ([97ab456a](https://github.com/ljquan/aitu/commit/97ab456a))
+
+### ❤️  Thank You
+
+- liquid <ljquan@qq.com>
+
 ## 0.6.19 (2026-04-12)
 
 ### 🚀 Features
