@@ -261,18 +261,29 @@ const AIVideoGeneration = ({
       ),
     [currentModel, currentModelRef, videoSelectedParams]
   );
+  const imageUploadLabelsSignature = React.useMemo(
+    () => (modelConfig.imageUpload.labels || []).join('|'),
+    [modelConfig.imageUpload.labels]
+  );
+  const stableImageUploadLabels = React.useMemo(
+    () =>
+      imageUploadLabelsSignature
+        ? imageUploadLabelsSignature.split('|')
+        : [],
+    [imageUploadLabelsSignature]
+  );
   const imageUploadConfig = React.useMemo(() => {
-    const labels = modelConfig.imageUpload.labels || [];
     return {
       maxCount: modelConfig.imageUpload.maxCount,
       mode: modelConfig.imageUpload.mode,
-      labels,
-      labelsSignature: labels.join('|'),
+      labels: stableImageUploadLabels,
+      labelsSignature: imageUploadLabelsSignature,
     };
   }, [
-    modelConfig.imageUpload.labels,
     modelConfig.imageUpload.maxCount,
     modelConfig.imageUpload.mode,
+    stableImageUploadLabels,
+    imageUploadLabelsSignature,
   ]);
 
   // Duration and size state
@@ -575,8 +586,30 @@ const AIVideoGeneration = ({
       return;
     }
 
+    console.warn('[AIVideoGeneration][debug-v2] mounted', {
+      currentModel,
+      currentModelRef,
+      effectiveDuration,
+      effectiveSize,
+      params: videoSelectedParams,
+    });
+
+    if (typeof window !== 'undefined') {
+      (
+        window as Window & {
+          __aituAIVideoDebugVersion?: string;
+        }
+      ).__aituAIVideoDebugVersion = 'debug-v2';
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!debugAIVideo) {
+      return;
+    }
+
     if (duration !== effectiveDuration || size !== effectiveSize) {
-      console.debug('[AIVideoGeneration] normalized invalid options', {
+      console.warn('[AIVideoGeneration][debug-v2] normalized invalid options', {
         currentModel,
         currentModelRef,
         rawDuration: duration,
