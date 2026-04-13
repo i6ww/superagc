@@ -279,6 +279,7 @@ export async function cacheRemoteUrl(
   index?: number,
   options?: {
     source?: 'AI_GENERATED' | 'PLAYBACK_CACHE';
+    forceRemoteCache?: boolean;
   }
 ): Promise<string> {
   const normalizedUrl =
@@ -290,7 +291,7 @@ export async function cacheRemoteUrl(
   }
 
   if (normalizedUrl.startsWith('http://') || normalizedUrl.startsWith('https://')) {
-    if (mediaType !== 'audio') {
+    if (mediaType !== 'audio' && !options?.forceRemoteCache) {
       return normalizedUrl;
     }
 

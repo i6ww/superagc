@@ -15,10 +15,11 @@ import { insertImageFromUrl } from '../../data/image';
 import { insertVideoFromUrl } from '../../data/video';
 import { MessagePlugin, Dialog, Input, Button, Tooltip } from 'tdesign-react';
 import { SearchIcon, DeleteIcon } from 'tdesign-icons-react';
-import { downloadFromBlob, normalizeImageDataUrl } from '@aitu/utils';
-import { buildDownloadFilename, downloadMediaFile } from '../../utils/download-utils';
-import { applyAudioMetadataToBlob } from '../../utils/audio-id3';
-import { unifiedCacheService } from '../../services/unified-cache-service';
+import { normalizeImageDataUrl } from '@aitu/utils';
+import {
+  buildTaskDownloadItems,
+  smartDownload,
+} from '../../utils/download-utils';
 import { CharacterCreateDialog } from '../character/CharacterCreateDialog';
 import {
   UnifiedMediaViewer,
@@ -174,62 +175,19 @@ export const DialogTaskList: React.FC<DialogTaskListProps> = ({
 
   const handleDownload = async (taskId: string) => {
     const task = tasks.find((t) => t.id === taskId);
-    if (!task?.result?.url && !task?.result?.urls?.length) return;
+    if (!task) return;
 
-    const urls = task.result.urls?.length
-      ? task.result.urls
-      : [task.result.url];
+    const downloadItems = buildTaskDownloadItems(task);
+    if (downloadItems.length === 0) return;
 
     try {
-      for (let i = 0; i < urls.length; i++) {
-        const url = urls[i];
-        const clip = task.result.clips?.[i];
-        const filename = buildDownloadFilename(
-          clip?.title || task.result.title || task.params.title || task.params.prompt,
-          task.type,
-          task.result.format,
-          urls.length > 1 ? `-${i + 1}` : undefined
-        );
-        const audioMetadata =
-          task.type === TaskType.AUDIO
-            ? {
-                title: clip?.title || task.result.title || task.params.title,
-                prompt: task.params.prompt,
-                tags: typeof task.params.tags === 'string' ? task.params.tags : undefined,
-                coverUrl:
-                  clip?.imageLargeUrl ||
-                  clip?.imageUrl ||
-                  task.result.previewImageUrl,
-                artist: task.params.model || task.params.mv || 'Aitu',
-                album: 'Aitu Generated',
-              }
-            : undefined;
-        const cachedBlob = await unifiedCacheService.getCachedBlob(url);
-        if (cachedBlob) {
-          const blob =
-            task.type === TaskType.AUDIO
-              ? await applyAudioMetadataToBlob(cachedBlob, audioMetadata, url)
-              : cachedBlob;
-          downloadFromBlob(blob, filename);
-          continue;
-        }
-        const result = await downloadMediaFile(
-          url,
-          clip?.title || task.result.title || task.params.title || task.params.prompt,
-          task.result.format,
-          task.type,
-          audioMetadata
-        );
-        if (result && 'opened' in result) {
-          // 浏览器已打开标签页
-        }
-      }
+      await smartDownload(downloadItems);
       MessagePlugin.success(
         task.type === TaskType.AUDIO
-          ? urls.length > 1
+          ? downloadItems.length > 1
             ? '多条音频已开始下载'
             : '音频下载成功'
-          : urls.length > 1
+          : downloadItems.length > 1
           ? '多图已开始下载'
           : '下载成功'
       );

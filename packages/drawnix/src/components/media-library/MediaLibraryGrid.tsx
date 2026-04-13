@@ -32,7 +32,6 @@ import {
   Heart,
   ListMusic,
 } from 'lucide-react';
-import JSZip from 'jszip';
 import { 
   ImageUploadIcon as ImageUploadIconComp,
   MediaLibraryIcon,
@@ -40,7 +39,7 @@ import {
 import { useAssets } from '../../contexts/AssetContext';
 import { filterAssets, formatFileSize, formatDate } from '../../utils/asset-utils';
 import { useDeviceType } from '../../hooks/useDeviceType';
-import { downloadFile, normalizeImageDataUrl } from '@aitu/utils';
+import { normalizeImageDataUrl } from '@aitu/utils';
 import { VirtualAssetGrid } from './VirtualAssetGrid';
 import { MediaLibraryEmpty } from './MediaLibraryEmpty';
 import { ViewModeToggle } from './ViewModeToggle';
@@ -68,6 +67,11 @@ import {
   AUDIO_PLAYLIST_ALL_ID,
   type AudioPlaylist,
 } from '../../types/audio-playlist.types';
+import {
+  buildAssetDownloadItem,
+  buildAssetDownloadItems,
+  smartDownload,
+} from '../../utils/download-utils';
 import './MediaLibraryGrid.scss';
 import './VirtualAssetGrid.scss';
 
@@ -314,6 +318,10 @@ export function MediaLibraryGrid({
     () => new Set(selectedPlaylistId ? getPlaylistAssetIds(selectedPlaylistId) : []),
     [getPlaylistAssetIds, selectedPlaylistId]
   );
+
+  const handleAssetDownload = useCallback(async (asset: Asset) => {
+    await smartDownload([buildAssetDownloadItem(asset)]);
+  }, []);
 
   const assetContextMenuItems = useMemo<ContextMenuEntry<Asset>[]>(() => [
     {
@@ -645,107 +653,18 @@ export function MediaLibraryGrid({
   const handleBatchDownload = useCallback(async () => {
     // 只获取筛选结果中被选中的素材
     const selectedAssets = filteredResult.assets.filter(a => selectedAssetIds.has(a.id));
-    const totalFiles = selectedAssets.length;
     
-    if (totalFiles === 0 || isDownloading) return;
+    if (selectedAssets.length === 0 || isDownloading) return;
     
     setIsDownloading(true);
     setDownloadProgress(0);
     
     try {
-      const zip = new JSZip();
-      let fetchedCount = 0;
-      
-      // 逐个获取文件并更新进度（0-50%）
-      const results: Array<{ fileName: string; blob: Blob } | null> = [];
-      
-      for (const asset of selectedAssets) {
-        try {
-          const assetUrl =
-            asset.type === AssetType.IMAGE
-              ? normalizeImageDataUrl(asset.url)
-              : asset.url;
-          const response = await fetch(assetUrl);
-          if (!response.ok) {
-            console.warn(`[MediaLibraryGrid] Failed to fetch ${asset.name}: ${response.status}`);
-            results.push(null);
-          } else {
-            const blob = await response.blob();
-            
-            // 获取文件扩展名
-            let ext = '';
-            if (asset.type === AssetType.IMAGE) {
-              ext = asset.name.match(/\.(jpg|jpeg|png|gif|webp|svg)$/i)?.[0] || '.png';
-            } else {
-              ext = asset.name.match(/\.(mp4|webm|mov|avi)$/i)?.[0] || '.mp4';
-            }
-            
-            // 确保文件名有扩展名
-            const fileName = asset.name.includes('.') ? asset.name : `${asset.name}${ext}`;
-            results.push({ fileName, blob });
-          }
-        } catch (err) {
-          console.warn(`[MediaLibraryGrid] Failed to fetch ${asset.name}:`, err);
-          results.push(null);
-        }
-        
-        fetchedCount++;
-        setDownloadProgress(Math.round((fetchedCount / totalFiles) * 50));
-      }
-      
-      // 添加成功获取的文件到 zip
-      let addedCount = 0;
-      const fileNames = new Map<string, number>();
-      
-      for (const result of results) {
-        if (result) {
-          // 处理重名文件
-          let fileName = result.fileName;
-          const count = fileNames.get(fileName) || 0;
-          if (count > 0) {
-            const dotIndex = fileName.lastIndexOf('.');
-            if (dotIndex > 0) {
-              fileName = `${fileName.slice(0, dotIndex)}_${count}${fileName.slice(dotIndex)}`;
-            } else {
-              fileName = `${fileName}_${count}`;
-            }
-          }
-          fileNames.set(result.fileName, count + 1);
-          
-          zip.file(fileName, result.blob);
-          addedCount++;
-        }
-      }
-      
-      if (addedCount === 0) {
-        console.error('[MediaLibraryGrid] No files were added to the zip');
-        return;
-      }
-      
-      // 生成 zip 文件（50-100%）
-      const zipBlob = await zip.generateAsync(
-        { 
-          type: 'blob',
-          compression: 'DEFLATE',
-          compressionOptions: { level: 6 }
-        },
-        (metadata) => {
-          // 压缩进度：50-100%
-          setDownloadProgress(50 + Math.round(metadata.percent / 2));
-        }
+      await smartDownload(
+        buildAssetDownloadItems(selectedAssets),
+        `素材_${new Date().toISOString().slice(0, 10)}.zip`,
+        setDownloadProgress
       );
-      
-      setDownloadProgress(100);
-      
-      // 下载
-      const url = URL.createObjectURL(zipBlob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `素材_${new Date().toISOString().slice(0, 10)}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
     } catch (error) {
       console.error('[MediaLibraryGrid] Download failed:', error);
     } finally {
@@ -907,6 +826,10 @@ export function MediaLibraryGrid({
       type: asset.type === AssetType.VIDEO ? 'video' : asset.type === AssetType.AUDIO ? 'audio' : 'image',
       title: asset.name,
       alt: asset.name,
+      posterUrl: asset.thumbnail,
+      prompt: asset.prompt,
+      artist: asset.modelName,
+      album: asset.type === AssetType.AUDIO ? 'Aitu Generated' : undefined,
     }));
   }, []);
 
@@ -1353,11 +1276,7 @@ export function MediaLibraryGrid({
                   <button
                     className="media-library-grid__mobile-inspector-btn"
                     onClick={() => {
-                      const downloadUrl =
-                        selectedAsset.type === AssetType.IMAGE
-                          ? normalizeImageDataUrl(selectedAsset.url)
-                          : selectedAsset.url;
-                      downloadFile(downloadUrl, selectedAsset.name);
+                      void handleAssetDownload(selectedAsset);
                     }}
                     data-track="mobile_download"
                   >

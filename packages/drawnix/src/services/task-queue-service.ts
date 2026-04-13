@@ -38,6 +38,30 @@ import {
 import { cacheRemoteUrl, cacheRemoteUrls } from './media-executor/fallback-utils';
 import { STORAGE_LIMITS } from '../constants/TASK_CONSTANTS';
 
+async function cacheAudioCoverUrl(
+  coverUrl: string | undefined,
+  taskId: string,
+  index?: number
+): Promise<string | undefined> {
+  if (!coverUrl) {
+    return undefined;
+  }
+
+  try {
+    return await cacheRemoteUrl(
+      coverUrl,
+      `${taskId}-cover`,
+      'image',
+      'png',
+      index,
+      { forceRemoteCache: true }
+    );
+  } catch (error) {
+    console.warn('[TaskQueueService] Audio cover cache failed, using original URL:', error);
+    return coverUrl;
+  }
+}
+
 /**
  * Task Queue Service
  * Manages task creation, updates, and lifecycle events
@@ -183,6 +207,7 @@ class TaskQueueService {
         let cachedUrl = result.url;
         let cachedUrls = result.urls;
         let cachedPreviewImageUrl = result.imageUrl;
+        let cachedClips = result.clips;
 
         if (fmt !== 'lyrics') {
           try {
@@ -191,9 +216,40 @@ class TaskQueueService {
               cachedUrls = await cacheRemoteUrls(result.urls, task.id, 'audio', fmt);
             }
             if (result.imageUrl) {
-              cachedPreviewImageUrl = await cacheRemoteUrl(
-                result.imageUrl, `${task.id}-cover`, 'image', 'png'
+              cachedPreviewImageUrl = await cacheAudioCoverUrl(
+                result.imageUrl,
+                task.id
               );
+            }
+            if (result.clips?.length) {
+              cachedClips = await Promise.all(
+                result.clips.map(async (clip, index) => {
+                  const cachedCoverUrl = await cacheAudioCoverUrl(
+                    clip.imageLargeUrl || clip.imageUrl,
+                    task.id,
+                    result.clips!.length > 1 ? index : undefined
+                  );
+
+                  if (!cachedCoverUrl) {
+                    return clip;
+                  }
+
+                  return {
+                    ...clip,
+                    imageLargeUrl: clip.imageLargeUrl
+                      ? cachedCoverUrl
+                      : clip.imageLargeUrl,
+                    imageUrl: clip.imageUrl
+                      ? cachedCoverUrl
+                      : clip.imageUrl || cachedCoverUrl,
+                  };
+                })
+              );
+            }
+            if (!cachedPreviewImageUrl) {
+              cachedPreviewImageUrl =
+                cachedClips?.[0]?.imageLargeUrl ||
+                cachedClips?.[0]?.imageUrl;
             }
           } catch (cacheError) {
             console.warn('[TaskQueueService] Audio cache failed, using original URLs:', cacheError);
@@ -221,7 +277,7 @@ class TaskQueueService {
             providerTaskId: result.providerTaskId || task.remoteId,
             primaryClipId: result.primaryClipId,
             clipIds: result.clipIds,
-            clips: result.clips,
+            clips: cachedClips,
           },
           executionPhase: undefined,
           completedAt: now,

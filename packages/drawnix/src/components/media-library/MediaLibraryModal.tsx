@@ -15,10 +15,10 @@ import type {
   Asset,
 } from '../../types/asset.types';
 import { AssetType, AssetSource, SelectionMode } from '../../types/asset.types';
-import { downloadFile, normalizeImageDataUrl } from '@aitu/utils';
 import { useDrawnix } from '../../hooks/use-drawnix';
 import { removeElementsByAssetIds, removeElementsByAssetUrls, isCacheUrl } from '../../utils/asset-cleanup';
 import { isZipFile, extractMediaFromZip } from '../../utils/zip-utils';
+import { buildAssetDownloadItem, smartDownload } from '../../utils/download-utils';
 import './MediaLibraryModal.scss';
 
 export function MediaLibraryModal({
@@ -123,6 +123,10 @@ export function MediaLibraryModal({
     },
     [onSelect, onClose],
   );
+
+  const handleDownloadAsset = useCallback(async (asset: Asset) => {
+    await smartDownload([buildAssetDownloadItem(asset)]);
+  }, []);
 
   // 处理文件上传
   const handleFileUpload = useCallback(
@@ -320,13 +324,7 @@ export function MediaLibraryModal({
                 asset={selectedAsset}
                 onRename={renameAsset}
                 onDelete={handleRemoveAsset}
-                onDownload={(asset) => {
-                  const downloadUrl =
-                    asset.type === AssetType.IMAGE
-                      ? normalizeImageDataUrl(asset.url)
-                      : asset.url;
-                  downloadFile(downloadUrl, asset.name);
-                }}
+                onDownload={handleDownloadAsset}
                 onSelect={showSelectButton ? handleUseAsset : undefined}
                 showSelectButton={showSelectButton}
                 selectButtonText={selectButtonText}
@@ -351,13 +349,7 @@ export function MediaLibraryModal({
             asset={selectedAsset}
             onRename={renameAsset}
             onDelete={handleRemoveAsset}
-            onDownload={(asset) => {
-              const downloadUrl =
-                asset.type === AssetType.IMAGE
-                  ? normalizeImageDataUrl(asset.url)
-                  : asset.url;
-              downloadFile(downloadUrl, asset.name);
-            }}
+            onDownload={handleDownloadAsset}
             onSelect={showSelectButton ? handleUseAsset : undefined}
             showSelectButton={showSelectButton}
             selectButtonText={selectButtonText}

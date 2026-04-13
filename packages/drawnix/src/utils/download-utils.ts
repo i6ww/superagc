@@ -16,6 +16,10 @@ import {
   processBatchWithConcurrency,
   normalizeImageDataUrl,
 } from '@aitu/utils';
+import type { Asset } from '../types/asset.types';
+import { AssetType } from '../types/asset.types';
+import type { Task } from '../types/task.types';
+import { TaskType } from '../types/task.types';
 import { applyAudioMetadataToBlob, type AudioDownloadMetadata } from './audio-id3';
 
 /**
@@ -88,6 +92,187 @@ export interface BatchDownloadItem {
   audioMetadata?: AudioDownloadMetadata;
 }
 
+export type DownloadProgressCallback = (progress: number) => void;
+
+function clampProgress(progress: number): number {
+  return Math.min(100, Math.max(0, Math.round(progress)));
+}
+
+function reportProgress(
+  onProgress?: DownloadProgressCallback,
+  progress?: number
+): void {
+  if (onProgress === undefined || progress === undefined) {
+    return;
+  }
+  onProgress(clampProgress(progress));
+}
+
+function buildAudioDownloadMetadata(options: {
+  title?: string;
+  prompt?: string;
+  tags?: string;
+  coverUrl?: string;
+  artist?: string;
+  album?: string;
+}): AudioDownloadMetadata {
+  return {
+    title: options.title,
+    prompt: options.prompt,
+    tags: options.tags,
+    coverUrl: options.coverUrl,
+    artist: options.artist || 'Aitu',
+    album: options.album || 'Aitu Generated',
+  };
+}
+
+function getTypeFallbackExtension(type: BatchDownloadItem['type']): string {
+  if (type === 'image') {
+    return 'png';
+  }
+  if (type === 'video') {
+    return 'mp4';
+  }
+  return 'mp3';
+}
+
+function resolveDownloadExtension(
+  primaryValue: string | undefined,
+  fallbackExtension: string,
+  secondaryValue?: string
+): string {
+  if (primaryValue && /^[a-z0-9]+$/i.test(primaryValue)) {
+    return primaryValue.toLowerCase();
+  }
+
+  const primaryExtension = primaryValue ? getFileExtension(primaryValue) : 'bin';
+  if (primaryExtension !== 'bin') {
+    return primaryExtension;
+  }
+
+  const secondaryExtension = secondaryValue ? getFileExtension(secondaryValue) : 'bin';
+  if (secondaryExtension !== 'bin') {
+    return secondaryExtension;
+  }
+
+  return fallbackExtension;
+}
+
+function getUniqueFilename(
+  filename: string,
+  seenFilenames: Map<string, number>
+): string {
+  const count = seenFilenames.get(filename) || 0;
+  seenFilenames.set(filename, count + 1);
+
+  if (count === 0) {
+    return filename;
+  }
+
+  const dotIndex = filename.lastIndexOf('.');
+  if (dotIndex <= 0) {
+    return `${filename}_${count}`;
+  }
+
+  return `${filename.slice(0, dotIndex)}_${count}${filename.slice(dotIndex)}`;
+}
+
+export function buildAssetDownloadItem(
+  asset: Pick<Asset, 'url' | 'type' | 'name' | 'thumbnail' | 'prompt' | 'modelName'>
+): BatchDownloadItem {
+  const type =
+    asset.type === AssetType.IMAGE
+      ? 'image'
+      : asset.type === AssetType.VIDEO
+      ? 'video'
+      : 'audio';
+  const extension = resolveDownloadExtension(
+    asset.name,
+    getTypeFallbackExtension(type),
+    asset.url
+  );
+
+  return {
+    url: asset.url,
+    type,
+    filename: buildDownloadFilename(asset.name, type, extension),
+    audioMetadata:
+      type === 'audio'
+        ? buildAudioDownloadMetadata({
+            title: asset.name,
+            prompt: asset.prompt,
+            coverUrl: asset.thumbnail,
+            artist: asset.modelName,
+          })
+        : undefined,
+  };
+}
+
+export function buildAssetDownloadItems(
+  assets: Array<
+    Pick<Asset, 'url' | 'type' | 'name' | 'thumbnail' | 'prompt' | 'modelName'>
+  >
+): BatchDownloadItem[] {
+  return assets.map(buildAssetDownloadItem);
+}
+
+export function buildTaskDownloadItems(
+  task: Pick<Task, 'type' | 'params' | 'result'>
+): BatchDownloadItem[] {
+  if (!task.result?.url && !task.result?.urls?.length) {
+    return [];
+  }
+
+  const type =
+    task.type === TaskType.IMAGE
+      ? 'image'
+      : task.type === TaskType.VIDEO
+      ? 'video'
+      : 'audio';
+  const urls = task.result.urls?.length ? task.result.urls : [task.result.url];
+
+  return urls.map((url, index) => {
+    const clip = task.result?.clips?.[index];
+    const baseName =
+      clip?.title ||
+      task.result?.title ||
+      task.params.title ||
+      task.params.prompt;
+    const extension = resolveDownloadExtension(
+      task.result?.format,
+      getTypeFallbackExtension(type),
+      url
+    );
+
+    return {
+      url,
+      type,
+      filename: buildDownloadFilename(
+        baseName,
+        type,
+        extension,
+        urls.length > 1 ? `-${index + 1}` : undefined
+      ),
+      audioMetadata:
+        task.type === TaskType.AUDIO
+          ? buildAudioDownloadMetadata({
+              title: clip?.title || task.result?.title || task.params.title,
+              prompt: task.params.prompt,
+              tags:
+                typeof task.params.tags === 'string'
+                  ? task.params.tags
+                  : undefined,
+              coverUrl:
+                clip?.imageLargeUrl ||
+                clip?.imageUrl ||
+                task.result?.previewImageUrl,
+              artist: task.params.model || task.params.mv,
+            })
+          : undefined,
+    };
+  });
+}
+
 /**
  * 批量下载为 ZIP 文件
  * 使用并发限制避免同时发起过多网络请求
@@ -96,7 +281,11 @@ export interface BatchDownloadItem {
  * @param zipFilename - 可选的 ZIP 文件名
  * @returns Promise
  */
-export async function downloadAsZip(items: BatchDownloadItem[], zipFilename?: string): Promise<void> {
+export async function downloadAsZip(
+  items: BatchDownloadItem[],
+  zipFilename?: string,
+  onProgress?: DownloadProgressCallback
+): Promise<void> {
   if (items.length === 0) {
     throw new Error('No files to download');
   }
@@ -104,6 +293,10 @@ export async function downloadAsZip(items: BatchDownloadItem[], zipFilename?: st
   const zip = new JSZip();
   const timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
   const finalZipName = zipFilename || `aitu_download_${timestamp}.zip`;
+  const seenFilenames = new Map<string, number>();
+  let processedCount = 0;
+
+  reportProgress(onProgress, 0);
 
   // 添加文件到 ZIP 根目录（限制并发数为 3）
   await processBatchWithConcurrency(
@@ -130,19 +323,34 @@ export async function downloadAsZip(items: BatchDownloadItem[], zipFilename?: st
 
         const prefix =
           item.type === 'image' ? 'image' : item.type === 'video' ? 'video' : 'audio';
-        const filename = item.filename || `${prefix}_${index + 1}.${ext}`;
+        const filename = getUniqueFilename(
+          item.filename || `${prefix}_${index + 1}.${ext}`,
+          seenFilenames
+        );
 
         zip.file(filename, blob);
       } catch (error) {
         console.error(`Failed to add file to zip:`, error);
+      } finally {
+        processedCount += 1;
+        reportProgress(
+          onProgress,
+          items.length > 0 ? (processedCount / items.length) * 50 : 50
+        );
       }
     },
     3 // 并发限制为 3
   );
 
   // 生成 ZIP 并下载
-  const content = await zip.generateAsync({ type: 'blob' });
+  const content = await zip.generateAsync(
+    { type: 'blob' },
+    (metadata) => {
+      reportProgress(onProgress, 50 + metadata.percent / 2);
+    }
+  );
   downloadFromBlob(content, finalZipName);
+  reportProgress(onProgress, 100);
 }
 
 /**
@@ -152,7 +360,11 @@ export async function downloadAsZip(items: BatchDownloadItem[], zipFilename?: st
  * @param zipFilename - 可选的 ZIP 文件名（仅在多文件时使用）
  * @returns Promise
  */
-export async function smartDownload(items: BatchDownloadItem[], zipFilename?: string): Promise<void> {
+export async function smartDownload(
+  items: BatchDownloadItem[],
+  zipFilename?: string,
+  onProgress?: DownloadProgressCallback
+): Promise<void> {
   if (items.length === 0) {
     throw new Error('No files to download');
   }
@@ -174,6 +386,7 @@ export async function smartDownload(items: BatchDownloadItem[], zipFilename?: st
       const ext = getFileExtension(assetUrl, blob.type) || 'mp3';
       const filename = item.filename || `${item.type}_download.${ext}`;
       downloadFromBlob(blob, filename);
+      reportProgress(onProgress, 100);
       return;
     }
 
@@ -183,7 +396,8 @@ export async function smartDownload(items: BatchDownloadItem[], zipFilename?: st
       (item.type === 'image' ? 'png' : item.type === 'video' ? 'mp4' : 'mp3');
     const filename = item.filename || `${item.type}_download.${ext}`;
     await downloadFile(assetUrl, filename);
+    reportProgress(onProgress, 100);
   } else {
-    await downloadAsZip(items, zipFilename);
+    await downloadAsZip(items, zipFilename, onProgress);
   }
 }
