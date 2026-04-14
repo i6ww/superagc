@@ -114,7 +114,8 @@ export const AnalyzePage: React.FC<AnalyzePageProps> = ({
         if (part.type === 'inline_data') {
           params = {
             videoData: part.data,
-            mimeType: part.mimeType,
+            // 写死为 mp4
+            mimeType: 'video/mp4', //part.mimeType,
             model: selectedModel,
             modelRef: selectedModelRef,
           };
