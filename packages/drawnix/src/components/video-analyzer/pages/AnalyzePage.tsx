@@ -42,6 +42,7 @@ interface AnalyzePageProps {
   existingRecord?: AnalysisRecord | null;
   onComplete: (record: AnalysisRecord) => void;
   onRecordsChange: (records: AnalysisRecord[]) => void;
+  onCreateNew?: () => void;
   onNext?: () => void;
 }
 
@@ -49,6 +50,7 @@ export const AnalyzePage: React.FC<AnalyzePageProps> = ({
   existingRecord,
   onComplete,
   onRecordsChange,
+  onCreateNew,
   onNext,
 }) => {
   const { setAppState } = useDrawnix();
@@ -462,6 +464,7 @@ export const AnalyzePage: React.FC<AnalyzePageProps> = ({
             {extractingFrames && <span className="va-frame-progress">{frameProgress}</span>}
             <button onClick={handleInsertAnalysis}>插入画布</button>
             <button onClick={() => { setAnalysis(null); }}>重新分析</button>
+            {onCreateNew && <button onClick={onCreateNew}>新建分析</button>}
             {onNext && <button className="va-btn-primary" onClick={onNext}>下一步: 编辑脚本 →</button>}
           </div>
         </div>

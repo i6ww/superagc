@@ -44,6 +44,13 @@ function getTaskSourceSnapshot(task: Task): AnalysisSourceSnapshot | null {
   return null;
 }
 
+function getStructuredEditedShots(task: Task) {
+  const structured = task.result?.analysisData as
+    | { editedShots?: AnalysisRecord['editedShots'] }
+    | undefined;
+  return Array.isArray(structured?.editedShots) ? structured.editedShots : null;
+}
+
 export async function syncVideoAnalyzerTask(task: Task): Promise<{
   records: AnalysisRecord[];
   record: AnalysisRecord;
@@ -108,13 +115,17 @@ export async function syncVideoAnalyzerTask(task: Task): Promise<{
   }
 
   const raw = getTaskChatResponse(task);
-  if (!raw) {
-    throw new Error('脚本改编任务缺少结果内容');
-  }
-
-  const updates = parseRewriteShotUpdates(raw);
-  const baseShots = target.editedShots || target.analysis.shots;
-  const editedShots = applyRewriteShotUpdates(baseShots, updates);
+  const structuredEditedShots = getStructuredEditedShots(task);
+  const editedShots = structuredEditedShots
+    ? structuredEditedShots
+    : (() => {
+        if (!raw) {
+          throw new Error('脚本改编任务缺少结果内容');
+        }
+        const updates = parseRewriteShotUpdates(raw);
+        const baseShots = target.editedShots || target.analysis.shots;
+        return applyRewriteShotUpdates(baseShots, updates);
+      })();
   const nextRecords = await updateRecord(recordId, {
     editedShots,
     pendingRewriteTaskId: null,

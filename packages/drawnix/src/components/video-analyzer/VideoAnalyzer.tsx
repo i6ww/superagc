@@ -137,6 +137,7 @@ const VideoAnalyzer: React.FC = () => {
           existingRecord={currentRecord}
           onComplete={handleAnalysisComplete}
           onRecordsChange={setRecords}
+          onCreateNew={handleRestart}
           onNext={currentRecord ? () => setPage('script') : undefined}
         />
       )}

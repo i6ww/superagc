@@ -86,6 +86,7 @@ export const ScriptPage: React.FC<ScriptPageProps> = ({
   const [pendingRewriteTaskId, setPendingRewriteTaskId] = useState<string | null>(
     () => record.pendingRewriteTaskId || null
   );
+  const [rewriteProgress, setRewriteProgress] = useState('');
   const [error, setError] = useState('');
   const [scriptModel, setScriptModelState] = useState(
     () => readStoredModelSelection(STORAGE_KEY_SCRIPT_MODEL, DEFAULT_SCRIPT_MODEL).modelId
@@ -162,6 +163,7 @@ export const ScriptPage: React.FC<ScriptPageProps> = ({
     );
     setShots(record.editedShots || [...record.analysis.shots]);
     setPendingRewriteTaskId(record.pendingRewriteTaskId || null);
+    setRewriteProgress('');
   }, [record]);
 
   // 表单变化时自动保存到 IndexedDB（防抖 500ms）
@@ -238,6 +240,7 @@ export const ScriptPage: React.FC<ScriptPageProps> = ({
 
       if (event.task.status === 'failed') {
         setPendingRewriteTaskId(null);
+        setRewriteProgress('');
         setError(event.task.error?.message || '改编失败');
         void updateRecord(record.id, { pendingRewriteTaskId: null }).then(updated => {
           onRecordsChange(updated);
@@ -258,7 +261,13 @@ export const ScriptPage: React.FC<ScriptPageProps> = ({
           setError(err.message || '改编结果同步失败');
         }).finally(() => {
           setPendingRewriteTaskId(null);
+          setRewriteProgress('');
         });
+        return;
+      }
+
+      if (typeof event.task.progress === 'number') {
+        setRewriteProgress(`AI 改编中 ${Math.round(event.task.progress)}%`);
       }
     });
 
@@ -331,7 +340,7 @@ export const ScriptPage: React.FC<ScriptPageProps> = ({
           )}
         </div>
         <button className="va-analyze-btn" onClick={handleRewrite} disabled={rewriting || !!pendingRewriteTaskId}>
-          {rewriting || pendingRewriteTaskId ? 'AI 改编中...' : 'AI 改编脚本'}
+          {rewriting || pendingRewriteTaskId ? rewriteProgress || 'AI 改编中...' : 'AI 改编脚本'}
         </button>
         {error && <div className="va-error">{error}</div>}
       </div>

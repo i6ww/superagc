@@ -46,11 +46,20 @@ import {
   formatShotsMarkdown,
   type VideoAnalysisData,
 } from '../components/video-analyzer/types';
+import { loadRecords } from '../components/video-analyzer/storage';
+import {
+  applyRewriteShotUpdates,
+  parseRewriteShotUpdates,
+} from '../components/video-analyzer/utils';
 
 const VIDEO_ANALYZER_SIMULATED_DURATION_MS = 10 * 60 * 1000;
 const VIDEO_ANALYZER_SIMULATED_INTERVAL_MS = 5000;
 const VIDEO_ANALYZER_SIMULATED_START_PROGRESS = 15;
 const VIDEO_ANALYZER_SIMULATED_END_PROGRESS = 95;
+const VIDEO_REWRITE_SIMULATED_DURATION_MS = 2 * 60 * 1000;
+const VIDEO_REWRITE_SIMULATED_INTERVAL_MS = 2000;
+const VIDEO_REWRITE_SIMULATED_START_PROGRESS = 20;
+const VIDEO_REWRITE_SIMULATED_END_PROGRESS = 95;
 
 async function cacheAudioCoverUrl(
   coverUrl: string | undefined,
@@ -627,6 +636,7 @@ class TaskQueueService {
       modelRef?: Task['params']['modelRef'];
       videoAnalyzerPrompt?: string;
       prompt?: string;
+      videoAnalyzerRecordId?: string;
     };
     const actualPrompt = String(params.videoAnalyzerPrompt || '').trim();
     if (!actualPrompt) {
@@ -634,29 +644,75 @@ class TaskQueueService {
     }
 
     await taskStorageWriter.updateStatus(task.id, 'processing');
-    options.onProgress({ progress: 30, phase: 'submitting' });
-    await taskStorageWriter.updateProgress(task.id, 30, 'submitting');
-
-    const messages: GeminiMessage[] = [
-      { role: 'user', content: [{ type: 'text', text: actualPrompt }] },
-    ];
-    const response = await sendChatWithGemini(
-      messages,
-      undefined,
-      undefined,
-      (params.modelRef as any) || params.model
-    );
-    const text = response.choices?.[0]?.message?.content;
-    if (!text) {
-      throw new Error('AI 未返回有效响应');
-    }
-
-    options.onProgress({ progress: 100 });
-    await this.finalizeChatTask(task, {
-      title: String(params.prompt || '脚本改编'),
-      chatResponse: text,
-      format: 'md',
+    options.onProgress({
+      progress: VIDEO_REWRITE_SIMULATED_START_PROGRESS,
+      phase: 'submitting',
     });
+    await taskStorageWriter.updateProgress(
+      task.id,
+      VIDEO_REWRITE_SIMULATED_START_PROGRESS,
+      'submitting'
+    );
+
+    const startedAt = Date.now();
+    const progressTimer = window.setInterval(() => {
+      const elapsed = Date.now() - startedAt;
+      const ratio = Math.min(elapsed / VIDEO_REWRITE_SIMULATED_DURATION_MS, 1);
+      const nextProgress =
+        VIDEO_REWRITE_SIMULATED_START_PROGRESS +
+        (VIDEO_REWRITE_SIMULATED_END_PROGRESS -
+          VIDEO_REWRITE_SIMULATED_START_PROGRESS) *
+          ratio;
+      this.updateTaskProgress(task.id, Math.floor(nextProgress));
+    }, VIDEO_REWRITE_SIMULATED_INTERVAL_MS);
+
+    try {
+      const messages: GeminiMessage[] = [
+        { role: 'user', content: [{ type: 'text', text: actualPrompt }] },
+      ];
+      const response = await sendChatWithGemini(
+        messages,
+        undefined,
+        undefined,
+        (params.modelRef as any) || params.model
+      );
+      const text = response.choices?.[0]?.message?.content;
+      if (!text) {
+        throw new Error('AI 未返回有效响应');
+      }
+
+      const recordId = String(params.videoAnalyzerRecordId || '').trim();
+      const targetRecord = recordId
+        ? (await loadRecords()).find(record => record.id === recordId) || null
+        : null;
+
+      const updates = parseRewriteShotUpdates(text);
+      const baseShots = targetRecord?.editedShots || targetRecord?.analysis.shots || [];
+      const editedShots = applyRewriteShotUpdates(baseShots, updates);
+      const formattedText =
+        targetRecord && editedShots.length > 0
+          ? formatShotsMarkdown(
+              editedShots,
+              targetRecord.analysis,
+              targetRecord.productInfo
+            )
+          : text;
+
+      options.onProgress({ progress: 100 });
+      await this.finalizeChatTask(task, {
+        title: '脚本改编结果',
+        chatResponse: formattedText,
+        format: 'md',
+        resultExtras: {
+          analysisData: {
+            editedShots,
+            rawResponse: text,
+          },
+        },
+      });
+    } finally {
+      window.clearInterval(progressTimer);
+    }
   }
 
   /**
