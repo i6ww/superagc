@@ -48,9 +48,6 @@ const VideoAnalyzer: React.FC = () => {
           if (prev?.id === synced.record.id) {
             return synced.record;
           }
-          if (!prev && task.params.videoAnalyzerAction === 'analyze') {
-            return synced.record;
-          }
           return prev;
         });
       } catch (error) {
@@ -121,10 +118,12 @@ const VideoAnalyzer: React.FC = () => {
             <StepBar current={page} onNavigate={handleNavigate} hasRecord={!!currentRecord} />
             <div className="va-nav-actions">
               <button className="va-nav-btn" onClick={() => { setShowStarred(false); setPage('history'); }}>
-                📋{records.length > 0 && <span className="va-nav-count">{records.length}</span>}
+                <span role="img" aria-label="history">📋</span>
+                {records.length > 0 && <span className="va-nav-count">{records.length}</span>}
               </button>
               <button className="va-nav-btn" onClick={() => { setShowStarred(true); setPage('history'); }}>
-                ⭐{records.filter(r => r.starred).length > 0 && <span className="va-nav-count">{records.filter(r => r.starred).length}</span>}
+                <span role="img" aria-label="starred">⭐</span>
+                {records.filter(r => r.starred).length > 0 && <span className="va-nav-count">{records.filter(r => r.starred).length}</span>}
               </button>
             </div>
           </>
