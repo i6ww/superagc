@@ -282,37 +282,43 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
     });
   }, [record, onRecordUpdate, onRecordsChange]);
 
-  // --- 批量生成（使用底部配置的参考图+模型） ---
-  const enqueueImageGeneration = useCallback(async (prompt: string) => {
-    if (!prompt.trim()) return;
-    await mcpRegistry.executeTool(
-      { name: 'generate_image', arguments: {
-        prompt: prompt.trim(), count: 1, size: aspectRatio,
-        referenceImages: refImageUrls.length > 0 ? refImageUrls : undefined,
-        batchId,
-        ...(imageModel ? { model: imageModel, modelRef: imageModelRef } : {}),
-      }},
-      { mode: 'queue' }
-    );
-  }, [aspectRatio, refImageUrls, batchId, imageModel, imageModelRef]);
-
   const handleGenerateAllFirstFrames = useCallback(async () => {
     await ensureBatchId();
     for (const shot of shots) {
-      const prompt = getFirstFramePrompt(shot);
-      if (!prompt) continue;
-      await enqueueImageGeneration(prompt);
+      const rawPrompt = getFirstFramePrompt(shot);
+      if (!rawPrompt) continue;
+      const prompt = buildFramePrompt(rawPrompt, record.analysis, record.productInfo);
+      const shotBatchId = `va_${record.id}_shot${shot.id}_first`;
+      await mcpRegistry.executeTool(
+        { name: 'generate_image', arguments: {
+          prompt: prompt.trim(), count: 1, size: aspectRatio,
+          referenceImages: refImageUrls.length > 0 ? refImageUrls : undefined,
+          batchId: shotBatchId,
+          ...(imageModel ? { model: imageModel, modelRef: imageModelRef } : {}),
+        }},
+        { mode: 'queue' }
+      );
     }
-  }, [shots, ensureBatchId, getFirstFramePrompt, enqueueImageGeneration]);
+  }, [shots, record, ensureBatchId, getFirstFramePrompt, aspectRatio, refImageUrls, imageModel, imageModelRef]);
 
   const handleGenerateAllLastFrames = useCallback(async () => {
     await ensureBatchId();
     for (const shot of shots) {
-      const prompt = getLastFramePrompt(shot);
-      if (!prompt) continue;
-      await enqueueImageGeneration(prompt);
+      const rawPrompt = getLastFramePrompt(shot);
+      if (!rawPrompt) continue;
+      const prompt = buildFramePrompt(rawPrompt, record.analysis, record.productInfo);
+      const shotBatchId = `va_${record.id}_shot${shot.id}_last`;
+      await mcpRegistry.executeTool(
+        { name: 'generate_image', arguments: {
+          prompt: prompt.trim(), count: 1, size: aspectRatio,
+          referenceImages: refImageUrls.length > 0 ? refImageUrls : undefined,
+          batchId: shotBatchId,
+          ...(imageModel ? { model: imageModel, modelRef: imageModelRef } : {}),
+        }},
+        { mode: 'queue' }
+      );
     }
-  }, [shots, ensureBatchId, getLastFramePrompt, enqueueImageGeneration]);
+  }, [shots, record, ensureBatchId, getLastFramePrompt, aspectRatio, refImageUrls, imageModel, imageModelRef]);
 
   const handleGenerateAllVideos = useCallback(async () => {
     await ensureBatchId();
@@ -321,16 +327,17 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
     for (const shot of shots) {
       const prompt = buildVideoPrompt(shot, record.analysis, record.productInfo);
       if (!prompt) continue;
+      const shotBatchId = `va_${record.id}_shot${shot.id}_video`;
       await mcpRegistry.executeTool(
         { name: 'generate_video', arguments: {
-          prompt, size, seconds, count: 1, batchId, model: videoModel,
+          prompt, size, seconds, count: 1, batchId: shotBatchId, model: videoModel,
           modelRef: videoModelRef,
           referenceImages: refImageUrls.length > 0 ? refImageUrls : undefined,
         }},
         { mode: 'queue' }
       );
     }
-  }, [shots, aspectRatio, batchId, videoModel, videoModelRef, ensureBatchId, segmentDuration, refImageUrls]);
+  }, [shots, record, aspectRatio, batchId, videoModel, videoModelRef, ensureBatchId, segmentDuration, refImageUrls]);
 
   return (
     <div className="va-page">
