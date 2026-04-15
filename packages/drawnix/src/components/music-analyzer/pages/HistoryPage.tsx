@@ -39,6 +39,33 @@ function shortTime(ts: number): string {
 }
 
 function taskPromptSummary(task: Task): string {
+  const action = task.params.musicAnalyzerAction;
+  if (action === 'rewrite') {
+    const analysisData =
+      task.result?.analysisData && typeof task.result.analysisData === 'object'
+        ? (task.result.analysisData as Record<string, unknown>)
+        : null;
+    const rewrittenTitle =
+      typeof analysisData?.title === 'string' && analysisData.title.trim()
+        ? analysisData.title.trim()
+        : '';
+    if (rewrittenTitle) {
+      return rewrittenTitle;
+    }
+  }
+
+  if (action === 'lyrics-gen') {
+    const generatedTitle =
+      typeof task.result?.lyricsTitle === 'string' && task.result.lyricsTitle.trim()
+        ? task.result.lyricsTitle.trim()
+        : typeof task.result?.title === 'string' && task.result.title.trim()
+        ? task.result.title.trim()
+        : '';
+    if (generatedTitle) {
+      return generatedTitle;
+    }
+  }
+
   const prompt = String(task.params.prompt || '');
   return prompt.length > 40 ? `${prompt.slice(0, 40)}…` : prompt;
 }

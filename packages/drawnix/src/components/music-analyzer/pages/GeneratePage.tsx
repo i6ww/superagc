@@ -41,10 +41,6 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
   );
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState('');
-  // 续写
-  const [continueMode, setContinueMode] = useState(false);
-  const [continueClipId, setContinueClipId] = useState('');
-  const [continueAt, setContinueAt] = useState(0);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const generatingRef = useRef(false);
 
@@ -106,11 +102,6 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
   }, [mvParam?.defaultValue]);
 
   const clips = record.generatedClips || [];
-  // 续写只能选有真实 clipId 的片段
-  const continuableClips = useMemo(
-    () => clips.filter((c) => c.clipId && c.clipId.length > 8),
-    [clips]
-  );
 
   // 批量生成
   const handleGenerate = useCallback(async () => {
@@ -165,68 +156,6 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
     }
   }, [
     batchCount,
-    mv,
-    onRecordUpdate,
-    onRecordsChange,
-    prompt,
-    record,
-    selectedModel,
-    selectedModelRef,
-    tags,
-    title,
-  ]);
-
-  // 续写
-  const handleContinue = useCallback(async () => {
-    if (!continueClipId) {
-      setMessage('请选择要续写的片段');
-      return;
-    }
-    if (generatingRef.current) return;
-    generatingRef.current = true;
-
-    setSubmitting(true);
-    setMessage('');
-    try {
-      const task = taskQueueService.createTask(
-        {
-          prompt: prompt || title,
-          model: selectedModel,
-          modelRef: selectedModelRef,
-          sunoAction: 'music',
-          title: title.trim(),
-          tags: tags.trim(),
-          mv,
-          continueSource: 'clip',
-          continueClipId,
-          continueAt,
-          batchId: `ma_${record.id}_cont_${continueClipId}_${continueAt}`,
-          autoInsertToCanvas: true,
-        },
-        TaskType.AUDIO
-      );
-      const updated = await updateRecord(record.id, {
-        generateTaskIds: [...(record.generateTaskIds || []), task.id],
-        continueFromClipId: continueClipId,
-        continueAt,
-      });
-      onRecordsChange(updated);
-      onRecordUpdate({
-        ...record,
-        generateTaskIds: [...(record.generateTaskIds || []), task.id],
-        continueFromClipId: continueClipId,
-        continueAt,
-      });
-      setMessage('续写任务已提交');
-    } catch (taskError: any) {
-      setMessage(taskError.message || '续写任务提交失败');
-    } finally {
-      setSubmitting(false);
-      generatingRef.current = false;
-    }
-  }, [
-    continueAt,
-    continueClipId,
     mv,
     onRecordUpdate,
     onRecordsChange,
@@ -341,53 +270,6 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
               <ClipCard key={clip.clipId} clip={clip} />
             ))}
           </div>
-        </div>
-      )}
-
-      {/* 续写区 */}
-      {continuableClips.length > 0 && (
-        <div className="ma-card">
-          <button
-            className="ma-section-toggle"
-            onClick={() => setContinueMode((v) => !v)}
-          >
-            <span>续写已有片段</span>
-            <span>{continueMode ? '收起' : '展开'}</span>
-          </button>
-          {continueMode && (
-            <div className="ma-continue-section">
-              <select
-                className="ma-select"
-                value={continueClipId}
-                onChange={(e) => setContinueClipId(e.target.value)}
-              >
-                <option value="">选择片段</option>
-                {continuableClips.map((clip) => (
-                  <option key={clip.clipId} value={clip.clipId}>
-                    {clip.title || clip.clipId.slice(0, 8)} ({clip.duration ? `${Math.round(clip.duration)}s` : '未知时长'})
-                  </option>
-                ))}
-              </select>
-              <div className="ma-continue-at">
-                <label>续写起点 (秒)</label>
-                <input
-                  type="number"
-                  className="ma-input"
-                  value={continueAt}
-                  onChange={(e) => setContinueAt(Number(e.target.value) || 0)}
-                  min={0}
-                  step={1}
-                />
-              </div>
-              <button
-                className="va-btn-primary"
-                onClick={handleContinue}
-                disabled={submitting || !continueClipId}
-              >
-                续写
-              </button>
-            </div>
-          )}
         </div>
       )}
 
