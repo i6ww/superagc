@@ -7,7 +7,11 @@ import type {
   MusicAnalysisSourceSnapshot,
 } from './types';
 import { addRecord, loadRecords, updateRecord } from './storage';
-import { parseLyricsRewriteResult, addLyricsVersionToRecord, createLyricsVersion } from './utils';
+import {
+  addLyricsVersionToRecord,
+  createLyricsVersion,
+  parseLyricsRewriteResult,
+} from './utils';
 import {
   normalizeMusicAnalysisData,
   type MusicAnalysisData,
@@ -119,7 +123,7 @@ export async function syncMusicAnalyzerTask(task: Task): Promise<{
     return { records: nextRecords, record };
   }
 
-  // lyrics-gen: Suno 歌词生成完成 → 回填到 record
+  // lyrics-gen: Suno 歌词生成或文本草稿生成完成 → 回填到 record
   if (action === 'lyrics-gen') {
     const recordId = String(
       (task.params as { musicAnalyzerRecordId?: unknown }).musicAnalyzerRecordId || ''
@@ -131,26 +135,50 @@ export async function syncMusicAnalyzerTask(task: Task): Promise<{
     if (!target || target.pendingLyricsGenTaskId !== task.id) return null;
 
     const lyricsResult = parseLyricsGenResult(task);
+    const nextTitle = lyricsResult?.title || target.title || '';
+    const nextStyleTags =
+      lyricsResult && lyricsResult.styleTags.length > 0
+        ? lyricsResult.styleTags
+        : target.styleTags || [];
+    const nextLyricsDraft = lyricsResult?.lyricsDraft || target.lyricsDraft || '';
     const versionPatch = lyricsResult
       ? addLyricsVersionToRecord(
-          { ...target, title: lyricsResult.title, styleTags: lyricsResult.styleTags, lyricsDraft: lyricsResult.lyricsDraft },
+          {
+            ...target,
+            title: nextTitle,
+            styleTags: nextStyleTags,
+            lyricsDraft: nextLyricsDraft,
+          },
           createLyricsVersion(
-            { ...target, title: lyricsResult.title, styleTags: lyricsResult.styleTags, lyricsDraft: lyricsResult.lyricsDraft },
-            'Suno 歌词',
+            {
+              ...target,
+              title: nextTitle,
+              styleTags: nextStyleTags,
+              lyricsDraft: nextLyricsDraft,
+            },
+            task.type === TaskType.CHAT ? 'AI 草稿' : 'Suno 歌词',
             target.creationPrompt
           )
         )
       : {};
 
     const nextRecords = await updateRecord(recordId, {
+      title: nextTitle,
+      styleTags: nextStyleTags,
+      lyricsDraft: nextLyricsDraft,
       ...versionPatch,
       pendingLyricsGenTaskId: null,
     });
-    const updatedRecord = nextRecords.find((record) => record.id === recordId) || {
-      ...target,
-      ...versionPatch,
-      pendingLyricsGenTaskId: null,
-    } as MusicAnalysisRecord;
+    const updatedRecord =
+      nextRecords.find((record) => record.id === recordId) ||
+      ({
+        ...target,
+        title: nextTitle,
+        styleTags: nextStyleTags,
+        lyricsDraft: nextLyricsDraft,
+        ...versionPatch,
+        pendingLyricsGenTaskId: null,
+      } as MusicAnalysisRecord);
 
     return { records: nextRecords, record: updatedRecord };
   }
@@ -208,6 +236,20 @@ export async function syncMusicAnalyzerTask(task: Task): Promise<{
 function parseLyricsGenResult(task: Task): LyricsRewriteResult | null {
   const result = task.result;
   if (!result) return null;
+
+  const structured = getStructuredRewriteResult(task);
+  if (structured) {
+    return structured;
+  }
+
+  const rawChatResponse = getTaskChatResponse(task);
+  if (rawChatResponse) {
+    try {
+      return parseLyricsRewriteResult(rawChatResponse);
+    } catch {
+      // fall through to Suno-specific fields
+    }
+  }
 
   // Suno lyrics API 返回 lyricsText + lyricsTitle + lyricsTags
   const text = result.lyricsText || '';

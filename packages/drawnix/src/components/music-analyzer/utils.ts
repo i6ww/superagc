@@ -4,6 +4,7 @@ import type {
   MusicAnalysisRecord,
 } from './types';
 import type { MusicAnalysisData } from '../../services/music-analysis-service';
+import type { ModelConfig } from '../../constants/model-config';
 import { createModelRef, type ModelRef } from '../../utils/settings-manager';
 import { SUNO_METATAG_GUIDE } from '../../services/music-analysis-service';
 
@@ -56,17 +57,24 @@ export function buildLyricsRewritePrompt(params: {
   analysis?: MusicAnalysisData | null;
   userPrompt: string;
   currentLyrics?: string;
+  mode?: 'rewrite' | 'create';
 }): string {
-  const { analysis, userPrompt, currentLyrics } = params;
+  const { analysis, userPrompt, currentLyrics, mode = 'rewrite' } = params;
+  const isCreateMode = mode === 'create';
 
-  return `你是一个擅长做”爆款音乐拆解与歌词改写”的创作助手。请基于${analysis ? '音频分析结果' : '用户要求'}改写歌词，并确保输出结果可以直接用于 Suno。
+  return `你是一个擅长做“爆款音乐拆解与歌词创作”的创作助手。请基于${analysis ? '音频分析结果' : '用户要求'}${isCreateMode ? '创作一版全新歌词草稿' : '改写歌词'}，并确保输出结果可以直接用于 Suno。
 
 ${SUNO_METATAG_GUIDE}
 
 ${analysis ? `音频分析结果：\n${JSON.stringify(analysis, null, 2)}\n` : ''}
 
-用户改写要求：
-${userPrompt || '保留这首歌最抓人的情绪和节奏记忆点，重写成更容易传播的版本。'}
+下游会把你的输出直接用于 Suno 音乐生成，因此你必须同时补齐：
+- title: 适合歌曲发布与生成的标题
+- styleTags: 适合 Suno 的精简风格标签
+- lyricsDraft: 带结构标签、可直接粘贴到 Suno 的歌词正文
+
+${isCreateMode ? '用户创作要求' : '用户改写要求'}：
+${userPrompt || (isCreateMode ? '围绕用户描述补全一首完整、上口、可演唱的歌曲。' : '保留这首歌最抓人的情绪和节奏记忆点，重写成更容易传播的版本。')}
 
 ${currentLyrics ? `当前已有歌词草稿：\n${currentLyrics}\n` : ''}
 
@@ -79,7 +87,32 @@ ${currentLyrics ? `当前已有歌词草稿：\n${currentLyrics}\n` : ''}
 1. 只返回合法 JSON，不要 markdown。
 2. styleTags 中不要出现完整句子。
 3. lyricsDraft 要区分结构标签与歌词正文。
-4. 如果需要结构标签，优先使用 [Intro] [Verse] [Pre-Chorus] [Chorus] [Bridge] [Outro] 等通用标签。`;
+4. 如果需要结构标签，优先使用 [Intro] [Verse] [Pre-Chorus] [Chorus] [Bridge] [Outro] 等通用标签。
+5. ${isCreateMode ? '如果用户只给了主题、情绪、乐器或人声信息，你需要主动补全合理的歌曲结构、段落推进与 hook。' : '改写时优先保留原有情绪核心、记忆点与适合传播的 hook。'}`;
+}
+
+export function isSunoLyricsModel(modelId: string): boolean {
+  return /suno/i.test(modelId);
+}
+
+export function collectLyricsDraftModels(
+  textModels: ModelConfig[],
+  audioModels: ModelConfig[]
+): ModelConfig[] {
+  const sunoLyricsModels = audioModels.filter((item) => /suno/i.test(item.id));
+  const mergedModels: ModelConfig[] = [];
+  const seenModelKeys = new Set<string>();
+
+  for (const model of [...textModels, ...sunoLyricsModels]) {
+    const modelKey = model.selectionKey || model.id;
+    if (seenModelKeys.has(modelKey)) {
+      continue;
+    }
+    seenModelKeys.add(modelKey);
+    mergedModels.push(model);
+  }
+
+  return mergedModels;
 }
 
 export function parseLyricsRewriteResult(text: string): LyricsRewriteResult {

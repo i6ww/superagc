@@ -23,7 +23,7 @@ export interface LLMApiLog {
   // 请求信息
   endpoint: string;        // API endpoint (e.g., /images/generations, /chat/completions)
   model: string;           // 使用的模型
-  taskType: 'image' | 'video' | 'chat' | 'character' | 'other';
+  taskType: 'image' | 'video' | 'audio' | 'chat' | 'character' | 'other';
   
   // 请求参数（脱敏后）
   prompt?: string;         // 提示词

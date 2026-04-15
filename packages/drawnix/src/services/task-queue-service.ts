@@ -468,6 +468,11 @@ class TaskQueueService {
             break;
           }
 
+          if ((task.params as { musicAnalyzerAction?: string }).musicAnalyzerAction === 'lyrics-gen') {
+            await this.executeMusicAnalyzerLyricsGenTask(task, executionOptions);
+            break;
+          }
+
           await executor.generateText(
             {
               taskId: task.id,
@@ -935,6 +940,100 @@ class TaskQueueService {
             title: rewriteResult.title,
             styleTags: rewriteResult.styleTags,
             lyricsDraft: rewriteResult.lyricsDraft,
+            rawResponse: text,
+          },
+        },
+      });
+    } finally {
+      window.clearInterval(progressTimer);
+    }
+  }
+
+  private async executeMusicAnalyzerLyricsGenTask(
+    task: Task,
+    options: {
+      onProgress: (progress: { progress: number; phase?: string }) => void;
+    }
+  ): Promise<void> {
+    const params = task.params as {
+      model?: string;
+      modelRef?: Task['params']['modelRef'];
+      musicAnalyzerPrompt?: string;
+      musicAnalyzerRecordId?: string;
+    };
+    const actualPrompt = String(params.musicAnalyzerPrompt || '').trim();
+    if (!actualPrompt) {
+      throw new Error('缺少歌词生成提示词');
+    }
+
+    await taskStorageWriter.updateStatus(task.id, 'processing');
+    options.onProgress({
+      progress: MUSIC_REWRITE_SIMULATED_START_PROGRESS,
+      phase: 'submitting',
+    });
+    await taskStorageWriter.updateProgress(
+      task.id,
+      MUSIC_REWRITE_SIMULATED_START_PROGRESS,
+      'submitting'
+    );
+
+    const startedAt = Date.now();
+    const progressTimer = window.setInterval(() => {
+      const elapsed = Date.now() - startedAt;
+      const ratio = Math.min(elapsed / MUSIC_REWRITE_SIMULATED_DURATION_MS, 1);
+      const nextProgress =
+        MUSIC_REWRITE_SIMULATED_START_PROGRESS +
+        (MUSIC_REWRITE_SIMULATED_END_PROGRESS -
+          MUSIC_REWRITE_SIMULATED_START_PROGRESS) *
+          ratio;
+      this.updateTaskProgress(task.id, Math.floor(nextProgress));
+    }, MUSIC_REWRITE_SIMULATED_INTERVAL_MS);
+
+    try {
+      const messages: GeminiMessage[] = [
+        { role: 'user', content: [{ type: 'text', text: actualPrompt }] },
+      ];
+      const response = await sendChatWithGemini(
+        messages,
+        undefined,
+        undefined,
+        (params.modelRef as any) || params.model
+      );
+      const text = response.choices?.[0]?.message?.content;
+      if (!text) {
+        throw new Error('AI 未返回有效响应');
+      }
+
+      const recordId = String(params.musicAnalyzerRecordId || '').trim();
+      const targetRecord = recordId
+        ? (await loadMusicRecords()).find((record) => record.id === recordId) || null
+        : null;
+      const lyricsResult = parseLyricsRewriteResult(text);
+      const formattedText =
+        targetRecord && lyricsResult.lyricsDraft
+          ? [
+              `# ${lyricsResult.title || targetRecord.title || '未命名歌曲'}`,
+              '',
+              `标签: ${
+                lyricsResult.styleTags.length > 0
+                  ? lyricsResult.styleTags.join(', ')
+                  : (targetRecord.styleTags || []).join(', ') || '-'
+              }`,
+              '',
+              lyricsResult.lyricsDraft,
+            ].join('\n')
+          : text;
+
+      options.onProgress({ progress: 100 });
+      await this.finalizeChatTask(task, {
+        title: '歌词草稿结果',
+        chatResponse: formattedText,
+        format: 'md',
+        resultExtras: {
+          analysisData: {
+            title: lyricsResult.title,
+            styleTags: lyricsResult.styleTags,
+            lyricsDraft: lyricsResult.lyricsDraft,
             rawResponse: text,
           },
         },

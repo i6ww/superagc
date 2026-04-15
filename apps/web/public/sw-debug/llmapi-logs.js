@@ -375,6 +375,7 @@ function createLLMApiEntry(log, isExpanded, onToggle, isSelectMode = false, isSe
   const typeLabel = {
     'image': '图片生成',
     'video': '视频生成',
+    'audio': '音频生成',
     'chat': '对话',
     'character': '角色',
     'other': '其他',

@@ -55,6 +55,18 @@ function taskPromptSummary(task: Task): string {
   }
 
   if (action === 'lyrics-gen') {
+    const analysisData =
+      task.result?.analysisData && typeof task.result.analysisData === 'object'
+        ? (task.result.analysisData as Record<string, unknown>)
+        : null;
+    const rewrittenTitle =
+      typeof analysisData?.title === 'string' && analysisData.title.trim()
+        ? analysisData.title.trim()
+        : '';
+    if (rewrittenTitle) {
+      return rewrittenTitle;
+    }
+
     const generatedTitle =
       typeof task.result?.lyricsTitle === 'string' && task.result.lyricsTitle.trim()
         ? task.result.lyricsTitle.trim()
@@ -113,7 +125,7 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({
 
       // Suno 歌词生成任务
       if (
-        task.type === TaskType.AUDIO &&
+        (task.type === TaskType.AUDIO || task.type === TaskType.CHAT) &&
         params.musicAnalyzerAction === 'lyrics-gen' &&
         typeof params.musicAnalyzerRecordId === 'string' &&
         recordIds.has(params.musicAnalyzerRecordId)

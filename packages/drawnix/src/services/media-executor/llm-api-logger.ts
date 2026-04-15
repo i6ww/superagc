@@ -32,7 +32,7 @@ export interface LLMApiLog {
   timestamp: number;
   endpoint: string;
   model: string;
-  taskType: 'image' | 'video' | 'chat' | 'character' | 'other';
+  taskType: 'image' | 'video' | 'audio' | 'chat' | 'character' | 'other';
   prompt?: string;
   requestBody?: string;
   hasReferenceImages?: boolean;

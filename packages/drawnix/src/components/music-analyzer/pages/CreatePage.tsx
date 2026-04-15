@@ -15,6 +15,9 @@ import {
   restoreAudioFileFromSnapshot,
 } from '../audio-source-cache';
 import {
+  buildLyricsRewritePrompt,
+  collectLyricsDraftModels,
+  isSunoLyricsModel,
   readStoredModelSelection,
   writeStoredModelSelection,
 } from '../utils';
@@ -26,7 +29,7 @@ import { getDefaultAudioModel } from '../../../constants/model-config';
 
 const DEFAULT_ANALYSIS_MODEL = 'gemini-2.5-pro';
 const STORAGE_KEY_MODEL = 'music-analyzer:model';
-const STORAGE_KEY_AUDIO_MODEL = 'music-analyzer:audio-model';
+const STORAGE_KEY_LYRICS_MODEL = 'music-analyzer:lyrics-model';
 
 function formatSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
@@ -84,11 +87,11 @@ export const CreatePage: React.FC<CreatePageProps> = ({
       existingRecord?.analysisModelRef ||
       readStoredModelSelection(STORAGE_KEY_MODEL, DEFAULT_ANALYSIS_MODEL).modelRef
   );
-  const [selectedAudioModel, setSelectedAudioModelState] = useState(
-    () => readStoredModelSelection(STORAGE_KEY_AUDIO_MODEL, getDefaultAudioModel()).modelId
+  const [selectedLyricsModel, setSelectedLyricsModelState] = useState(
+    () => readStoredModelSelection(STORAGE_KEY_LYRICS_MODEL, getDefaultAudioModel()).modelId
   );
-  const [selectedAudioModelRef, setSelectedAudioModelRef] = useState<ModelRef | null>(
-    () => readStoredModelSelection(STORAGE_KEY_AUDIO_MODEL, getDefaultAudioModel()).modelRef
+  const [selectedLyricsModelRef, setSelectedLyricsModelRef] = useState<ModelRef | null>(
+    () => readStoredModelSelection(STORAGE_KEY_LYRICS_MODEL, getDefaultAudioModel()).modelRef
   );
 
   const setSelectedModel = useCallback((model: string, modelRef?: ModelRef | null) => {
@@ -97,10 +100,10 @@ export const CreatePage: React.FC<CreatePageProps> = ({
     writeStoredModelSelection(STORAGE_KEY_MODEL, model, modelRef);
   }, []);
 
-  const setSelectedAudioModel = useCallback((model: string, modelRef?: ModelRef | null) => {
-    setSelectedAudioModelState(model);
-    setSelectedAudioModelRef(modelRef || null);
-    writeStoredModelSelection(STORAGE_KEY_AUDIO_MODEL, model, modelRef);
+  const setSelectedLyricsModel = useCallback((model: string, modelRef?: ModelRef | null) => {
+    setSelectedLyricsModelState(model);
+    setSelectedLyricsModelRef(modelRef || null);
+    writeStoredModelSelection(STORAGE_KEY_LYRICS_MODEL, model, modelRef);
   }, []);
 
   const audioPreviewUrl = useMemo(() => {
@@ -206,9 +209,9 @@ export const CreatePage: React.FC<CreatePageProps> = ({
     [allTextModels]
   );
   const audioModels = useSelectableModels('audio');
-  const sunoLyricsModels = useMemo(
-    () => audioModels.filter((item) => /suno/i.test(item.id)),
-    [audioModels]
+  const lyricsDraftModels = useMemo(
+    () => collectLyricsDraftModels(allTextModels, audioModels),
+    [allTextModels, audioModels]
   );
   const normalizedAnalysis = useMemo(
     () =>
@@ -277,8 +280,9 @@ export const CreatePage: React.FC<CreatePageProps> = ({
       setError('请先描述你想创作的歌曲');
       return;
     }
+    const useSunoLyricsModel = isSunoLyricsModel(selectedLyricsModel);
     setError('');
-    setLyricsGenProgress('歌词生成中...');
+    setLyricsGenProgress(useSunoLyricsModel ? '歌词生成中...' : '歌词草稿生成中 0%');
     try {
       // 先创建 record
       const record: MusicAnalysisRecord = {
@@ -290,18 +294,34 @@ export const CreatePage: React.FC<CreatePageProps> = ({
         starred: false,
       };
 
-      const task = taskQueueService.createTask(
-        {
-          prompt: creationPrompt,
-          model: selectedAudioModel,
-          modelRef: selectedAudioModelRef,
-          sunoAction: 'lyrics',
-          musicAnalyzerAction: 'lyrics-gen',
-          musicAnalyzerRecordId: record.id,
-          autoInsertToCanvas: false,
-        },
-        TaskType.AUDIO
-      );
+      const task = useSunoLyricsModel
+        ? taskQueueService.createTask(
+            {
+              prompt: creationPrompt,
+              model: selectedLyricsModel,
+              modelRef: selectedLyricsModelRef,
+              sunoAction: 'lyrics',
+              musicAnalyzerAction: 'lyrics-gen',
+              musicAnalyzerRecordId: record.id,
+              autoInsertToCanvas: false,
+            },
+            TaskType.AUDIO
+          )
+        : taskQueueService.createTask(
+            {
+              prompt: `从零创作歌词：${record.sourceLabel}`,
+              model: selectedLyricsModel,
+              modelRef: selectedLyricsModelRef,
+              musicAnalyzerAction: 'lyrics-gen',
+              musicAnalyzerPrompt: buildLyricsRewritePrompt({
+                userPrompt: creationPrompt,
+                mode: 'create',
+              }),
+              musicAnalyzerRecordId: record.id,
+              autoInsertToCanvas: false,
+            },
+            TaskType.CHAT
+          );
 
       record.pendingLyricsGenTaskId = task.id;
       const nextRecords = await addRecord(record);
@@ -312,7 +332,13 @@ export const CreatePage: React.FC<CreatePageProps> = ({
       setError(taskError.message || '歌词生成失败');
       setLyricsGenProgress('');
     }
-  }, [creationPrompt, onComplete, onRecordsChange, selectedAudioModel, selectedAudioModelRef]);
+  }, [
+    creationPrompt,
+    onComplete,
+    onRecordsChange,
+    selectedLyricsModel,
+    selectedLyricsModelRef,
+  ]);
 
   // ── 监听分析任务 ──
   useEffect(() => {
@@ -350,12 +376,23 @@ export const CreatePage: React.FC<CreatePageProps> = ({
   // ── 监听歌词生成任务 ──
   useEffect(() => {
     if (!pendingLyricsGenTaskId) return;
+    const currentTask = taskQueueService.getTask(pendingLyricsGenTaskId);
+    if (typeof currentTask?.progress === 'number') {
+      const label = currentTask.type === TaskType.CHAT ? '歌词草稿生成中' : '歌词生成中';
+      setLyricsGenProgress(`${label} ${Math.round(currentTask.progress)}%`);
+    }
     const subscription = taskQueueService.observeTaskUpdates().subscribe((event) => {
       if (event.task.id !== pendingLyricsGenTaskId) return;
       if (event.task.status === 'failed') {
+        const recordId = String(
+          (event.task.params as { musicAnalyzerRecordId?: unknown }).musicAnalyzerRecordId || ''
+        ).trim();
         setPendingLyricsGenTaskId(null);
         setLyricsGenProgress('');
         setError(event.task.error?.message || '歌词生成失败');
+        if (recordId) {
+          void updateRecord(recordId, { pendingLyricsGenTaskId: null }).then(onRecordsChange);
+        }
         return;
       }
       if (event.task.status === 'completed') {
@@ -366,11 +403,12 @@ export const CreatePage: React.FC<CreatePageProps> = ({
         return;
       }
       if (typeof event.task.progress === 'number') {
-        setLyricsGenProgress(`歌词生成中 ${Math.round(event.task.progress)}%`);
+        const label = event.task.type === TaskType.CHAT ? '歌词草稿生成中' : '歌词生成中';
+        setLyricsGenProgress(`${label} ${Math.round(event.task.progress)}%`);
       }
     });
     return () => subscription.unsubscribe();
-  }, [pendingLyricsGenTaskId, onLyricsReady]);
+  }, [onLyricsReady, onRecordsChange, pendingLyricsGenTaskId]);
 
   const handleInsertAnalysis = useCallback(async () => {
     if (!normalizedAnalysis) return;
@@ -401,16 +439,17 @@ export const CreatePage: React.FC<CreatePageProps> = ({
         <>
           <div className="ma-card">
             <div className="ma-card-header">
-              <span>Suno 歌词模型</span>
+              <span>歌词草稿模型</span>
+              <span className="ma-muted">文本模型会补齐 Suno 所需标题/标签/歌词</span>
             </div>
             <ModelDropdown
-              selectedModel={selectedAudioModel}
-              selectedSelectionKey={getSelectionKey(selectedAudioModel, selectedAudioModelRef)}
-              onSelect={setSelectedAudioModel}
-              models={sunoLyricsModels.length > 0 ? sunoLyricsModels : audioModels}
+              selectedModel={selectedLyricsModel}
+              selectedSelectionKey={getSelectionKey(selectedLyricsModel, selectedLyricsModelRef)}
+              onSelect={setSelectedLyricsModel}
+              models={lyricsDraftModels}
               variant="form"
               placement="down"
-              placeholder="选择歌词生成模型"
+              placeholder="选择歌词草稿模型"
             />
           </div>
 

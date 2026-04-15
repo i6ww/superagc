@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildLyricsRewritePrompt,
+  collectLyricsDraftModels,
+  isSunoLyricsModel,
   parseLyricsRewriteResult,
 } from './utils';
 
@@ -25,6 +27,18 @@ describe('music-analyzer utils', () => {
     expect(prompt).toContain('只返回合法 JSON');
   });
 
+  it('builds Suno-ready create prompts for text lyric drafting', () => {
+    const prompt = buildLyricsRewritePrompt({
+      userPrompt: '写一首适合夏夜海边的中文女声流行歌',
+      mode: 'create',
+    });
+
+    expect(prompt).toContain('用户创作要求');
+    expect(prompt).toContain('直接用于 Suno 音乐生成');
+    expect(prompt).toContain('title: 适合歌曲发布与生成的标题');
+    expect(prompt).toContain('主动补全合理的歌曲结构');
+  });
+
   it('extracts lyrics rewrite payload from JSON text', () => {
     const result = parseLyricsRewriteResult(`说明文字
 {
@@ -39,5 +53,31 @@ describe('music-analyzer utils', () => {
       styleTags: ['edm pop', 'female vocal'],
       lyricsDraft: '[Verse]\n我们迎着光奔跑',
     });
+  });
+
+  it('merges text models and Suno models without duplicates', () => {
+    const models = collectLyricsDraftModels(
+      [
+        { id: 'gemini-2.5-pro', selectionKey: 'text:g2p' } as any,
+        { id: 'gpt-4.1-mini', selectionKey: 'text:gpt' } as any,
+      ],
+      [
+        { id: 'suno_lyric', selectionKey: 'audio:suno-lyric' } as any,
+        { id: 'suno_lyric', selectionKey: 'audio:suno-lyric' } as any,
+        { id: 'suno-music', selectionKey: 'audio:suno-music' } as any,
+      ]
+    );
+
+    expect(models.map((item) => item.id)).toEqual([
+      'gemini-2.5-pro',
+      'gpt-4.1-mini',
+      'suno_lyric',
+      'suno-music',
+    ]);
+  });
+
+  it('detects Suno lyric models', () => {
+    expect(isSunoLyricsModel('suno_lyric')).toBe(true);
+    expect(isSunoLyricsModel('gemini-2.5-pro')).toBe(false);
   });
 });

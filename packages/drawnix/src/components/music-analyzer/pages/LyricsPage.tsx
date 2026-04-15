@@ -8,12 +8,13 @@ import { ModelDropdown } from '../../ai-input-bar/ModelDropdown';
 import { useSelectableModels } from '../../../hooks/use-runtime-models';
 import { getSelectionKey } from '../../../utils/model-selection';
 import type { ModelRef } from '../../../utils/settings-manager';
-import type { ModelConfig } from '../../../constants/model-config';
 import { quickInsert } from '../../../mcp/tools/canvas-insertion';
 import { syncMusicAnalyzerTask } from '../task-sync';
 import {
   buildLyricsRewritePrompt,
+  collectLyricsDraftModels,
   getDefaultRewritePrompt,
+  isSunoLyricsModel,
   readStoredModelSelection,
   writeStoredModelSelection,
   ORIGINAL_VERSION_ID,
@@ -114,27 +115,11 @@ export const LyricsPage: React.FC<LyricsPageProps> = ({
 
   const allTextModels = useSelectableModels('text');
   const audioModels = useSelectableModels('audio');
-  const rewriteModels = useMemo(() => {
-    const sunoLyricsModels = audioModels.filter((item) => /suno.*lyric|suno_lyric/i.test(item.id));
-    const mergedModels: ModelConfig[] = [];
-    const seenModelKeys = new Set<string>();
-
-    for (const model of [...allTextModels, ...sunoLyricsModels]) {
-      const modelKey = model.selectionKey || model.id;
-      if (seenModelKeys.has(modelKey)) {
-        continue;
-      }
-      seenModelKeys.add(modelKey);
-      mergedModels.push(model);
-    }
-
-    return mergedModels;
-  }, [allTextModels, audioModels]);
-
-  const isSunoModel = useMemo(
-    () => /suno/i.test(selectedModel),
-    [selectedModel]
+  const rewriteModels = useMemo(
+    () => collectLyricsDraftModels(allTextModels, audioModels),
+    [allTextModels, audioModels]
   );
+  const isSunoModel = useMemo(() => isSunoLyricsModel(selectedModel), [selectedModel]);
 
   // 版本列表
   const versions = useMemo(() => {

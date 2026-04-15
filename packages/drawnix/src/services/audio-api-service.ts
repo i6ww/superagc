@@ -22,6 +22,12 @@ import type {
   AudioGenerationResult,
 } from './model-adapters';
 import { getForcedSunoParams } from '../utils/suno-model-aliases';
+import {
+  startLLMApiLog,
+  completeLLMApiLog,
+  failLLMApiLog,
+  updateLLMApiLogMetadata,
+} from './media-executor/llm-api-logger';
 
 export interface AudioGenerationParams {
   model: string;
@@ -35,6 +41,7 @@ export interface AudioGenerationParams {
   continueClipId?: string;
   continueAt?: number;
   params?: Record<string, unknown>;
+  taskId?: string;
 }
 
 export type SunoAction = 'music' | 'lyrics';
@@ -758,20 +765,46 @@ class AudioAPIService {
       throw new Error('API Key 未配置，请先配置 API Key');
     }
 
-    const response = await providerTransport.send(providerContext, {
-      path: resolveSubmitPath(params, binding),
-      baseUrlStrategy,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: buildSubmitBody(params),
+    const action = resolveRequestedAction(params);
+    const submitPath = resolveSubmitPath(params, binding);
+    const body = buildSubmitBody(params);
+    const startTime = Date.now();
+
+    const logId = startLLMApiLog({
+      endpoint: submitPath,
+      model: params.model,
+      taskType: 'audio',
+      prompt: params.prompt,
+      taskId: params.taskId,
     });
+
+    let response: Response;
+    try {
+      response = await providerTransport.send(providerContext, {
+        path: submitPath,
+        baseUrlStrategy,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+    } catch (error: any) {
+      failLLMApiLog(logId, {
+        duration: Date.now() - startTime,
+        errorMessage: error.message || String(error),
+      });
+      throw error;
+    }
 
     if (!response.ok) {
       const errorText = await response.text();
+      const duration = Date.now() - startTime;
+      failLLMApiLog(logId, {
+        httpStatus: response.status,
+        duration,
+        errorMessage: errorText.substring(0, 500),
+      });
       const error = new Error(
-        `${resolveRequestedAction(params) === 'lyrics' ? '歌词' : '音乐'}生成提交失败: ${response.status} - ${errorText}`
+        `${action === 'lyrics' ? '歌词' : '音乐'}生成提交失败: ${response.status} - ${errorText}`
       );
       (error as any).apiErrorBody = errorText;
       (error as any).httpStatus = response.status;
@@ -779,7 +812,21 @@ class AudioAPIService {
     }
 
     const payload = await response.json();
-    return normalizeAudioTaskResponse(payload);
+    const result = normalizeAudioTaskResponse(payload);
+    const duration = Date.now() - startTime;
+
+    completeLLMApiLog(logId, {
+      httpStatus: response.status,
+      duration,
+      resultType: action === 'lyrics' ? 'lyrics' : 'audio',
+      remoteId: result.taskId,
+    });
+
+    if (result.taskId) {
+      updateLLMApiLogMetadata(logId, { remoteId: result.taskId });
+    }
+
+    return result;
   }
 
   async queryAudioTask(
