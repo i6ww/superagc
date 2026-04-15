@@ -116,6 +116,8 @@ export interface GenerationParams {
   notifyHook?: string;
   /** Continue from clip ID */
   continueClipId?: string;
+  /** Continue from provider task ID */
+  continueTaskId?: string;
   /** Continue from timestamp */
   continueAt?: number;
   /** Infill start timestamp */

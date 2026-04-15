@@ -278,6 +278,7 @@ describe('audio-api-service', () => {
         model: 'suno_music',
         prompt: '继续完善副歌',
         continueClipId: 'clip-continue-1',
+        continueTaskId: 'task-continue-1',
         continueAt: 32,
         infillStartS: 8,
         infillEndS: 16,
@@ -296,6 +297,7 @@ describe('audio-api-service', () => {
     expect(JSON.parse(sendMock.mock.calls[0]?.[1]?.body as string)).toMatchObject({
       prompt: '继续完善副歌',
       continue_clip_id: 'clip-continue-1',
+      task_id: 'task-continue-1',
       continue_at: 32,
       infill_start_s: 8,
       infill_end_s: 16,

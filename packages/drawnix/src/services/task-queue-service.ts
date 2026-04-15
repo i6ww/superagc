@@ -253,6 +253,7 @@ class TaskQueueService {
             sunoAction: task.params.sunoAction,
             notifyHook: task.params.notifyHook,
             continueClipId: task.params.continueClipId,
+            continueTaskId: task.params.continueTaskId,
             continueAt: task.params.continueAt,
             infillStartS: task.params.infillStartS,
             infillEndS: task.params.infillEndS,

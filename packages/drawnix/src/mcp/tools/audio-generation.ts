@@ -25,6 +25,7 @@ export interface AudioGenerationParams {
   mv?: string;
   continueSource?: 'clip' | 'upload';
   continueClipId?: string;
+  continueTaskId?: string;
   continueAt?: number;
   infillStartS?: number;
   infillEndS?: number;
@@ -57,6 +58,7 @@ async function executeAsync(params: AudioGenerationParams): Promise<MCPResult> {
       tags: params.tags,
       mv: params.mv,
       continueClipId: params.continueClipId,
+      continueTaskId: params.continueTaskId,
       continueAt: params.continueAt,
       infillStartS: params.infillStartS,
       infillEndS: params.infillEndS,
@@ -115,6 +117,7 @@ function getAudioQueueConfig(params: AudioGenerationParams) {
       tags: params.tags,
       mv: params.mv,
       continueClipId: params.continueClipId,
+      continueTaskId: params.continueTaskId,
       continueAt: params.continueAt,
       infillStartS: params.infillStartS,
       infillEndS: params.infillEndS,
@@ -184,6 +187,10 @@ export const audioGenerationTool: MCPTool = {
       continueClipId: {
         type: 'string',
         description: '续写目标 clip ID',
+      },
+      continueTaskId: {
+        type: 'string',
+        description: '续写目标所属任务 task_id',
       },
       continueSource: {
         type: 'string',

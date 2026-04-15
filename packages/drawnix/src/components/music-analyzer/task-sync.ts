@@ -288,7 +288,7 @@ export function extractClipsFromTask(task: Task): GeneratedClip[] {
           imageUrl: clip.imageUrl || clip.imageLargeUrl,
           title: clip.title,
           duration: clip.duration ?? null,
-          taskId: task.id,
+          taskId: result.providerTaskId || task.remoteId || task.id,
         });
       }
     }
@@ -302,7 +302,7 @@ export function extractClipsFromTask(task: Task): GeneratedClip[] {
       imageUrl: result.previewImageUrl,
       title: result.title,
       duration: result.duration ?? null,
-      taskId: task.id,
+      taskId: result.providerTaskId || task.remoteId || task.id,
     });
   }
 
@@ -324,17 +324,51 @@ export async function syncMusicGenerationTask(
   if (!target) return null;
 
   const existingClips = target.generatedClips || [];
-  // 去重：同一 taskId 不重复添加
-  const existingTaskIds = new Set(existingClips.map((c) => c.taskId));
-  const newClips = clips.filter((c) => !existingTaskIds.has(c.taskId));
-  if (newClips.length === 0) return { records, record: target };
+  const mergeKey = (clip: GeneratedClip): string => {
+    const clipId = String(clip.clipId || '').trim();
+    if (clipId) {
+      return `clip:${clipId}`;
+    }
+    return `audio:${clip.audioUrl}`;
+  };
+
+  const mergedMap = new Map<string, GeneratedClip>();
+  existingClips.forEach((clip) => {
+    mergedMap.set(mergeKey(clip), clip);
+  });
+
+  let changed = false;
+  clips.forEach((clip) => {
+    const key = mergeKey(clip);
+    const existing = mergedMap.get(key);
+    if (!existing) {
+      mergedMap.set(key, clip);
+      changed = true;
+      return;
+    }
+
+    const nextClip: GeneratedClip = {
+      ...existing,
+      ...clip,
+      taskId: clip.taskId || existing.taskId,
+      clipId: clip.clipId || existing.clipId,
+      audioUrl: clip.audioUrl || existing.audioUrl,
+    };
+    if (JSON.stringify(existing) !== JSON.stringify(nextClip)) {
+      mergedMap.set(key, nextClip);
+      changed = true;
+    }
+  });
+  if (!changed) return { records, record: target };
+
+  const mergedClips = Array.from(mergedMap.values());
 
   const nextRecords = await updateRecord(recordId, {
-    generatedClips: [...existingClips, ...newClips],
+    generatedClips: mergedClips,
   });
   const updatedRecord = nextRecords.find((r) => r.id === recordId) || {
     ...target,
-    generatedClips: [...existingClips, ...newClips],
+    generatedClips: mergedClips,
   } as MusicAnalysisRecord;
 
   return { records: nextRecords, record: updatedRecord };

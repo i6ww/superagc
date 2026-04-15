@@ -86,6 +86,7 @@ export interface AudioGenerationRequest {
   sunoAction?: string;
   notifyHook?: string;
   continueClipId?: string;
+  continueTaskId?: string;
   continueAt?: number;
   infillStartS?: number;
   infillEndS?: number;

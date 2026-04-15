@@ -39,6 +39,7 @@ export interface AudioGenerationParams {
   sunoAction?: string;
   notifyHook?: string;
   continueClipId?: string;
+  continueTaskId?: string;
   continueAt?: number;
   infillStartS?: number;
   infillEndS?: number;
@@ -682,6 +683,14 @@ function buildMusicSubmitBody(params: AudioGenerationParams): string {
     (typeof params.params?.continueClipId === 'string'
       ? params.params.continueClipId
       : undefined);
+  const continueTaskId =
+    params.continueTaskId ||
+    (typeof params.params?.continueTaskId === 'string'
+      ? params.params.continueTaskId
+      : undefined) ||
+    (typeof params.params?.task_id === 'string'
+      ? params.params.task_id
+      : undefined);
   const continueAtValue =
     params.continueAt ??
     (typeof params.params?.continueAt === 'number'
@@ -706,6 +715,9 @@ function buildMusicSubmitBody(params: AudioGenerationParams): string {
   }
   if (continueClipId) {
     body.continue_clip_id = continueClipId;
+  }
+  if (continueTaskId) {
+    body.task_id = continueTaskId;
   }
   if (typeof continueAtValue === 'number' && Number.isFinite(continueAtValue)) {
     body.continue_at = continueAtValue;

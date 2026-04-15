@@ -231,6 +231,10 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
       setMessage('请先选择要续写的片段');
       return;
     }
+    if (requiresContinuation && !selectedClip?.taskId) {
+      setMessage('当前片段缺少来源 task_id，请先重新同步或重新生成一次片段');
+      return;
+    }
     if (requiresContinuation && continueAt == null) {
       setMessage('请填写续写起点秒数');
       return;
@@ -285,6 +289,7 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
             tags: trimmedTags,
             mv,
             continueClipId: requiresContinuation ? continueClipId : undefined,
+            continueTaskId: requiresContinuation ? selectedClip?.taskId : undefined,
             continueAt: requiresContinuation ? continueAt ?? undefined : undefined,
             infillStartS: requiresInfill ? infillStartS ?? undefined : undefined,
             infillEndS: requiresInfill ? infillEndS ?? undefined : undefined,
@@ -336,6 +341,7 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
     record,
     requiresContinuation,
     requiresInfill,
+    selectedClip?.taskId,
     selectedModel,
     selectedModelRef,
     tags,

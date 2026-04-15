@@ -538,6 +538,7 @@ class GenerationAPIService {
           sunoAction: params.sunoAction,
           notifyHook: params.notifyHook,
           continueClipId: params.continueClipId,
+          continueTaskId: params.continueTaskId,
           continueAt: params.continueAt,
           infillStartS: params.infillStartS,
           infillEndS: params.infillEndS,
