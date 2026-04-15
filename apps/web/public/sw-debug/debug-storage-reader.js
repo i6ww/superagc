@@ -85,6 +85,26 @@ const APP_TASKS_STORE = 'tasks';
 const SW_TASK_QUEUE_DB_NAME = 'sw-task-queue';
 const SW_TASKS_STORE = 'tasks';
 
+function matchesLLMApiTaskTypeFilter(log, taskType) {
+  if (!taskType) return true;
+  if (!log || typeof log !== 'object') return false;
+
+  const isLyrics =
+    log.taskType === 'audio' &&
+    (log.resultType === 'lyrics' ||
+      (typeof log.endpoint === 'string' && /\/lyrics(?:\/|$)/i.test(log.endpoint)));
+
+  if (taskType === 'lyrics') {
+    return isLyrics;
+  }
+
+  if (taskType === 'audio') {
+    return log.taskType === 'audio' && !isLyrics;
+  }
+
+  return log.taskType === taskType;
+}
+
 // ============================================================================
 // 控制台日志读取
 // ============================================================================
@@ -195,7 +215,7 @@ export async function getLLMApiLogsDirect(page = 1, pageSize = 20, filter = {}) 
           const log = cursor.value;
           // 应用过滤器
           let include = true;
-          if (filter.taskType && log.taskType !== filter.taskType) {
+          if (!matchesLLMApiTaskTypeFilter(log, filter.taskType)) {
             include = false;
           }
           if (filter.status && log.status !== filter.status) {

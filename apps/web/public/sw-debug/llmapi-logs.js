@@ -12,6 +12,21 @@ import { loadLLMApiLogs as loadLLMApiLogsRPC, clearLLMApiLogsInSW, deleteLLMApiL
 /** 缓存已获取的完整日志数据 (logId -> fullLog) */
 const fullLogCache = new Map();
 
+function isLyricsLLMLog(log) {
+  if (!log || typeof log !== 'object') return false;
+  if (log.taskType !== 'audio') return false;
+
+  return log.resultType === 'lyrics' ||
+    (typeof log.endpoint === 'string' && /\/lyrics(?:\/|$)/i.test(log.endpoint));
+}
+
+function getLLMApiCategory(log) {
+  if (isLyricsLLMLog(log)) {
+    return 'lyrics';
+  }
+  return log?.taskType || 'other';
+}
+
 /**
  * 获取当前过滤条件
  */
@@ -208,7 +223,16 @@ export async function batchDeleteLLMApiLogs() {
  * 注意：过滤已经在 SW 端完成，这里直接返回当前页的日志
  */
 export function getFilteredLLMApiLogs() {
-  return state.llmapiLogs;
+  const filter = getCurrentFilter();
+  return state.llmapiLogs.filter(log => {
+    if (filter.taskType && getLLMApiCategory(log) !== filter.taskType) {
+      return false;
+    }
+    if (filter.status && log.status !== filter.status) {
+      return false;
+    }
+    return true;
+  });
 }
 
 /**
@@ -376,10 +400,11 @@ function createLLMApiEntry(log, isExpanded, onToggle, isSelectMode = false, isSe
     'image': '图片生成',
     'video': '视频生成',
     'audio': '音频生成',
+    'lyrics': '歌词生成',
     'chat': '对话',
     'character': '角色',
     'other': '其他',
-  }[log.taskType] || log.taskType;
+  }[getLLMApiCategory(log)] || getLLMApiCategory(log);
 
   // Duration format - use log-duration class like Fetch logs
   const durationMs = log.duration || 0;
@@ -449,7 +474,7 @@ function createLLMApiEntry(log, isExpanded, onToggle, isSelectMode = false, isSe
             </tr>
             <tr>
               <td class="form-data-name">类型</td>
-              <td><span class="form-data-value">${log.taskType}</span></td>
+              <td><span class="form-data-value">${escapeHtml(getLLMApiCategory(log))}</span></td>
             </tr>
             <tr>
               <td class="form-data-name">HTTP 状态</td>
@@ -866,7 +891,7 @@ export async function handleCopyLLMApiLogs() {
   // Format logs as text
   const logText = filteredLogs.map(log => {
     const time = new Date(log.timestamp).toLocaleString('zh-CN', { hour12: false });
-    const type = log.taskType || 'unknown';
+    const type = getLLMApiCategory(log) || 'unknown';
     const status = log.status || '-';
     const model = log.model || '-';
     const duration = log.duration ? `${(log.duration / 1000).toFixed(1)}s` : '-';
@@ -930,10 +955,12 @@ export async function handleExportLLMApiLogs() {
       userAgent: navigator.userAgent,
       totalLogs: state.llmapiLogs.length,
       summary: {
-        image: state.llmapiLogs.filter(l => l.taskType === 'image').length,
-        video: state.llmapiLogs.filter(l => l.taskType === 'video').length,
-        chat: state.llmapiLogs.filter(l => l.taskType === 'chat').length,
-        character: state.llmapiLogs.filter(l => l.taskType === 'character').length,
+        image: state.llmapiLogs.filter(l => getLLMApiCategory(l) === 'image').length,
+        video: state.llmapiLogs.filter(l => getLLMApiCategory(l) === 'video').length,
+        audio: state.llmapiLogs.filter(l => getLLMApiCategory(l) === 'audio').length,
+        lyrics: state.llmapiLogs.filter(l => getLLMApiCategory(l) === 'lyrics').length,
+        chat: state.llmapiLogs.filter(l => getLLMApiCategory(l) === 'chat').length,
+        character: state.llmapiLogs.filter(l => getLLMApiCategory(l) === 'character').length,
         success: state.llmapiLogs.filter(l => l.status === 'success').length,
         error: state.llmapiLogs.filter(l => l.status === 'error').length,
       },
@@ -948,7 +975,7 @@ export async function handleExportLLMApiLogs() {
         mediaUrls.push({
           url: log.resultUrl,
           id: log.id,
-          type: log.taskType,
+          type: getLLMApiCategory(log),
           timestamp: log.timestamp
         });
       }

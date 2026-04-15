@@ -212,6 +212,25 @@ function compactLog(log: LLMApiLog): Partial<LLMApiLog> {
   };
 }
 
+function matchesTaskTypeFilter(log: LLMApiLog, taskType?: string): boolean {
+  if (!taskType) return true;
+
+  const isLyrics =
+    log.taskType === 'audio' &&
+    (log.resultType === 'lyrics' ||
+      /\/lyrics(?:\/|$)/i.test(log.endpoint || ''));
+
+  if (taskType === 'lyrics') {
+    return isLyrics;
+  }
+
+  if (taskType === 'audio') {
+    return log.taskType === 'audio' && !isLyrics;
+  }
+
+  return log.taskType === taskType;
+}
+
 /**
  * 分页获取 LLM API 日志（精简版，用于列表展示）
  * @param page 页码
@@ -233,7 +252,7 @@ export async function getLLMApiLogsPaginated(
   
   // 应用过滤条件
   if (filter?.taskType) {
-    allLogs = allLogs.filter(log => log.taskType === filter.taskType);
+    allLogs = allLogs.filter(log => matchesTaskTypeFilter(log, filter.taskType));
   }
   if (filter?.status) {
     allLogs = allLogs.filter(log => log.status === filter.status);
