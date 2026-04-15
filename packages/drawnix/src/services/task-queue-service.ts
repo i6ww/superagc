@@ -34,12 +34,14 @@ import {
   getAdapterContextFromSettings,
   resolveAdapterForInvocation,
 } from './model-adapters';
-import { cacheRemoteUrl, cacheRemoteUrls } from './media-executor/fallback-utils';
+import { cacheRemoteUrl } from './media-executor/fallback-utils';
 import { STORAGE_LIMITS } from '../constants/TASK_CONSTANTS';
 import { sendChatWithGemini } from '../utils/gemini-api/services';
 import type { GeminiMessage } from '../utils/gemini-api/types';
 import { buildInlineDataPart } from '../utils/gemini-api/message-utils';
 import { unifiedCacheService } from './unified-cache-service';
+import { buildGenerateContentConfig } from './analysis-core';
+import { callGoogleGenerateContentWithLog } from '../utils/gemini-api/logged-calls';
 import { executeVideoAnalysis } from './video-analysis-service';
 import {
   formatShotsMarkdown,
@@ -286,9 +288,6 @@ class TaskQueueService {
         if (fmt !== 'lyrics') {
           try {
             cachedUrl = await cacheRemoteUrl(result.url, task.id, 'audio', fmt);
-            if (result.urls?.length) {
-              cachedUrls = await cacheRemoteUrls(result.urls, task.id, 'audio', fmt);
-            }
             if (result.imageUrl) {
               cachedPreviewImageUrl = await cacheAudioCoverUrl(
                 result.imageUrl,
@@ -298,27 +297,55 @@ class TaskQueueService {
             if (result.clips?.length) {
               cachedClips = await Promise.all(
                 result.clips.map(async (clip, index) => {
+                  const cachedAudioUrl = await cacheRemoteUrl(
+                    clip.audioUrl,
+                    task.id,
+                    'audio',
+                    fmt,
+                    result.clips!.length > 1 ? index : undefined
+                  );
                   const cachedCoverUrl = await cacheAudioCoverUrl(
                     clip.imageLargeUrl || clip.imageUrl,
                     task.id,
                     result.clips!.length > 1 ? index : undefined
                   );
 
-                  if (!cachedCoverUrl) {
-                    return clip;
-                  }
-
                   return {
                     ...clip,
+                    audioUrl: cachedAudioUrl,
                     imageLargeUrl: clip.imageLargeUrl
-                      ? cachedCoverUrl
+                      ? cachedCoverUrl || clip.imageLargeUrl
                       : clip.imageLargeUrl,
                     imageUrl: clip.imageUrl
-                      ? cachedCoverUrl
+                      ? cachedCoverUrl || clip.imageUrl
                       : clip.imageUrl || cachedCoverUrl,
                   };
                 })
               );
+              cachedUrls = cachedClips
+                .map((clip) => clip.audioUrl)
+                .filter(
+                  (audioUrl): audioUrl is string =>
+                    typeof audioUrl === 'string' && audioUrl.trim().length > 0
+                );
+              if (cachedUrls.length > 0) {
+                cachedUrl = cachedUrls[0];
+              }
+            } else if (result.urls?.length) {
+              cachedUrls = await Promise.all(
+                result.urls.map((audioUrl, index) =>
+                  cacheRemoteUrl(
+                    audioUrl,
+                    task.id,
+                    'audio',
+                    fmt,
+                    result.urls!.length > 1 ? index : undefined
+                  )
+                )
+              );
+              if (cachedUrls.length > 0) {
+                cachedUrl = cachedUrls[0];
+              }
             }
             if (!cachedPreviewImageUrl) {
               cachedPreviewImageUrl =
@@ -474,6 +501,11 @@ class TaskQueueService {
 
           if ((task.params as { musicAnalyzerAction?: string }).musicAnalyzerAction === 'lyrics-gen') {
             await this.executeMusicAnalyzerLyricsGenTask(task, executionOptions);
+            break;
+          }
+
+          if ((task.params as { mvCreatorAction?: string }).mvCreatorAction === 'storyboard') {
+            await this.executeMVStoryboardTask(task, executionOptions);
             break;
           }
 
@@ -1050,6 +1082,108 @@ class TaskQueueService {
     }
   }
 
+  private async executeMVStoryboardTask(
+    task: Task,
+    options: {
+      onProgress: (progress: { progress: number; phase?: string }) => void;
+    }
+  ): Promise<void> {
+    const params = task.params as {
+      model?: string;
+      modelRef?: Task['params']['modelRef'];
+      prompt?: string;
+      audioCacheUrl?: string;
+    };
+    const actualPrompt = String(params.prompt || '').trim();
+    if (!actualPrompt) {
+      throw new Error('缺少分镜规划提示词');
+    }
+
+    await taskStorageWriter.updateStatus(task.id, 'processing');
+    options.onProgress({
+      progress: MUSIC_REWRITE_SIMULATED_START_PROGRESS,
+      phase: 'submitting',
+    });
+    await taskStorageWriter.updateProgress(
+      task.id,
+      MUSIC_REWRITE_SIMULATED_START_PROGRESS,
+      'submitting'
+    );
+
+    // 读取音频 base64
+    let audioData: string | undefined;
+    let audioMimeType = 'audio/mpeg';
+    if (params.audioCacheUrl) {
+      const blob =
+        (await unifiedCacheService.getCachedBlob(params.audioCacheUrl)) ||
+        (await fetch(params.audioCacheUrl).then(r => r.ok ? r.blob() : null));
+      if (blob) {
+        const file = new File([blob], 'mv-audio.mp3', {
+          type: blob.type || audioMimeType,
+        });
+        const part = await buildInlineDataPart(file);
+        if (part.type === 'inline_data') {
+          audioData = part.data;
+          audioMimeType = part.mimeType || audioMimeType;
+        }
+      }
+    }
+
+    const startedAt = Date.now();
+    const progressTimer = window.setInterval(() => {
+      const elapsed = Date.now() - startedAt;
+      const ratio = Math.min(elapsed / MUSIC_REWRITE_SIMULATED_DURATION_MS, 1);
+      const nextProgress =
+        MUSIC_REWRITE_SIMULATED_START_PROGRESS +
+        (MUSIC_REWRITE_SIMULATED_END_PROGRESS -
+          MUSIC_REWRITE_SIMULATED_START_PROGRESS) *
+          ratio;
+      this.updateTaskProgress(task.id, Math.floor(nextProgress));
+    }, MUSIC_REWRITE_SIMULATED_INTERVAL_MS);
+
+    try {
+      const contentParts: GeminiMessage['content'] = [
+        { type: 'text', text: actualPrompt },
+      ];
+      if (audioData) {
+        (contentParts as any[]).push({
+          type: 'inline_data',
+          mimeType: audioMimeType,
+          data: audioData,
+        });
+      }
+
+      const messages: GeminiMessage[] = [
+        { role: 'user', content: contentParts },
+      ];
+
+      const config = await buildGenerateContentConfig(
+        params.model,
+        (params.modelRef as any) || null
+      );
+      const response = await callGoogleGenerateContentWithLog(
+        config,
+        messages,
+        { stream: false },
+        { taskType: 'video', prompt: actualPrompt, taskId: task.id }
+      );
+
+      const text = response.choices?.[0]?.message?.content;
+      if (!text) {
+        throw new Error('AI 未返回有效响应');
+      }
+
+      options.onProgress({ progress: 100 });
+      await this.finalizeChatTask(task, {
+        title: 'MV 分镜脚本',
+        chatResponse: text,
+        format: 'md',
+      });
+    } finally {
+      window.clearInterval(progressTimer);
+    }
+  }
+
   /**
    * Gets the singleton instance of TaskQueueService
    */
@@ -1143,6 +1277,7 @@ class TaskQueueService {
       );
       return;
     }
+
     let task = this.tasks.get(taskId);
     if (!task) {
       // Task not in memory — create a minimal entry so the event is still emitted.
@@ -1210,6 +1345,7 @@ class TaskQueueService {
       );
       return;
     }
+
     const task = this.tasks.get(taskId);
     if (!task) {
       console.warn(`[TaskQueueService] Task ${taskId} not found`);
