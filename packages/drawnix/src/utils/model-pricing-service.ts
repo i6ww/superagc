@@ -24,12 +24,14 @@ type ResolvedProviderPricingConfig = {
 
 type SharedPricingResponseCacheEntry = {
   fetchedAt: number;
+  ttlMs: number;
   response: PricingApiResponse;
 };
 
 const TUZI_HOST = 'api.tu-zi.com';
 export const DEFAULT_TUZI_CNY_PER_USD = 0.7;
 export const MODEL_PRICING_CACHE_TTL_MS = 5 * 60 * 1000;
+export const TUZI_PRICING_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 function round4(v: number): number {
   return Math.round(v * 10000) / 10000;
@@ -65,6 +67,24 @@ function isTuziProvider(baseUrl: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isTuziPricingUrl(pricingUrl: string): boolean {
+  const normalized = normalizePricingUrl(pricingUrl);
+  if (!normalized) return false;
+
+  try {
+    const url = new URL(normalized);
+    return url.host === TUZI_HOST && url.pathname === '/api/pricing';
+  } catch {
+    return stripPricingUrlSearch(normalized) === `https://${TUZI_HOST}/api/pricing`;
+  }
+}
+
+export function getPricingCacheTtlMs(pricingUrl: string): number {
+  return isTuziPricingUrl(pricingUrl)
+    ? TUZI_PRICING_CACHE_TTL_MS
+    : MODEL_PRICING_CACHE_TTL_MS;
 }
 
 export function resolveProviderPricingConfig(
@@ -168,13 +188,17 @@ class ModelPricingService {
     return `${stripPricingUrlSearch(pricingUrl)}\n${groupName || 'default'}\n${round4(cnyPerUsd)}`;
   }
 
-  private isFresh(fetchedAt: number | undefined, now = Date.now()): boolean {
-    return typeof fetchedAt === 'number' && now - fetchedAt < MODEL_PRICING_CACHE_TTL_MS;
+  private isFresh(
+    fetchedAt: number | undefined,
+    ttlMs: number,
+    now = Date.now()
+  ): boolean {
+    return typeof fetchedAt === 'number' && now - fetchedAt < ttlMs;
   }
 
   private pruneExpiredSharedResponses(now = Date.now()): void {
     this.sharedResponseCacheMap.forEach((entry, key) => {
-      if (!this.isFresh(entry.fetchedAt, now)) {
+      if (!this.isFresh(entry.fetchedAt, entry.ttlMs, now)) {
         this.sharedResponseCacheMap.delete(key);
       }
     });
@@ -187,13 +211,14 @@ class ModelPricingService {
   ): Promise<PricingApiResponse> {
     const normalizedPricingUrl = normalizePricingUrl(pricingUrl);
     const requestKey = this.buildSharedCacheKey(normalizedPricingUrl, apiKey);
+    const ttlMs = getPricingCacheTtlMs(normalizedPricingUrl);
     const now = Date.now();
 
     this.pruneExpiredSharedResponses(now);
 
     if (!options.force) {
       const cached = this.sharedResponseCacheMap.get(requestKey);
-      if (cached && this.isFresh(cached.fetchedAt, now)) {
+      if (cached && this.isFresh(cached.fetchedAt, cached.ttlMs, now)) {
         return cached.response;
       }
     }
@@ -218,6 +243,7 @@ class ModelPricingService {
       }
       this.sharedResponseCacheMap.set(requestKey, {
         fetchedAt: Date.now(),
+        ttlMs,
         response: json,
       });
       return json;
@@ -287,6 +313,7 @@ class ModelPricingService {
     options: FetchAndCacheOptions = {}
   ): Promise<ProviderPricingCache> {
     const normalizedPricingUrl = normalizePricingUrl(pricingUrl);
+    const ttlMs = getPricingCacheTtlMs(normalizedPricingUrl);
     const sourceSignature = this.buildSourceSignature(
       normalizedPricingUrl,
       groupName,
@@ -297,7 +324,7 @@ class ModelPricingService {
       !options.force &&
       cached &&
       cached.sourceSignature === sourceSignature &&
-      this.isFresh(cached.fetchedAt)
+      this.isFresh(cached.fetchedAt, ttlMs)
     ) {
       return cached;
     }

@@ -12,6 +12,7 @@ import {
 } from './tools/model-benchmark';
 import { musicAnalyzerTool, MusicAnalyzerToolComponent } from './tools/music-analyzer';
 import { videoAnalyzerTool, VideoAnalyzerToolComponent } from './tools/video-analyzer';
+import { mvCreatorTool, MVCreatorToolComponent } from './tools/mv-creator';
 
 export interface ToolPluginModule {
   manifest: ToolDefinition;
@@ -28,6 +29,7 @@ const BUILT_IN_TOOL_PLUGINS: ToolPluginModule[] = [
   musicPlayerTool,
   musicAnalyzerTool,
   videoAnalyzerTool,
+  mvCreatorTool,
 ];
 
 const INTERNAL_COMPONENTS = new Map<string, React.ComponentType<any>>([
@@ -37,6 +39,7 @@ const INTERNAL_COMPONENTS = new Map<string, React.ComponentType<any>>([
   ['music-player', MusicPlayerToolComponent],
   ['music-analyzer', MusicAnalyzerToolComponent],
   ['video-analyzer', VideoAnalyzerToolComponent],
+  ['mv-creator', MVCreatorToolComponent],
 ]);
 
 class ToolRegistry {

@@ -80,6 +80,34 @@
     min-height: 220px;
   }
 
+  .ma-rewrite-submit {
+    width: 100%;
+    padding: 8px 6px;
+    border: none;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #f8b24a, #ee8f34);
+    color: #fff;
+    font-size: 11px;
+    line-height: 1.2;
+    font-weight: 600;
+    letter-spacing: 0;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(235, 125, 26, 0.1);
+    transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease,
+      opacity 0.16s ease;
+
+    &:hover {
+      filter: brightness(1.005);
+      box-shadow: 0 3px 10px rgba(235, 125, 26, 0.12);
+      transform: translateY(-1px);
+    }
+
+    &:active {
+      transform: translateY(0);
+      box-shadow: 0 1px 6px rgba(235, 125, 26, 0.1);
+    }
+  }
+
   .ma-progress,
   .ma-error {
     padding: 10px 12px;
@@ -400,6 +428,7 @@
   .ma-clip-row {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 10px;
     padding: 6px 8px;
     border-radius: 8px;
@@ -454,7 +483,7 @@
 
   .ma-clip-player {
     flex: 1;
-    min-width: 0;
+    min-width: 200px;
     height: 28px;
   }
 

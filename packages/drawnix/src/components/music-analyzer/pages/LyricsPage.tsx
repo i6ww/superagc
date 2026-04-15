@@ -134,6 +134,7 @@ export const LyricsPage: React.FC<LyricsPageProps> = ({
 
   const activeVersionId = record.activeVersionId || ORIGINAL_VERSION_ID;
   const hasVersions = versions.length > 1;
+  const creationPrompt = String(record.creationPrompt || '').trim();
 
   const handleSwitchVersion = useCallback(async (versionId: string) => {
     const patch = switchToLyricsVersion(record, versionId);
@@ -150,10 +151,21 @@ export const LyricsPage: React.FC<LyricsPageProps> = ({
     try {
       let task;
       if (isSunoModel) {
-        // Suno lyrics API：用改写要求作为 prompt 直接生成歌词
+        const promptSections = [
+          rewritePrompt.trim() ? `本轮改写要求：\n${rewritePrompt.trim()}` : '',
+          creationPrompt && creationPrompt !== rewritePrompt.trim()
+            ? `第一步创作提示词：\n${creationPrompt}`
+            : '',
+          lyricsDraft.trim() ? `当前歌词草稿：\n${lyricsDraft.trim()}` : '',
+        ].filter(Boolean);
+
+        const sunoPrompt =
+          promptSections.join('\n\n') || rewritePrompt || lyricsDraft || record.sourceLabel;
+
+        // Suno lyrics API：补齐首轮创作提示词与当前歌词，避免改写上下文缺失
         task = taskQueueService.createTask(
           {
-            prompt: rewritePrompt || lyricsDraft || record.sourceLabel,
+            prompt: sunoPrompt,
             model: selectedModel,
             modelRef: selectedModelRef || null,
             sunoAction: 'lyrics',
@@ -174,6 +186,7 @@ export const LyricsPage: React.FC<LyricsPageProps> = ({
             musicAnalyzerPrompt: buildLyricsRewritePrompt({
               analysis: record.analysis,
               userPrompt: rewritePrompt,
+              originalPrompt: creationPrompt,
               currentLyrics: lyricsDraft,
             }),
             musicAnalyzerRecordId: record.id,
@@ -321,6 +334,10 @@ export const LyricsPage: React.FC<LyricsPageProps> = ({
           rows={4}
           placeholder="告诉 AI 要保留什么、强化什么、改成什么风格"
         />
+        <button className="va-btn-primary ma-rewrite-submit" onClick={handleRewrite}>
+          {isSunoModel ? 'Suno 生成歌词' : 'AI 改写'}
+        </button>
+        {rewriteProgress && <div className="ma-progress">{rewriteProgress}</div>}
       </div>
 
       <div className="ma-card">
@@ -361,16 +378,12 @@ export const LyricsPage: React.FC<LyricsPageProps> = ({
       </div>
 
       {error && <div className="ma-error">{error}</div>}
-      {rewriteProgress && <div className="ma-progress">{rewriteProgress}</div>}
 
       <div className="va-page-actions">
         <button onClick={handleInsertLyrics} disabled={!lyricsDraft.trim()}>
           插入歌词
         </button>
-        <button className="va-btn-primary" onClick={handleRewrite}>
-          {isSunoModel ? 'Suno 生成歌词' : 'AI 改写'}
-        </button>
-        <button onClick={onNext} disabled={!lyricsDraft.trim()}>
+        <button className="va-btn-primary" onClick={onNext} disabled={!lyricsDraft.trim()}>
           下一步
         </button>
       </div>

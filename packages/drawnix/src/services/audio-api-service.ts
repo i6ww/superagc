@@ -920,6 +920,7 @@ class AudioAPIService {
       duration,
       resultType: action === 'lyrics' ? 'lyrics' : 'audio',
       remoteId: result.taskId,
+      responseBody: JSON.stringify(payload),
     });
 
     if (result.taskId) {

@@ -40,6 +40,8 @@ interface OpenToolOptions {
   componentProps?: Record<string, unknown>;
   /** 打开策略 */
   launchMode?: ToolWindowLaunchMode;
+  /** 指定窗口初始位置，避免与调用方窗口重叠 */
+  position?: { x: number; y: number };
 }
 
 /**
@@ -303,7 +305,7 @@ class ToolWindowService {
       instanceIndex,
       tool,
       status: 'open',
-      position: this.getCascadedPosition(tool.id),
+      position: options?.position || this.getCascadedPosition(tool.id),
       activationOrder: this.nextActivationOrder(),
       isPinned: this.pinnedToolIds.has(tool.id),
       isLauncher: false,

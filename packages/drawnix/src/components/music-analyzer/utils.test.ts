@@ -39,6 +39,18 @@ describe('music-analyzer utils', () => {
     expect(prompt).toContain('主动补全合理的歌曲结构');
   });
 
+  it('includes the first-step creation prompt in rewrite context', () => {
+    const prompt = buildLyricsRewritePrompt({
+      userPrompt: '保留情绪核心，但副歌更抓耳',
+      originalPrompt: '写一首关于深夜城市奔跑感的热血流行歌',
+      currentLyrics: '[Verse]\n霓虹在背后流动',
+    });
+
+    expect(prompt).toContain('第一步创作提示词');
+    expect(prompt).toContain('深夜城市奔跑感');
+    expect(prompt).toContain('当前已有歌词草稿');
+  });
+
   it('extracts lyrics rewrite payload from JSON text', () => {
     const result = parseLyricsRewriteResult(`说明文字
 {

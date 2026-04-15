@@ -1,6 +1,6 @@
 {
   "version": "0.6.27",
-  "buildTime": "2026-04-15T03:19:31.547Z",
+  "buildTime": "2026-04-15T03:19:32.547Z",
   "gitCommit": "unknown",
   "changelog": [
     "首屏异步预热价格并补全 LLM 原始响应日志",

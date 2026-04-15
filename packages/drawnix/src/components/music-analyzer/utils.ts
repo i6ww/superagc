@@ -57,10 +57,16 @@ export function buildLyricsRewritePrompt(params: {
   analysis?: MusicAnalysisData | null;
   userPrompt: string;
   currentLyrics?: string;
+  originalPrompt?: string;
   mode?: 'rewrite' | 'create';
 }): string {
-  const { analysis, userPrompt, currentLyrics, mode = 'rewrite' } = params;
+  const { analysis, userPrompt, currentLyrics, originalPrompt, mode = 'rewrite' } = params;
   const isCreateMode = mode === 'create';
+  const normalizedOriginalPrompt = String(originalPrompt || '').trim();
+  const normalizedUserPrompt = String(userPrompt || '').trim();
+  const shouldIncludeOriginalPrompt =
+    !!normalizedOriginalPrompt &&
+    normalizedOriginalPrompt !== normalizedUserPrompt;
 
   return `你是一个擅长做“爆款音乐拆解与歌词创作”的创作助手。请基于${analysis ? '音频分析结果' : '用户要求'}${isCreateMode ? '创作一版全新歌词草稿' : '改写歌词'}，并确保输出结果可以直接用于 Suno。
 
@@ -75,6 +81,8 @@ ${analysis ? `音频分析结果：\n${JSON.stringify(analysis, null, 2)}\n` : '
 
 ${isCreateMode ? '用户创作要求' : '用户改写要求'}：
 ${userPrompt || (isCreateMode ? '围绕用户描述补全一首完整、上口、可演唱的歌曲。' : '保留这首歌最抓人的情绪和节奏记忆点，重写成更容易传播的版本。')}
+
+${shouldIncludeOriginalPrompt ? `第一步创作提示词：\n${normalizedOriginalPrompt}\n` : ''}
 
 ${currentLyrics ? `当前已有歌词草稿：\n${currentLyrics}\n` : ''}
 
