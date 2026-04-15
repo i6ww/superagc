@@ -1,6 +1,6 @@
 {
   "version": "0.6.28",
-  "buildTime": "2026-04-15T14:08:17.303Z",
+  "buildTime": "2026-04-15T14:17:29.574Z",
   "gitCommit": "unknown",
   "changelog": [
     "补齐 sw-debug 的 llmapi JSON 结果展示",

@@ -396,8 +396,12 @@ export function AssetProvider({ children }: AssetProviderProps) {
       urls?: string[];
       format?: string;
       size?: number;
+      duration?: number;
       previewImageUrl?: string;
       title?: string;
+      providerTaskId?: string;
+      primaryClipId?: string;
+      clipIds?: string[];
       clips?: Array<{
         id?: string;
         clipId?: string;
