@@ -65,6 +65,8 @@ export interface ImageGenerationAnchorSubmissionContext {
   expectedInsertPosition?: Point;
   targetFrameId?: string;
   targetFrameDimensions?: { width: number; height: number };
+  frameAffinityId?: string;
+  frameAffinityDimensions?: { width: number; height: number };
   requestedSize?: string;
   requestedCount?: number;
   zoom: number;
@@ -129,6 +131,8 @@ export interface PlaitImageGenerationAnchor extends PlaitElement {
   expectedInsertPosition?: Point;
   targetFrameId?: string;
   targetFrameDimensions?: { width: number; height: number };
+  frameAffinityId?: string;
+  frameAffinityDimensions?: { width: number; height: number };
   requestedSize?: string;
   requestedCount?: number;
   zoom: number;

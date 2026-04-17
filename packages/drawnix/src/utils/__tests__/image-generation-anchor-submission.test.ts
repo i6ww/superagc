@@ -73,4 +73,30 @@ describe('image-generation-anchor-submission', () => {
       })
     ).toEqual(DEFAULT_IMAGE_GENERATION_ANCHOR_SIZE);
   });
+
+  it('preserves weak frame affinity for independent multi-image anchors', () => {
+    const options = buildImageGenerationAnchorCreateOptions({
+      workflowId: 'wf-batch',
+      expectedInsertPosition: [120, 240],
+      targetFrameId: undefined,
+      targetFrameDimensions: undefined,
+      frameAffinityId: 'frame-1',
+      frameAffinityDimensions: { width: 960, height: 540 },
+      requestedSize: '16x9',
+      requestedCount: 1,
+      batchId: 'wf_batch_wf-batch',
+      batchIndex: 1,
+      batchTotal: 4,
+      zoom: 1,
+      title: '图片生成',
+    });
+
+    expect(options.anchorType).toBe('ratio');
+    expect(options.frameAffinityId).toBe('frame-1');
+    expect(options.frameAffinityDimensions).toEqual({
+      width: 960,
+      height: 540,
+    });
+    expect(options.targetFrameId).toBeUndefined();
+  });
 });

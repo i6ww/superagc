@@ -19,6 +19,7 @@ export interface BaseGenerationParams {
   prompt: string;
   model?: string;
   modelRef?: unknown;
+  workflowId?: string;
   count?: number;
   batchId?: string;
   batchIndex?: number;
@@ -102,6 +103,7 @@ export function createQueueTask(
 
   const {
     count = 1,
+    workflowId: paramsWorkflowId,
     batchId: paramsBatchId,
     batchIndex: paramsBatchIndex,
     batchTotal: paramsBatchTotal,
@@ -132,6 +134,7 @@ export function createQueueTask(
       const task = taskQueueService.createTask(
         {
           ...toolPayload,
+          workflowId: paramsWorkflowId,
           batchId,
           batchIndex: paramsBatchIndex,
           batchTotal,
@@ -148,6 +151,7 @@ export function createQueueTask(
         const task = taskQueueService.createTask(
           {
             ...toolPayload,
+            workflowId: paramsWorkflowId,
             batchId,
             batchIndex: i + 1,
             batchTotal: actualCount,

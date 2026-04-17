@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { PlaitImageGenerationAnchor } from '../../types/image-generation-anchor.types';
 import { TaskStatus, TaskType, type Task } from '../../types/task.types';
-import { doesTaskBelongToImageGenerationAnchor } from '../image-generation-anchor-task';
+import {
+  doesTaskBelongToImageGenerationAnchor,
+  getImageGenerationTaskInsertGroupKey,
+  isIndependentBatchImageGenerationAnchor,
+} from '../image-generation-anchor-task';
 
 function createAnchor(
   overrides: Partial<PlaitImageGenerationAnchor> = {}
@@ -102,5 +106,179 @@ describe('image-generation-anchor-task', () => {
         })
       )
     ).toBe(false);
+  });
+
+  it('matches independent anchors by batch slot even when legacy tasks miss workflowId', () => {
+    const anchor = createAnchor({
+      batchId: 'wf_batch_wf-1',
+      batchIndex: 2,
+      batchTotal: 4,
+    });
+
+    expect(
+      doesTaskBelongToImageGenerationAnchor(
+        anchor,
+        createTask({
+          params: {
+            prompt: '生成图片',
+            batchId: 'wf_batch_wf-1',
+            batchIndex: 2,
+            batchTotal: 4,
+            size: '16x9',
+          },
+        })
+      )
+    ).toBe(true);
+  });
+
+  it('detects independent batch anchors and uses slot-level insert group keys', () => {
+    const anchor = createAnchor({
+      batchId: 'wf_batch_wf-1',
+      batchIndex: 2,
+      batchTotal: 4,
+    });
+    const task = createTask({
+      params: {
+        prompt: '生成图片',
+        workflowId: 'wf-1',
+        batchId: 'wf_batch_wf-1',
+        batchIndex: 2,
+        batchTotal: 4,
+        size: '16x9',
+      },
+    });
+
+    expect(isIndependentBatchImageGenerationAnchor(anchor)).toBe(true);
+    expect(getImageGenerationTaskInsertGroupKey(task, anchor)).toBe(
+      'slot:wf-1:wf_batch_wf-1:2'
+    );
+  });
+
+  it('keeps workflow-level insert grouping for legacy single anchors', () => {
+    const anchor = createAnchor();
+    const task = createTask();
+
+    expect(isIndependentBatchImageGenerationAnchor(anchor)).toBe(false);
+    expect(getImageGenerationTaskInsertGroupKey(task, anchor)).toBe('wf-1');
+  });
+
+  it('keeps workflow-level grouping for legacy stack anchors', () => {
+    const anchor = createAnchor({
+      anchorType: 'stack',
+      batchId: 'wf_batch_wf-1',
+      batchIndex: 2,
+      batchTotal: 4,
+    });
+    const task = createTask({
+      params: {
+        prompt: '生成图片',
+        workflowId: 'wf-1',
+        batchId: 'wf_batch_wf-1',
+        batchIndex: 2,
+        batchTotal: 4,
+        size: '16x9',
+      },
+    });
+
+    expect(isIndependentBatchImageGenerationAnchor(anchor)).toBe(false);
+    expect(getImageGenerationTaskInsertGroupKey(task, anchor)).toBe('wf-1');
+  });
+
+  it('matches legacy stack anchors by workflow instead of slot', () => {
+    const anchor = createAnchor({
+      anchorType: 'stack',
+      batchId: 'wf_batch_wf-1',
+      batchIndex: 2,
+      batchTotal: 4,
+    });
+
+    expect(
+      doesTaskBelongToImageGenerationAnchor(
+        anchor,
+        createTask({
+          params: {
+            prompt: '生成图片',
+            workflowId: 'wf-1',
+            batchId: 'wf_batch_wf-1',
+            batchIndex: 1,
+            batchTotal: 4,
+            size: '16x9',
+          },
+        })
+      )
+    ).toBe(true);
+  });
+
+  it('falls back to anchor-level grouping for independent anchors when workflow metadata is missing', () => {
+    const anchor = createAnchor({
+      id: 'anchor-slot-2',
+      batchId: 'wf_batch_wf-1',
+      batchIndex: 2,
+      batchTotal: 4,
+    });
+    const task = createTask({
+      params: {
+        prompt: '生成图片',
+        batchId: 'wf_batch_wf-1',
+        batchIndex: 2,
+        batchTotal: 4,
+        size: '16x9',
+      },
+    });
+
+    expect(getImageGenerationTaskInsertGroupKey(task, anchor)).toBe(
+      'anchor-slot:anchor-slot-2'
+    );
+  });
+
+  it('uses slot-level grouping for independent batch image tasks without anchor context', () => {
+    const task = createTask({
+      params: {
+        prompt: '生成图片',
+        workflowId: 'wf-1',
+        batchId: 'wf_batch_wf-1',
+        batchIndex: 3,
+        batchTotal: 4,
+        size: '16x9',
+      },
+    });
+
+    expect(getImageGenerationTaskInsertGroupKey(task)).toBe(
+      'slot:wf-1:wf_batch_wf-1:3'
+    );
+  });
+
+  it('prefixes non-image tasks to avoid cross-media regrouping', () => {
+    const task = createTask({
+      type: TaskType.VIDEO,
+      params: {
+        prompt: '生成视频',
+        workflowId: 'wf-2',
+        size: '16x9',
+      },
+    });
+
+    expect(getImageGenerationTaskInsertGroupKey(task)).toBe('video:wf-2');
+  });
+
+  it('separates lyrics tasks from regular audio groups', () => {
+    const task = createTask({
+      type: TaskType.AUDIO,
+      params: {
+        prompt: '写一段歌词',
+        workflowId: 'wf-lyrics',
+      },
+      result: {
+        url: 'https://example.com/lyrics.txt',
+        format: 'lyrics',
+        size: 128,
+        resultKind: 'lyrics',
+        lyricsText: '春风轻轻吹过山野',
+      },
+    });
+
+    expect(getImageGenerationTaskInsertGroupKey(task)).toBe(
+      'lyrics:wf-lyrics'
+    );
   });
 });

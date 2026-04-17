@@ -132,6 +132,11 @@ describe('workflow-converter', () => {
           expect(step.id).toMatch(new RegExp(`-step-${index + 1}$`));
           expect(step.mcp).toBe('generate_image');
           expect(step.description).toContain(`${index + 1}`);
+          expect(step.args.workflowId).toBe(workflow.id);
+          expect(step.args.batchId).toBe(`wf_batch_${workflow.id}`);
+          expect(step.args.batchIndex).toBe(index + 1);
+          expect(step.args.batchTotal).toBe(3);
+          expect(step.args.globalIndex).toBe(index + 1);
         });
       });
 
@@ -191,6 +196,11 @@ describe('workflow-converter', () => {
           size: '16x9',
           seconds: '8',
           model: 'veo3',
+          workflowId: workflow.id,
+          batchId: `wf_batch_${workflow.id}`,
+          batchIndex: 1,
+          batchTotal: 1,
+          globalIndex: 1,
         });
       });
 
@@ -228,6 +238,36 @@ describe('workflow-converter', () => {
       });
     });
 
+    describe('音频生成场景', () => {
+      it('应该正确转换音频生成请求并保留工作流元数据', () => {
+        const params = createMockParams({
+          generationType: 'audio',
+          modelId: 'suno-v4',
+          prompt: '写一首温柔的民谣',
+          size: undefined,
+          extraParams: {
+            sunoAction: 'music',
+          },
+        });
+
+        const workflow = convertDirectGenerationToWorkflow(params);
+
+        expect(workflow.generationType).toBe('audio');
+        expect(workflow.steps).toHaveLength(1);
+        expect(workflow.steps[0].mcp).toBe('generate_audio');
+        expect(workflow.steps[0].args).toMatchObject({
+          prompt: '写一首温柔的民谣',
+          model: 'suno-v4',
+          sunoAction: 'music',
+          workflowId: workflow.id,
+          batchId: `wf_batch_${workflow.id}`,
+          batchIndex: 1,
+          batchTotal: 1,
+          globalIndex: 1,
+        });
+      });
+    });
+
     describe('文本生成场景', () => {
       it('应该正确转换文本生成请求', () => {
         const params = createMockParams({
@@ -246,6 +286,11 @@ describe('workflow-converter', () => {
         expect(workflow.steps[0].args).toMatchObject({
           prompt: '写一份会议纪要',
           model: 'deepseek-v3.2',
+          workflowId: workflow.id,
+          batchId: `wf_batch_${workflow.id}`,
+          batchIndex: 1,
+          batchTotal: 1,
+          globalIndex: 1,
         });
       });
     });

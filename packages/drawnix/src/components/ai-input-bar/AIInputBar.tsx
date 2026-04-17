@@ -120,8 +120,7 @@ import { BoardTransforms } from '@plait/core';
 import { ImageGenerationAnchorTransforms } from '../../plugins/with-image-generation-anchor';
 import { buildImageGenerationAnchorCreateOptions } from '../../utils/image-generation-anchor-submission';
 import {
-  resolveImageGenerationAnchorAvailablePosition,
-  resolveImageGenerationBatchAnchorSeedPosition,
+  resolveImageGenerationBatchAnchorPositions,
 } from '../../utils/image-generation-anchor-placement';
 import {
   buildImageGenerationAnchorPresentationPatch,
@@ -2290,6 +2289,9 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
           let targetFrameDimensions:
             | { width: number; height: number }
             | undefined;
+          let targetFrameRect:
+            | { x: number; y: number; width: number; height: number }
+            | undefined;
 
           if (frameInfo) {
             // 验证 Frame 仍然存在
@@ -2306,6 +2308,7 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
               const frameRect = RectangleClient.getRectangleByPoints(
                 frameElement.points
               );
+              targetFrameRect = frameRect;
               expectedInsertLeftX = frameRect.x;
               expectedInsertY = frameRect.y;
             }
@@ -2327,6 +2330,33 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
               ReturnType<typeof ImageGenerationAnchorTransforms.insertAnchor>
             > = [];
             const workflowBatchId = `wf_batch_${workflow.id}`;
+            const plannedAnchorPositions = !anchorTargetFrameId
+              ? resolveImageGenerationBatchAnchorPositions(
+                  board,
+                  [expectedInsertLeftX, expectedInsertY],
+                  buildImageGenerationAnchorCreateOptions({
+                    workflowId: workflow.id,
+                    expectedInsertPosition: [
+                      expectedInsertLeftX,
+                      expectedInsertY,
+                    ],
+                    requestedSize: parsedParams.size,
+                    requestedCount: 1,
+                    zoom,
+                    title: workflowMessageData.name || '图片生成',
+                    ...buildImageGenerationAnchorPresentationPatch('submitted'),
+                  }).size ?? {
+                    width: 320,
+                    height: 180,
+                  },
+                  requestedCount,
+                  {
+                    frameRect: shouldCreateIndependentBatchAnchors
+                      ? targetFrameRect
+                      : undefined,
+                  }
+                )
+              : null;
 
             for (let index = 0; index < requestedCount; index += 1) {
               let anchorCreateOptions = buildImageGenerationAnchorCreateOptions({
@@ -2334,6 +2364,12 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
                 expectedInsertPosition: [expectedInsertLeftX, expectedInsertY],
                 targetFrameId: anchorTargetFrameId,
                 targetFrameDimensions: anchorTargetFrameDimensions,
+                frameAffinityId: shouldCreateIndependentBatchAnchors
+                  ? targetFrameId
+                  : undefined,
+                frameAffinityDimensions: shouldCreateIndependentBatchAnchors
+                  ? targetFrameDimensions
+                  : undefined,
                 requestedSize: parsedParams.size,
                 requestedCount: shouldCreateIndependentBatchAnchors ? 1 : requestedCount,
                 batchId: shouldCreateIndependentBatchAnchors
@@ -2351,29 +2387,10 @@ export const AIInputBar: React.FC<AIInputBarProps> = React.memo(
               });
 
               if (!anchorTargetFrameId) {
-                const anchorSize = anchorCreateOptions.size ?? {
-                  width: 320,
-                  height: 180,
-                };
-                const seedPosition = shouldCreateIndependentBatchAnchors
-                  ? resolveImageGenerationBatchAnchorSeedPosition(
-                      [expectedInsertLeftX, expectedInsertY],
-                      anchorSize,
-                      index,
-                      requestedCount
-                    )
-                  : anchorCreateOptions.position;
                 const resolvedAnchorPosition =
-                  resolveImageGenerationAnchorAvailablePosition(
-                    board,
-                    seedPosition,
-                    anchorSize,
-                    {
-                      ignoreElementIds: imageAnchorElements.map(
-                        (anchor) => anchor.id
-                      ),
-                    }
-                  );
+                  plannedAnchorPositions
+                    ? plannedAnchorPositions[index] ?? anchorCreateOptions.position
+                    : anchorCreateOptions.position;
 
                 anchorCreateOptions = {
                   ...anchorCreateOptions,

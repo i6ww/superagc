@@ -1,5 +1,6 @@
 import type { PlaitImageGenerationAnchor } from '../types/image-generation-anchor.types';
 import { TaskStatus, TaskType, type Task } from '../types/task.types';
+import { isLyricsTask } from './lyrics-task-utils';
 
 export function getImageGenerationAnchorTaskWorkflowId(
   task: Task
@@ -21,6 +22,66 @@ export function getImageGenerationAnchorTaskBatchIndex(
   return typeof task.params.batchIndex === 'number'
     ? task.params.batchIndex
     : undefined;
+}
+
+export function hasExplicitBatchBinding(
+  anchor: Pick<
+    PlaitImageGenerationAnchor,
+    'anchorType' | 'batchId' | 'batchIndex'
+  >
+): boolean {
+  if (anchor.anchorType === 'stack') {
+    return false;
+  }
+
+  return Boolean(anchor.batchId) && typeof anchor.batchIndex === 'number';
+}
+
+export function isIndependentBatchImageGenerationAnchor(
+  anchor: Pick<
+    PlaitImageGenerationAnchor,
+    'anchorType' | 'batchId' | 'batchIndex'
+  >
+): boolean {
+  return hasExplicitBatchBinding(anchor);
+}
+
+export function getImageGenerationTaskInsertGroupKey(
+  task: Task,
+  anchor?: Pick<
+    PlaitImageGenerationAnchor,
+    'id' | 'anchorType' | 'batchId' | 'batchIndex'
+  > | null
+): string {
+  const workflowId = getImageGenerationAnchorTaskWorkflowId(task);
+  const batchId = getImageGenerationAnchorTaskBatchId(task);
+  const batchIndex = getImageGenerationAnchorTaskBatchIndex(task);
+  const fallbackGroupKey = workflowId || task.params.prompt || `task:${task.id}`;
+
+  if (task.type !== TaskType.IMAGE) {
+    const taskGroupType =
+      task.type === TaskType.AUDIO && isLyricsTask(task) ? 'lyrics' : task.type;
+    return `${taskGroupType}:${fallbackGroupKey}`;
+  }
+
+  const hasIndependentAnchor = anchor
+    ? isIndependentBatchImageGenerationAnchor(anchor)
+    : false;
+  const shouldUseIndependentSlotKey =
+    Boolean(workflowId) &&
+    typeof batchId === 'string' &&
+    typeof batchIndex === 'number' &&
+    (anchor ? hasIndependentAnchor : true);
+
+  if (shouldUseIndependentSlotKey) {
+    return `slot:${workflowId}:${batchId}:${batchIndex}`;
+  }
+
+  if (hasIndependentAnchor && anchor) {
+    return `anchor-slot:${anchor.id}`;
+  }
+
+  return fallbackGroupKey;
 }
 
 function isImageTask(task: Task): boolean {
@@ -47,23 +108,24 @@ export function doesTaskBelongToImageGenerationAnchor(
   const taskWorkflowId = getImageGenerationAnchorTaskWorkflowId(task);
   const taskBatchId = getImageGenerationAnchorTaskBatchId(task);
   const taskBatchIndex = getImageGenerationAnchorTaskBatchIndex(task);
-  const hasExplicitBatchBinding =
-    Boolean(anchor.batchId) || typeof anchor.batchIndex === 'number';
+  const hasAnchorExplicitBatchBinding = hasExplicitBatchBinding(anchor);
 
-  if (hasExplicitBatchBinding) {
-    if (anchor.workflowId !== taskWorkflowId) {
-      return false;
-    }
-
+  if (hasAnchorExplicitBatchBinding) {
     if (anchor.batchId && anchor.batchId !== taskBatchId) {
       return false;
     }
 
     if (typeof anchor.batchIndex === 'number') {
-      return anchor.batchIndex === taskBatchIndex;
+      if (anchor.batchIndex !== taskBatchIndex) {
+        return false;
+      }
     }
 
-    return Boolean(taskBatchId);
+    if (taskWorkflowId && anchor.workflowId !== taskWorkflowId) {
+      return false;
+    }
+
+    return Boolean(taskBatchId) || taskWorkflowId === anchor.workflowId;
   }
 
   return (

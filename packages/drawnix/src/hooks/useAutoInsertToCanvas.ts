@@ -57,10 +57,9 @@ import {
   isLyricsTask,
 } from '../utils/lyrics-task-utils';
 import {
-  getImageGenerationAnchorTaskBatchId,
-  getImageGenerationAnchorTaskBatchIndex,
-  getImageGenerationAnchorTaskWorkflowId,
+  getImageGenerationTaskInsertGroupKey,
 } from '../utils/image-generation-anchor-task';
+import { findImageGenerationAnchorForTaskOnBoard } from '../utils/image-generation-anchor-lookup';
 
 /**
  * 配置项
@@ -116,48 +115,7 @@ function findImageGenerationAnchorForTask(
 ): PlaitImageGenerationAnchor | null {
   const board = getCanvasBoard();
   if (!board) return null;
-
-  if (typeof taskOrTaskId === 'string') {
-    return ImageGenerationAnchorTransforms.getAnchorByTaskId(
-      board,
-      taskOrTaskId
-    );
-  }
-
-  const byTaskId = ImageGenerationAnchorTransforms.getAnchorByTaskId(
-    board,
-    taskOrTaskId.id
-  );
-  if (byTaskId) {
-    return byTaskId;
-  }
-
-  const workflowId = getImageGenerationAnchorTaskWorkflowId(taskOrTaskId);
-  const batchId = getImageGenerationAnchorTaskBatchId(taskOrTaskId);
-  const batchIndex = getImageGenerationAnchorTaskBatchIndex(taskOrTaskId);
-  if (workflowId && batchId && typeof batchIndex === 'number') {
-    const byBatchSlot = ImageGenerationAnchorTransforms.getAnchorByBatchSlot(
-      board,
-      {
-        workflowId,
-        batchId,
-        batchIndex,
-      }
-    );
-
-    if (byBatchSlot) {
-      return byBatchSlot;
-    }
-  }
-
-  if (workflowId) {
-    return ImageGenerationAnchorTransforms.getAnchorByWorkflowId(
-      board,
-      workflowId
-    );
-  }
-
-  return null;
+  return findImageGenerationAnchorForTaskOnBoard(board, taskOrTaskId);
 }
 
 function linkImageGenerationAnchorToTask(
@@ -1234,11 +1192,10 @@ export function useAutoInsertToCanvas(
       // Note: 步骤状态更新现在由 SW 统一通过 workflow:stepStatus 事件处理
       // 不再需要在这里调用 updateWorkflowStepForTask
 
-      // 优先按 workflow 分组，避免不同轮同 prompt 生成共用同一个插入槽位。
-      const promptKey =
-        getImageGenerationAnchorTaskWorkflowId(task) ||
-        task.params.prompt ||
-        `task:${task.id}`;
+      const promptKey = getImageGenerationTaskInsertGroupKey(
+        task,
+        linkedImageAnchor
+      );
       // console.log(`[AutoInsert] Task ${task.id} added to pending inserts with promptKey: ${promptKey.substring(0, 30)}`);
 
       // 添加到待插入列表

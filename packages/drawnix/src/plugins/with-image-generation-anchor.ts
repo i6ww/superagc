@@ -78,6 +78,8 @@ export const ImageGenerationAnchorTransforms = {
       expectedInsertPosition: options.expectedInsertPosition ?? options.position,
       targetFrameId: options.targetFrameId,
       targetFrameDimensions: options.targetFrameDimensions,
+      frameAffinityId: options.frameAffinityId,
+      frameAffinityDimensions: options.frameAffinityDimensions,
       requestedSize: options.requestedSize,
       requestedCount: options.requestedCount ?? 1,
       zoom: options.zoom,
