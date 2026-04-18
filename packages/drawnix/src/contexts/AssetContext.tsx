@@ -400,6 +400,11 @@ export function AssetProvider({ children }: AssetProviderProps) {
    * 将已完成的任务转换为素材
    */
   const taskToAssets = useCallback((task: AssetTaskRecord): Asset[] => {
+    const result = task.result;
+    if (!result) {
+      return [];
+    }
+
     const assetType = task.type === TaskType.IMAGE
       ? AssetTypeEnum.IMAGE
       : task.type === TaskType.AUDIO
@@ -408,31 +413,31 @@ export function AssetProvider({ children }: AssetProviderProps) {
 
     const mimeType = task.type === TaskType.AUDIO
       ? 'audio/mpeg'
-      : task.result.format === 'mp4'
+      : result.format === 'mp4'
       ? 'video/mp4'
-      : task.result.format === 'webm'
+      : result.format === 'webm'
       ? 'video/webm'
-      : `image/${task.result.format || 'png'}`;
+      : `image/${result.format || 'png'}`;
 
     if (task.type === TaskType.AUDIO) {
-      const clipAssets = (task.result.clips || [])
+      const clipAssets = (result.clips || [])
         .map((clip, index): Asset | null => {
           const audioUrl =
             typeof clip.audioUrl === 'string' && clip.audioUrl.trim()
               ? clip.audioUrl
-              : task.result.urls?.[index];
+              : result.urls?.[index];
           if (!audioUrl) {
             return null;
           }
 
           const fallbackBaseName =
-            task.result.title ||
+            result.title ||
             task.params.title ||
             task.params.prompt?.substring(0, 30) ||
             'AI音频';
           const clipKey = clip.clipId || clip.id || String(index);
           const clipDuration =
-            typeof clip.duration === 'number' ? clip.duration : task.result.duration;
+            typeof clip.duration === 'number' ? clip.duration : result.duration;
 
           return {
             id: `${task.id}::${clipKey}`,
@@ -442,21 +447,21 @@ export function AssetProvider({ children }: AssetProviderProps) {
             url: audioUrl,
             name:
               clip.title ||
-              ((task.result.clips?.length || task.result.urls?.length || 0) > 1
+              ((result.clips?.length || result.urls?.length || 0) > 1
                 ? `${fallbackBaseName} ${index + 1}`
                 : fallbackBaseName),
             mimeType,
             createdAt: task.completedAt || task.createdAt,
-            size: task.result.size,
+            size: result.size,
             prompt: task.params.prompt,
             modelName: task.params.model,
             duration: clipDuration,
             clipId: clip.clipId || clip.id,
-            providerTaskId: task.result.providerTaskId || task.remoteId || task.id,
+            providerTaskId: result.providerTaskId || task.remoteId || task.id,
             thumbnail:
               clip.imageLargeUrl ||
               clip.imageUrl ||
-              task.result.previewImageUrl,
+              result.previewImageUrl,
           };
         })
         .filter((asset): asset is Asset => asset !== null);
@@ -467,7 +472,7 @@ export function AssetProvider({ children }: AssetProviderProps) {
     }
 
     const name = task.type === TaskType.AUDIO
-      ? (task.result.title || task.params.title || task.params.prompt?.substring(0, 30) || 'AI音频')
+      ? (result.title || task.params.title || task.params.prompt?.substring(0, 30) || 'AI音频')
       : (task.params.prompt?.substring(0, 30) || 'AI生成');
 
     return [{
@@ -475,24 +480,24 @@ export function AssetProvider({ children }: AssetProviderProps) {
       taskId: task.id,
       type: assetType,
       source: AssetSourceEnum.AI_GENERATED,
-      url: task.result.url,
+      url: result.url,
       name,
       mimeType,
       createdAt: task.completedAt || task.createdAt,
-      size: task.result.size,
+      size: result.size,
       prompt: task.params.prompt,
       modelName: task.params.model,
       duration:
-        task.type === TaskType.AUDIO ? task.result.duration : undefined,
+        task.type === TaskType.AUDIO ? result.duration : undefined,
       providerTaskId:
         task.type === TaskType.AUDIO
-          ? task.result.providerTaskId || task.remoteId || task.id
+          ? result.providerTaskId || task.remoteId || task.id
           : undefined,
       clipId:
         task.type === TaskType.AUDIO
-          ? task.result.primaryClipId || task.result.clipIds?.[0]
+          ? result.primaryClipId || result.clipIds?.[0]
           : undefined,
-      ...(task.result.previewImageUrl && { thumbnail: task.result.previewImageUrl }),
+      ...(result.previewImageUrl && { thumbnail: result.previewImageUrl }),
     }];
   }, []);
 

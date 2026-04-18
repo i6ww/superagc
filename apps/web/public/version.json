@@ -1,6 +1,6 @@
 {
   "version": "0.6.32",
-  "buildTime": "2026-04-18T01:44:46.820Z",
+  "buildTime": "2026-04-18T01:48:12.709Z",
   "gitCommit": "unknown",
   "changelog": [
     "修复生成页多项 Bug 并优化单镜头生成参数透传",
