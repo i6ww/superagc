@@ -265,6 +265,7 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
       initialAspectRatio: '1:1',
       initialModel: imageModel || undefined,
       initialModelRef: imageModelRef,
+      autoInsertToCanvas: false,
     });
   }, [record.id, record.videoStyle, openDialog, imageModel, imageModelRef]);
 
@@ -279,7 +280,7 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
   const processedTaskIdsRef = useRef(new Set<string>());
   const extractingRef = useRef(new Set<string>());
 
-  /** 从新生成的视频中提取帧，自动填入相邻片段的空位 */
+  /** 从新生成的视频中提取帧，自动回填前一片段缺失的尾帧 */
   const autoFillAdjacentFrames = useCallback(async (
     recordId: string,
     currentShots: VideoShot[],
@@ -297,19 +298,7 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
         const idx = updatedShots.findIndex(s => s.id === shotId);
         if (idx === -1) continue;
 
-        const nextShot = updatedShots[idx + 1];
         const prevShot = idx > 0 ? updatedShots[idx - 1] : undefined;
-
-        // 视频尾帧 → 下一片段首帧（如果下一片段首帧为空）
-        if (nextShot && !nextShot.generated_first_frame_url) {
-          const url = await extractFrameFromUrl(videoUrl, nextShot.id, 'first', 'last');
-          if (url) {
-            updatedShots = updatedShots.map(s =>
-              s.id === nextShot.id ? { ...s, generated_first_frame_url: url } : s
-            );
-            changed = true;
-          }
-        }
 
         // 视频首帧 → 前一片段尾帧（如果前一片段尾帧为空且前一片段未生成视频）
         if (prevShot && !prevShot.generated_last_frame_url && !prevShot.generated_video_url) {
@@ -638,6 +627,7 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
       initialAspectRatio: draft?.aspectRatio ?? imageAspectRatio,
       initialModel: imageModel || undefined,
       initialModelRef: imageModelRef,
+      autoInsertToCanvas: false,
       initialImages: draft
         ? toDraftImages(draft.images || [])
         : shot.generated_first_frame_url
@@ -669,6 +659,7 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
       initialAspectRatio: draft?.aspectRatio ?? imageAspectRatio,
       initialModel: imageModel || undefined,
       initialModelRef: imageModelRef,
+      autoInsertToCanvas: false,
       initialImages: draft
         ? toDraftImages(draft.images || [])
         : lastFrameUrl
@@ -717,6 +708,7 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
       initialModel: videoModel || undefined,
       initialModelRef: videoModelRef,
       batchId: shotBatchId,
+      autoInsertToCanvas: false,
       onDraftChange: (nextDraft: {
         prompt: string;
         images: Array<{ url: string; name: string }>;
@@ -775,30 +767,6 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
       onRecordUpdate({ ...record, editedShots: updatedShots });
     });
   }, [record, shots, onRecordUpdate, onRecordsChange]);
-  const propagateTailFrameToNextShot = useCallback(async (
-    currentShots: VideoShot[],
-    index: number,
-    videoUrl: string
-  ) => {
-    const nextShot = currentShots[index + 1];
-    if (!nextShot) {
-      return currentShots;
-    }
-
-    const nextFirstFrameUrl = await extractFrameFromUrl(videoUrl, nextShot.id, 'first', 'last');
-    if (!nextFirstFrameUrl || nextShot.generated_first_frame_url === nextFirstFrameUrl) {
-      return currentShots;
-    }
-
-    const updatedShots = currentShots.map((item, shotIndex) =>
-      shotIndex === index + 1
-        ? { ...item, generated_first_frame_url: nextFirstFrameUrl }
-        : item
-    );
-    await applyUpdatedShots(updatedShots);
-    return updatedShots;
-  }, [applyUpdatedShots]);
-
   const writeShotVideoResult = useCallback(async (
     currentShots: VideoShot[],
     index: number,
@@ -856,6 +824,7 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
         prompt: prompt.trim(), count: 1, size: imageAspectRatio,
         referenceImages: referenceImages.length > 0 ? referenceImages : undefined,
         batchId: shotBatchId,
+        autoInsertToCanvas: false,
         ...(imageModel ? { model: imageModel, modelRef: imageModelRef } : {}),
       }},
       { mode: 'queue' }
@@ -905,6 +874,7 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
           model: videoModel,
           modelRef: videoModelRef,
           referenceImages,
+          autoInsertToCanvas: false,
           params: videoModelConfig.provider === 'seedance'
             ? { aspect_ratio: selectedVideoAspectRatio }
             : undefined,
@@ -987,6 +957,7 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
               count: 1,
               size: '1:1',
               batchId: charBatchId,
+              autoInsertToCanvas: false,
               ...(imageModel ? { model: imageModel, modelRef: imageModelRef } : {}),
             }},
             { mode: 'queue' }
@@ -1039,7 +1010,6 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
           if (shouldInsertToCanvas) {
             await insertGeneratedVideoToCanvas(shot.generated_video_url);
           }
-          currentShots = await propagateTailFrameToNextShot(currentShots, index, shot.generated_video_url);
           try {
             const lastFrame = await extractFrameFromUrl(shot.generated_video_url, shot.id, 'last', 'last');
             prevLastFrameUrl = lastFrame || undefined;
@@ -1056,6 +1026,7 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
         const shotHasCharacters = (shot.character_ids || []).length > 0;
         const needsFirstFrame = shotHasCharacters || (prevLastFrameUrl !== undefined);
         const hasGeneratedFirstFrame = !!shot.generated_first_frame_url;
+        // 第二段开始必须先用“上一段尾帧 + 角色参考图”重新生首帧，不能直接把尾帧当首帧复用。
         const shouldGenerateFirstFrame = needsFirstFrame && !hasGeneratedFirstFrame;
 
         if (shouldGenerateFirstFrame && !batchStopRef.current) {
@@ -1105,7 +1076,6 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
             if (shouldInsertToCanvas) {
               await insertGeneratedVideoToCanvas(videoUrl);
             }
-            currentShots = await propagateTailFrameToNextShot(currentShots, index, videoUrl);
             try {
               const lastFrame = await extractFrameFromUrl(videoUrl, shot.id, 'last', 'last');
               prevLastFrameUrl = lastFrame || undefined;
@@ -1148,7 +1118,6 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
     createBatchVideoTask,
     ensureBatchId,
     generateFirstFrameForShot,
-    propagateTailFrameToNextShot,
     pseudoAnalysis,
     pseudoProductInfo,
     applyUpdatedShots,

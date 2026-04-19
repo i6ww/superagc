@@ -1,4 +1,9 @@
-export { ComboInput, type ComboInputProps, type ComboOption } from './ComboInput';
+export {
+  ComboInput,
+  type ComboInputProps,
+  type ComboOption,
+  type ComboOptionGroup,
+} from './ComboInput';
 export {
   CharacterDescriptionList,
   autoResizeTextarea,
@@ -49,3 +54,7 @@ export {
   appendVersionToRecord,
   switchVersionInRecord,
 } from './versioned-record';
+export {
+  VISUAL_STYLE_OPTIONS,
+  VISUAL_STYLE_PLACEHOLDER,
+} from './style-presets';

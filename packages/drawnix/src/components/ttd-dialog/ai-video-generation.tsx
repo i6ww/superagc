@@ -142,6 +142,7 @@ interface AIVideoGenerationProps {
   onModelChange?: (value: string) => void;
   onModelRefChange?: (value: ModelRef | null) => void;
   externalBatchId?: string;
+  initialAutoInsertToCanvas?: boolean;
   onDraftChange?: (draft: {
     prompt: string;
     images: Array<{ url: string; name: string }>;
@@ -163,6 +164,7 @@ const AIVideoGeneration = ({
   onModelChange,
   onModelRefChange,
   externalBatchId,
+  initialAutoInsertToCanvas,
   onDraftChange,
 }: AIVideoGenerationProps = {}) => {
   const videoModels = useSelectableModels('video');
@@ -1081,7 +1083,9 @@ const AIVideoGeneration = ({
           batchId,
           batchIndex: i + 1,
           batchTotal: count,
-          autoInsertToCanvas: getAutoInsertValue(LS_KEYS.AI_VIDEO_AUTO_INSERT),
+          autoInsertToCanvas:
+            initialAutoInsertToCanvas ??
+            getAutoInsertValue(LS_KEYS.AI_VIDEO_AUTO_INSERT),
           ...(extraParams ? { params: extraParams } : {}),
         };
 

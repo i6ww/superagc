@@ -82,6 +82,7 @@ interface AIImageGenerationProps {
   onModelRefChange?: (value: ModelRef | null) => void;
   /** 外部传入的 batchId，用于任务关联（如视频分析器帧生成） */
   externalBatchId?: string;
+  initialAutoInsertToCanvas?: boolean;
   onDraftChange?: (draft: {
     prompt: string;
     images: Array<{ url: string; name: string }>;
@@ -104,6 +105,7 @@ const AIImageGeneration = ({
   onModelChange,
   onModelRefChange,
   externalBatchId,
+  initialAutoInsertToCanvas,
   onDraftChange,
 }: AIImageGenerationProps = {}) => {
   const imageModels = useSelectableModels('image');
@@ -637,9 +639,9 @@ const AIImageGeneration = ({
             batchId,
             batchIndex: i + 1,
             batchTotal: count,
-            autoInsertToCanvas: getAutoInsertValue(
-              LS_KEYS.AI_IMAGE_AUTO_INSERT
-            ),
+            autoInsertToCanvas:
+              initialAutoInsertToCanvas ??
+              getAutoInsertValue(LS_KEYS.AI_IMAGE_AUTO_INSERT),
             targetFrameId,
             targetFrameDimensions,
             ...(extraParams ? { params: extraParams } : {}),
@@ -708,7 +710,9 @@ const AIImageGeneration = ({
         modelRef: currentModelRef || null,
         // 保存上传的图片（已转换为可序列化的格式）
         uploadedImages: convertedImages,
-        autoInsertToCanvas: getAutoInsertValue(LS_KEYS.AI_IMAGE_AUTO_INSERT),
+        autoInsertToCanvas:
+          initialAutoInsertToCanvas ??
+          getAutoInsertValue(LS_KEYS.AI_IMAGE_AUTO_INSERT),
         // 始终包含 batchId 以跳过重复检测
         batchId: externalBatchId || `image_single_${Date.now()}`,
         batchIndex: 1,

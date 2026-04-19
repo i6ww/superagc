@@ -10,16 +10,33 @@ export interface ComboOption {
   value: string;
 }
 
+export interface ComboOptionGroup {
+  label: string;
+  options: Array<string | ComboOption>;
+}
+
+type ComboInputOption = string | ComboOption | ComboOptionGroup;
+
 export interface ComboInputProps {
   value: string;
   onChange: (value: string) => void;
-  options: Array<string | ComboOption>;
+  options: ComboInputOption[];
   className?: string;
   placeholder?: string;
 }
 
 function normalizeOption(option: string | ComboOption): ComboOption {
   return typeof option === 'string' ? { label: option, value: option } : option;
+}
+
+function isOptionGroup(option: ComboInputOption): option is ComboOptionGroup {
+  return typeof option !== 'string' && 'options' in option;
+}
+
+interface NormalizedOptionGroup {
+  key: string;
+  label?: string;
+  options: ComboOption[];
 }
 
 export const ComboInput: React.FC<ComboInputProps> = ({
@@ -33,16 +50,44 @@ export const ComboInput: React.FC<ComboInputProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const normalized = options.map(normalizeOption);
+  const normalizedGroups: NormalizedOptionGroup[] = [];
+  const ungroupedOptions: ComboOption[] = [];
+
+  options.forEach((option, index) => {
+    if (isOptionGroup(option)) {
+      normalizedGroups.push({
+        key: `group-${index}-${option.label}`,
+        label: option.label,
+        options: option.options.map(normalizeOption),
+      });
+      return;
+    }
+    ungroupedOptions.push(normalizeOption(option));
+  });
+
+  if (ungroupedOptions.length > 0) {
+    normalizedGroups.unshift({
+      key: 'ungrouped',
+      options: ungroupedOptions,
+    });
+  }
+
+  const normalized = normalizedGroups.flatMap((group) => group.options);
   const displayValue = normalized.find((option) => option.value === value)?.label || value;
-  const filtered =
-    !value || normalized.some((option) => option.value === value)
-      ? normalized
-      : normalized.filter(
-          (option) =>
-            option.label.toLowerCase().includes(value.toLowerCase()) ||
-            option.value.toLowerCase().includes(value.toLowerCase())
-        );
+  const query = value.trim().toLowerCase();
+  const showAllOptions = !query || normalized.some((option) => option.value === value);
+  const filteredGroups = showAllOptions
+    ? normalizedGroups
+    : normalizedGroups
+        .map((group) => ({
+          ...group,
+          options: group.options.filter(
+            (option) =>
+              option.label.toLowerCase().includes(query) ||
+              option.value.toLowerCase().includes(query)
+          ),
+        }))
+        .filter((group) => group.options.length > 0);
 
   useEffect(() => {
     if (!open) return;
@@ -93,18 +138,23 @@ export const ComboInput: React.FC<ComboInputProps> = ({
         )}
         <span className="va-combo-arrow">▾</span>
       </div>
-      {open && filtered.length > 0 && (
+      {open && filteredGroups.length > 0 && (
         <div className="va-combo-menu">
-          {filtered.map((option) => (
-            <div
-              key={option.value}
-              className={`va-combo-option ${option.value === value ? 'selected' : ''}`}
-              onMouseDown={(event) => {
-                event.preventDefault();
-                handleSelect(option);
-              }}
-            >
-              {option.label}
+          {filteredGroups.map((group) => (
+            <div key={group.key} className="va-combo-group">
+              {group.label && <div className="va-combo-group-label">{group.label}</div>}
+              {group.options.map((option) => (
+                <div
+                  key={`${group.key}-${option.value}`}
+                  className={`va-combo-option ${option.value === value ? 'selected' : ''}`}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    handleSelect(option);
+                  }}
+                >
+                  {option.label}
+                </div>
+              ))}
             </div>
           ))}
         </div>

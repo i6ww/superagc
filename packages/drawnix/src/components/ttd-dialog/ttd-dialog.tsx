@@ -764,6 +764,7 @@ const TTDDialogComponent = ({
               onModelChange={handleImageModelChange}
               onModelRefChange={handleImageModelRefChange}
               externalBatchId={imageDialogInitialData?.batchId}
+              initialAutoInsertToCanvas={imageDialogInitialData?.autoInsertToCanvas}
               onDraftChange={imageDialogInitialData?.onDraftChange}
             />
           ))}
@@ -801,6 +802,7 @@ const TTDDialogComponent = ({
             onModelChange={handleVideoModelChange}
             onModelRefChange={handleVideoModelRefChange}
             externalBatchId={videoDialogInitialData?.batchId}
+            initialAutoInsertToCanvas={videoDialogInitialData?.autoInsertToCanvas}
             onDraftChange={videoDialogInitialData?.onDraftChange}
           />
         )}

@@ -9,6 +9,10 @@ import { quickInsert } from '../../../mcp/tools/canvas-insertion';
 import { updateRecord } from '../storage';
 import { ShotCard } from '../components/ShotCard';
 import { ComboInput } from '../components/ComboInput';
+import {
+  VISUAL_STYLE_OPTIONS,
+  VISUAL_STYLE_PLACEHOLDER,
+} from '../../shared/workflow';
 import { CharacterDescriptionList } from '../../shared/workflow';
 import { ModelDropdown } from '../../ai-input-bar/ModelDropdown';
 import { useSelectableModels } from '../../../hooks/use-runtime-models';
@@ -484,14 +488,12 @@ export const ScriptPage: React.FC<ScriptPageProps> = ({
         <div className="va-form-row">
           <div style={{ flex: 1 }}>
             <label className="va-edit-label">画面风格</label>
-            <textarea
-              ref={autoResizeRef}
-              className="va-edit-textarea va-auto-resize"
-              rows={estimateRows(productInfo.videoStyle)}
+            <ComboInput
+              className="va-style-combo"
               value={productInfo.videoStyle || ''}
-              onChange={e => setProductInfo(p => ({ ...p, videoStyle: e.target.value }))}
-              onInput={e => autoResize(e.currentTarget)}
-              placeholder="如：室内暖光，色调温暖现代"
+              onChange={value => setProductInfo(p => ({ ...p, videoStyle: value }))}
+              options={VISUAL_STYLE_OPTIONS}
+              placeholder={VISUAL_STYLE_PLACEHOLDER}
             />
           </div>
           <div style={{ flex: 1 }}>

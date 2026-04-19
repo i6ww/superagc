@@ -9,6 +9,8 @@ import {
   ShotCard,
   ComboInput,
   CharacterDescriptionList,
+  VISUAL_STYLE_OPTIONS,
+  VISUAL_STYLE_PLACEHOLDER,
 } from '../../shared/workflow';
 import { ModelDropdown } from '../../ai-input-bar/ModelDropdown';
 import { useSelectableModels } from '../../../hooks/use-runtime-models';
@@ -369,14 +371,12 @@ export const ScriptPage: React.FC<ScriptPageProps> = ({
         <div className="va-form-row">
           <div style={{ flex: 1 }}>
             <label className="va-edit-label">画面风格</label>
-            <textarea
-              ref={autoResizeRef}
-              className="va-edit-textarea va-auto-resize"
-              rows={estimateRows(videoStyle)}
+            <ComboInput
+              className="va-style-combo"
               value={videoStyle}
-              onChange={e => setVideoStyle(e.target.value)}
-              onInput={e => autoResize(e.currentTarget)}
-              placeholder="如：赛博朋克、暖色调、电影质感"
+              onChange={setVideoStyle}
+              options={VISUAL_STYLE_OPTIONS}
+              placeholder={VISUAL_STYLE_PLACEHOLDER}
             />
           </div>
         </div>
