@@ -13,6 +13,7 @@ import type { ProviderPricingCache } from './model-pricing-types';
 import {
   getDefaultAudioModel,
   getDefaultImageModel,
+  getModelConfig,
   getDefaultTextModel,
   getDefaultVideoModel,
   type ModelConfig,
