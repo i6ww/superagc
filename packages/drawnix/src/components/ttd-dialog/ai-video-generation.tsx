@@ -129,6 +129,38 @@ function extractSeedanceResolution(size?: string | null): string | null {
   return resolution && /^\d+p$/.test(resolution) ? resolution : null;
 }
 
+function areModelRefsEqual(
+  left?: ModelRef | null,
+  right?: ModelRef | null
+): boolean {
+  return (
+    (left?.profileId || null) === (right?.profileId || null) &&
+    (left?.modelId || null) === (right?.modelId || null)
+  );
+}
+
+function getAlignedModelRef(
+  modelId?: string | null,
+  modelRef?: ModelRef | null
+): ModelRef | null {
+  const normalized = createModelRef(modelRef?.profileId, modelRef?.modelId);
+  return normalized?.modelId === (modelId || null) ? normalized : null;
+}
+
+function resolveVideoModelRef(
+  models: ModelConfig[],
+  modelId?: string | null,
+  modelRef?: ModelRef | null
+): ModelRef | null {
+  if (!modelId) {
+    return null;
+  }
+
+  const alignedRef = getAlignedModelRef(modelId, modelRef);
+  const matchedModel = findMatchingSelectableModel(models, modelId, alignedRef);
+  return getModelRefFromConfig(matchedModel) || alignedRef;
+}
+
 interface AIVideoGenerationProps {
   initialPrompt?: string;
   initialImage?: ImageFile; // 保留单图片支持（向后兼容）
@@ -184,32 +216,43 @@ const AIVideoGeneration = ({
   // Video model parameters - use state to support dynamic updates
   const initialRoute = resolveInvocationRoute('video');
   const initialPreferredModelId = initialModel || initialRoute.modelId;
+  const initialPreferredModelRef = getAlignedModelRef(
+    initialPreferredModelId,
+    initialModel && initialModel === selectedModel
+      ? selectedModelRef
+      : initialRoute.modelId === initialPreferredModelId
+      ? createModelRef(initialRoute.profileId, initialRoute.modelId)
+      : null
+  );
   const initialMatchedModel =
     findMatchingSelectableModel(
       videoModels,
       initialPreferredModelId,
-      createModelRef(initialRoute.profileId, initialPreferredModelId)
+      initialPreferredModelRef
     ) ||
     getPinnedSelectableModel(
       'video',
       initialPreferredModelId,
-      createModelRef(initialRoute.profileId, initialPreferredModelId)
+      initialPreferredModelRef
     );
+  const initialResolvedModelRef = resolveVideoModelRef(
+    videoModels,
+    (initialMatchedModel?.id as VideoModel) || initialPreferredModelId,
+    getModelRefFromConfig(initialMatchedModel) || initialPreferredModelRef
+  );
   const [currentModel, setCurrentModel] = useState<VideoModel>(
     (initialMatchedModel?.id as VideoModel) ||
       videoModels[0]?.id ||
       normalizeVideoModel('veo3')
   );
   const [currentModelRef, setCurrentModelRef] = useState<ModelRef | null>(
-    getModelRefFromConfig(initialMatchedModel) ||
-      createModelRef(initialRoute.profileId, initialPreferredModelId)
+    initialResolvedModelRef
   );
   const initialVideoSelectionKey = getSelectionKey(
     ((initialMatchedModel?.id as VideoModel) ||
       videoModels[0]?.id ||
       normalizeVideoModel('veo3')) as VideoModel,
-    getModelRefFromConfig(initialMatchedModel) ||
-      createModelRef(initialRoute.profileId, initialPreferredModelId)
+    initialResolvedModelRef
   );
   const initialScopedVideoPreferences = loadScopedAIVideoToolPreferences(
     ((initialMatchedModel?.id as VideoModel) ||
@@ -508,12 +551,11 @@ const AIVideoGeneration = ({
       const newModel = newSettings.videoModelName || 'veo3';
       if (newModel !== currentModel) {
         setCurrentModel(newModel);
-        const matchedModel = findMatchingSelectableModel(
+        const nextModelRef = resolveVideoModelRef(
           visibleVideoModels,
           newModel,
           currentModelRef
         );
-        const nextModelRef = getModelRefFromConfig(matchedModel) || null;
         setCurrentModelRef(nextModelRef);
       }
     };
@@ -535,22 +577,30 @@ const AIVideoGeneration = ({
       currentModel,
       currentModelRef
     );
+    const nextModelRef = resolveVideoModelRef(
+      visibleVideoModels,
+      currentModel,
+      currentModelRef
+    );
     if (!matchedModel) {
       const fallback = visibleVideoModels[0];
       const nextRef = getModelRefFromConfig(fallback);
       setCurrentModel(fallback.id);
       setCurrentModelRef((prev) => {
-        if (
-          prev &&
-          nextRef &&
-          prev.profileId === nextRef.profileId &&
-          prev.modelId === nextRef.modelId
-        ) {
+        if (areModelRefsEqual(prev, nextRef)) {
           return prev;
         }
         return nextRef;
       });
+      return;
     }
+
+    setCurrentModelRef((prev) => {
+      if (areModelRefsEqual(prev, nextModelRef)) {
+        return prev;
+      }
+      return nextModelRef;
+    });
   }, [currentModel, currentModelRef, visibleVideoModels]);
 
   // Sync model from selectedModel prop (from parent component)
@@ -571,23 +621,13 @@ const AIVideoGeneration = ({
 
     lastSyncedSelectedSelectionKeyRef.current = nextSelectionKey;
     setCurrentModel((prev) => (prev === selectedModel ? prev : selectedModel));
-    const matchedModel = findMatchingSelectableModel(
+    const nextModelRef = resolveVideoModelRef(
       visibleVideoModels,
       selectedModel,
       selectedModelRef
     );
-    const nextModelRef =
-      getModelRefFromConfig(matchedModel) || selectedModelRef || null;
     setCurrentModelRef((prev) => {
-      if (
-        prev &&
-        nextModelRef &&
-        prev.profileId === nextModelRef.profileId &&
-        prev.modelId === nextModelRef.modelId
-      ) {
-        return prev;
-      }
-      if (!prev && !nextModelRef) {
+      if (areModelRefsEqual(prev, nextModelRef)) {
         return prev;
       }
       return nextModelRef;
@@ -717,6 +757,9 @@ const AIVideoGeneration = ({
     if (initialModel) {
       initialModelAppliedRef.current = initialModel;
       setCurrentModel(initialModel as VideoModel);
+      setCurrentModelRef(
+        resolveVideoModelRef(videoModels, initialModel, selectedModelRef)
+      );
     }
 
     setPrompt(initialPrompt);
@@ -1221,22 +1264,34 @@ const AIVideoGeneration = ({
                       currentModel,
                       currentModelRef
                     )}
-                    onSelect={(value) => {
+                    onSelect={(value, modelRef) => {
                       const nextModel = value as VideoModel;
+                      const nextModelRef = resolveVideoModelRef(
+                        visibleVideoModels,
+                        nextModel,
+                        modelRef || null
+                      );
                       initialModelAppliedRef.current = null; // 用户手动切换，解除保护
                       setCurrentModel(nextModel);
-                      setCurrentModelRef(null);
+                      setCurrentModelRef(nextModelRef);
                       setVideoSelectedParams(
-                        getDefaultVideoExtraParams(nextModel, nextModel)
+                        getDefaultVideoExtraParams(
+                          nextModel,
+                          nextModelRef || nextModel
+                        )
                       );
                       onModelChange(value);
-                      onModelRefChange?.(null);
+                      onModelRefChange?.(nextModelRef);
                     }}
                     onSelectModel={(model: ModelConfig) => {
                       const nextModel = model.id as VideoModel;
                       initialModelAppliedRef.current = null; // 用户手动切换，解除保护
                       setCurrentModel(nextModel);
-                      const nextModelRef = getModelRefFromConfig(model);
+                      const nextModelRef = resolveVideoModelRef(
+                        visibleVideoModels,
+                        nextModel,
+                        getModelRefFromConfig(model)
+                      );
                       setCurrentModelRef(nextModelRef);
                       setVideoSelectedParams(
                         getDefaultVideoExtraParams(

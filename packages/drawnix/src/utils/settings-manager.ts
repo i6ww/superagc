@@ -1541,14 +1541,24 @@ class SettingsManager {
             requestedModelId?.profileId || null,
             requestedModelId?.modelId || null
           );
+    const normalizedRequestedModelId = requestedModelRef?.modelId || null;
+    const normalizedPresetModelId = presetModelRef?.modelId || null;
+    const requestedStaticModel = normalizedRequestedModelId
+      ? getModelConfig(normalizedRequestedModelId)
+      : null;
+    const shouldInheritPresetProfile =
+      !normalizedRequestedModelId ||
+      Boolean(requestedModelRef?.profileId) ||
+      normalizedRequestedModelId === normalizedPresetModelId ||
+      !requestedStaticModel;
     const profile = this.getProviderProfileById(
-      requestedModelRef?.profileId || presetModelRef?.profileId || null
+      requestedModelRef?.profileId ||
+        (shouldInheritPresetProfile ? presetModelRef?.profileId : null) ||
+        null
     );
     const profileModels = profile
       ? this.getSelectedModelsForProfile(profile.id, routeType)
       : [];
-    const normalizedRequestedModelId = requestedModelRef?.modelId || null;
-    const normalizedPresetModelId = presetModelRef?.modelId || null;
     const normalizedLegacyBaseUrl =
       this.settings.gemini.baseUrl?.trim() || DEFAULT_SETTINGS.gemini.baseUrl;
     const normalizedLegacyApiKey = this.settings.gemini.apiKey?.trim() || '';
