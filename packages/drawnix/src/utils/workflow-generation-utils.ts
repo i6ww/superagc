@@ -164,6 +164,49 @@ export function resetCharacterReferenceImages<T extends VideoCharacter>(characte
   }));
 }
 
+export function resetWorkflowGeneratedAssets<
+  TShot extends VideoShot,
+  TCharacter extends VideoCharacter,
+>(shots: TShot[], characters: TCharacter[]) {
+  return {
+    shots: resetGeneratedShots(shots),
+    characters: resetCharacterReferenceImages(characters),
+  };
+}
+
+export function collectWorkflowExportAssets<TShot extends VideoShot>(
+  shots: TShot[]
+): WorkflowExportAssetItem[] {
+  return shots.flatMap((shot, index) => {
+    const items: WorkflowExportAssetItem[] = [];
+    if (shot.generated_first_frame_url) {
+      items.push({
+        url: shot.generated_first_frame_url,
+        type: 'image',
+        kind: 'first',
+        shotIndex: index,
+      });
+    }
+    if (shot.generated_last_frame_url) {
+      items.push({
+        url: shot.generated_last_frame_url,
+        type: 'image',
+        kind: 'last',
+        shotIndex: index,
+      });
+    }
+    if (shot.generated_video_url) {
+      items.push({
+        url: shot.generated_video_url,
+        type: 'video',
+        kind: 'video',
+        shotIndex: index,
+      });
+    }
+    return items;
+  });
+}
+
 export async function exportWorkflowAssetsZip(
   options: ExportWorkflowAssetsZipOptions
 ): Promise<ExportWorkflowAssetsZipResult> {

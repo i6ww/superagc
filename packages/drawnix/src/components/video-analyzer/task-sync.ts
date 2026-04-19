@@ -2,6 +2,13 @@ import type { Task } from '../../types/task.types';
 import type { AnalysisRecord, AnalysisSourceSnapshot, VideoAnalysisData } from './types';
 import { addRecord, loadRecords, updateRecord } from './storage';
 import {
+  parseStructuredOrChatJson,
+  readTaskAction,
+  readTaskChatResponse,
+  readTaskStringParam,
+  updateWorkflowRecord,
+} from '../shared/workflow';
+import {
   addVersionToRecord,
   applyRewriteShotUpdates,
   createScriptVersion,
@@ -11,24 +18,14 @@ import {
 type VideoAnalyzerTaskAction = 'analyze' | 'rewrite';
 
 function getTaskAction(task: Task): VideoAnalyzerTaskAction | null {
-  const action = (task.params as { videoAnalyzerAction?: unknown }).videoAnalyzerAction;
-  return action === 'analyze' || action === 'rewrite' ? action : null;
-}
-
-function getTaskChatResponse(task: Task): string {
-  return String(task.result?.chatResponse || '').trim();
+  return readTaskAction(task, 'videoAnalyzerAction', ['analyze', 'rewrite'] as const);
 }
 
 function parseAnalysisResult(task: Task): VideoAnalysisData {
-  const structured = task.result?.analysisData;
-  if (structured && typeof structured === 'object') {
-    return structured as VideoAnalysisData;
-  }
-  const raw = getTaskChatResponse(task);
-  if (!raw) {
-    throw new Error('分析任务缺少结果内容');
-  }
-  return JSON.parse(raw) as VideoAnalysisData;
+  return parseStructuredOrChatJson(task, {
+    missingMessage: '分析任务缺少结果内容',
+    fromStructured: (structured) => structured as VideoAnalysisData,
+  });
 }
 
 function getTaskSourceSnapshot(task: Task): AnalysisSourceSnapshot | null {
@@ -107,9 +104,7 @@ export async function syncVideoAnalyzerTask(task: Task): Promise<{
     return { records: nextRecords, record };
   }
 
-  const recordId = String(
-    (task.params as { videoAnalyzerRecordId?: unknown }).videoAnalyzerRecordId || ''
-  ).trim();
+  const recordId = readTaskStringParam(task, 'videoAnalyzerRecordId');
   if (!recordId) {
     return null;
   }
@@ -137,16 +132,11 @@ export async function syncVideoAnalyzerTask(task: Task): Promise<{
   const version = createScriptVersion(editedShots, versionLabel, target.productInfo?.prompt);
   const versionPatch = addVersionToRecord(target, version);
 
-  const nextRecords = await updateRecord(recordId, {
+  return updateWorkflowRecord(target, {
     ...versionPatch,
     pendingRewriteTaskId: null,
     storyboardGeneratedAt: Date.now(),
-  });
-  const updatedRecord =
-    nextRecords.find(record => record.id === recordId) ||
-    ({ ...target, editedShots, pendingRewriteTaskId: null } as AnalysisRecord);
-
-  return { records: nextRecords, record: updatedRecord };
+  }, updateRecord);
 }
 
 export function isVideoAnalyzerTask(task: Task): boolean {

@@ -5,17 +5,22 @@
 import type { Task } from '../../types/task.types';
 import { TaskType } from '../../types/task.types';
 import type { MVRecord, VideoShot, VideoCharacter } from './types';
-import type { GeneratedClip } from '../music-analyzer/types';
-import { extractClipsFromTask } from '../music-analyzer/task-sync';
-import { addRecord, loadRecords, updateRecord } from './storage';
+import { loadRecords, updateRecord } from './storage';
 import { addStoryboardVersionToRecord, createStoryboardVersion } from './utils';
 import { parseRewriteShotUpdates, applyRewriteShotUpdates } from '../video-analyzer/utils';
+import {
+  extractBatchRecordId,
+  readTaskAction,
+  readTaskChatResponse,
+  readTaskStringParam,
+  syncGeneratedClipsForRecord,
+  updateWorkflowRecord,
+} from '../shared/workflow';
 
 // ── 分镜规划任务 ──
 
 function getMVCreatorAction(task: Task): 'storyboard' | 'rewrite' | null {
-  const action = (task.params as { mvCreatorAction?: unknown }).mvCreatorAction;
-  return action === 'storyboard' || action === 'rewrite' ? action : null;
+  return readTaskAction(task, 'mvCreatorAction', ['storyboard', 'rewrite'] as const);
 }
 
 export function isMVCreatorTask(task: Task): boolean {
@@ -23,7 +28,7 @@ export function isMVCreatorTask(task: Task): boolean {
 }
 
 function parseStoryboardResult(task: Task): { shots: VideoShot[]; characters: VideoCharacter[] } {
-  let chatResponse = String(task.result?.chatResponse || '').trim();
+  let chatResponse = readTaskChatResponse(task);
   if (!chatResponse) throw new Error('分镜任务缺少结果内容');
 
   const codeBlockMatch = chatResponse.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
@@ -89,9 +94,7 @@ export async function syncMVStoryboardTask(task: Task): Promise<{
     return null;
   }
 
-  const recordId = String(
-    (task.params as { mvCreatorRecordId?: unknown }).mvCreatorRecordId || ''
-  ).trim();
+  const recordId = readTaskStringParam(task, 'mvCreatorRecordId');
   if (!recordId) return null;
 
   const records = await loadRecords();
@@ -107,21 +110,13 @@ export async function syncMVStoryboardTask(task: Task): Promise<{
   );
   const versionPatch = addStoryboardVersionToRecord(target, version);
 
-  const nextRecords = await updateRecord(recordId, {
+  return updateWorkflowRecord(target, {
     editedShots: shots,
     pendingStoryboardTaskId: null,
     storyboardGeneratedAt: Date.now(),
     ...(characters.length > 0 ? { characters } : {}),
     ...versionPatch,
-  });
-  const updatedRecord = nextRecords.find(r => r.id === recordId) || {
-    ...target,
-    editedShots: shots,
-    pendingStoryboardTaskId: null,
-    ...versionPatch,
-  } as MVRecord;
-
-  return { records: nextRecords, record: updatedRecord };
+  }, updateRecord);
 }
 
 // ── 脚本改编任务 ──
@@ -134,16 +129,14 @@ export async function syncMVRewriteTask(task: Task): Promise<{
     return null;
   }
 
-  const recordId = String(
-    (task.params as { mvCreatorRecordId?: unknown }).mvCreatorRecordId || ''
-  ).trim();
+  const recordId = readTaskStringParam(task, 'mvCreatorRecordId');
   if (!recordId) return null;
 
   const records = await loadRecords();
   const target = records.find(r => r.id === recordId);
   if (!target || target.pendingRewriteTaskId !== task.id) return null;
 
-  const chatResponse = String(task.result?.chatResponse || '').trim();
+  const chatResponse = readTaskChatResponse(task);
   if (!chatResponse) return null;
 
   // 尝试解析 { characters, shots } 格式（改编可能同时更新角色）
@@ -186,22 +179,13 @@ export async function syncMVRewriteTask(task: Task): Promise<{
   );
   const versionPatch = addStoryboardVersionToRecord(target, version);
 
-  const nextRecords = await updateRecord(recordId, {
+  return updateWorkflowRecord(target, {
     editedShots: newShots,
     pendingRewriteTaskId: null,
     storyboardGeneratedAt: Date.now(),
     ...(updatedCharacters ? { characters: updatedCharacters } : {}),
     ...versionPatch,
-  });
-  const updatedRecord = nextRecords.find(r => r.id === recordId) || {
-    ...target,
-    editedShots: newShots,
-    pendingRewriteTaskId: null,
-    ...(updatedCharacters ? { characters: updatedCharacters } : {}),
-    ...versionPatch,
-  } as MVRecord;
-
-  return { records: nextRecords, record: updatedRecord };
+  }, updateRecord);
 }
 
 // ── 音乐生成任务 ──
@@ -209,65 +193,19 @@ export async function syncMVRewriteTask(task: Task): Promise<{
 export function getMVMusicRecordId(task: Task): string | null {
   if (task.type !== TaskType.AUDIO) return null;
   const batchId = (task.params as { batchId?: string }).batchId;
-  if (!batchId || !batchId.startsWith('mv_')) return null;
-  // batchId: mv_{recordId}_music_{index}
-  const rest = batchId.slice(3);
-  const musicIdx = rest.indexOf('_music_');
-  return musicIdx > 0 ? rest.slice(0, musicIdx) : null;
+  if (!batchId) return null;
+  return extractBatchRecordId(batchId, {
+    prefix: 'mv_',
+    marker: '_music_',
+  });
 }
 
 export async function syncMVMusicTask(
   task: Task,
   recordId: string
 ): Promise<{ records: MVRecord[]; record: MVRecord } | null> {
-  if (task.type !== TaskType.AUDIO || task.status !== 'completed') return null;
-
-  const clips = extractClipsFromTask(task);
-  if (clips.length === 0) return null;
-
-  const records = await loadRecords();
-  const target = records.find(r => r.id === recordId);
-  if (!target) return null;
-
-  const existingClips = target.generatedClips || [];
-  const mergeKey = (clip: GeneratedClip): string => {
-    const clipId = String(clip.clipId || '').trim();
-    return clipId ? `clip:${clipId}` : `audio:${clip.audioUrl}`;
-  };
-
-  const mergedMap = new Map<string, GeneratedClip>();
-  existingClips.forEach(clip => mergedMap.set(mergeKey(clip), clip));
-
-  let changed = false;
-  clips.forEach(clip => {
-    const key = mergeKey(clip);
-    const existing = mergedMap.get(key);
-    if (!existing) {
-      mergedMap.set(key, clip);
-      changed = true;
-      return;
-    }
-    const nextClip: GeneratedClip = {
-      ...existing,
-      ...clip,
-      taskId: clip.taskId || existing.taskId,
-      clipId: clip.clipId || existing.clipId,
-      audioUrl: clip.audioUrl || existing.audioUrl,
-    };
-    if (JSON.stringify(existing) !== JSON.stringify(nextClip)) {
-      mergedMap.set(key, nextClip);
-      changed = true;
-    }
+  return syncGeneratedClipsForRecord(task, recordId, {
+    loadRecords,
+    updateRecord,
   });
-
-  if (!changed) return { records, record: target };
-
-  const mergedClips = Array.from(mergedMap.values());
-  const nextRecords = await updateRecord(recordId, { generatedClips: mergedClips });
-  const updatedRecord = nextRecords.find(r => r.id === recordId) || {
-    ...target,
-    generatedClips: mergedClips,
-  } as MVRecord;
-
-  return { records: nextRecords, record: updatedRecord };
 }

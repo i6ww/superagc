@@ -1,94 +1,30 @@
-import type { AnalysisRecord, ProductInfo, ScriptVersion, VideoAnalysisData, VideoShot, VideoCharacter } from './types';
-import { createModelRef, type ModelRef } from '../../utils/settings-manager';
+import type {
+  AnalysisRecord,
+  ProductInfo,
+  ScriptVersion,
+  VideoAnalysisData,
+  VideoShot,
+  VideoCharacter,
+} from './types';
 import { computeSegmentPlan } from '../../utils/segment-plan';
 import { getVideoModelConfig } from '../../constants/video-model-config';
+import {
+  DEFAULT_ORIGINAL_VERSION_ID,
+  appendVersionToRecord,
+  buildVideoPrompt,
+  buildFramePrompt,
+  readStoredModelSelection,
+  switchVersionInRecord,
+  writeStoredModelSelection,
+  updateActiveVersionShotsInRecord,
+} from '../shared/workflow';
+
+export { buildVideoPrompt, buildFramePrompt };
+export { readStoredModelSelection, writeStoredModelSelection };
 
 /** 去除字符串末尾的中英文句号 */
 function trimTrailingPeriod(s: string): string {
   return s.replace(/[。.]+$/, '');
-}
-
-/** 将镜头的多个字段融合为完整的视频生成 prompt */
-export function buildVideoPrompt(
-  shot: VideoShot,
-  analysis?: VideoAnalysisData,
-  productInfo?: ProductInfo | null,
-): string {
-  const description = shot.description ? trimTrailingPeriod(shot.description) : '';
-  const cameraMovement = shot.camera_movement
-    ? trimTrailingPeriod(shot.camera_movement)
-    : '';
-  const firstFramePrompt = shot.first_frame_prompt
-    ? trimTrailingPeriod(shot.first_frame_prompt)
-    : '';
-  const lastFramePrompt = shot.last_frame_prompt
-    ? trimTrailingPeriod(shot.last_frame_prompt)
-    : '';
-  const transitionHint = shot.transition_hint
-    ? trimTrailingPeriod(shot.transition_hint)
-    : '';
-  const narration = shot.narration
-    ? trimTrailingPeriod(shot.narration)
-    : '';
-  const dialogue = shot.dialogue ? trimTrailingPeriod(shot.dialogue) : '';
-  const dialogueSpeakers = shot.dialogue_speakers
-    ? trimTrailingPeriod(shot.dialogue_speakers)
-    : '';
-  const speechRelation = shot.speech_relation
-    ? trimTrailingPeriod(shot.speech_relation)
-    : narration && dialogue
-    ? 'both'
-    : narration
-    ? 'narration_only'
-    : dialogue
-    ? 'dialogue_only'
-    : 'none';
-  const narrationPrompt = narration ? `旁白：${narration}` : '';
-  const dialoguePrompt = dialogue
-    ? dialogueSpeakers
-      ? `角色对白：由${dialogueSpeakers}发言。对白内容：${dialogue}`
-      : `角色对白：${dialogue}`
-    : '';
-
-  // 全局风格信息（优先使用用户编辑值）
-  const styleParts: string[] = [];
-  const videoStyle = productInfo?.videoStyle || analysis?.video_style;
-  const bgmMood = productInfo?.bgmMood || analysis?.bgm_mood;
-  if (videoStyle) styleParts.push(`画面风格：${trimTrailingPeriod(videoStyle)}`);
-  if (bgmMood) styleParts.push(`BGM情绪：${trimTrailingPeriod(bgmMood)}`);
-
-  // 角色一致性锚定：若有角色描述，在每个镜头 prompt 中注入"the same [角色描述]"
-  const characterAnchor = shot.character_description
-    ? `The same ${trimTrailingPeriod(shot.character_description)}`
-    : '';
-
-  const parts = [
-    '请生成一个真实自然、上下文连贯的单镜头短视频',
-    ...styleParts,
-    characterAnchor ? `角色一致性：${characterAnchor}` : '',
-    description ? `镜头主题：${description}` : '',
-    narrationPrompt,
-    dialoguePrompt,
-    `语音关系：${speechRelation}`,
-    firstFramePrompt ? `开场关键帧：${firstFramePrompt}` : '',
-    lastFramePrompt ? `结束关键帧：${lastFramePrompt}` : '',
-    cameraMovement ? `运镜方式：${cameraMovement}` : '',
-    transitionHint ? `转场建议：${transitionHint}` : '',
-    '要求主体动作连贯、时序自然、画面风格统一，避免突兀跳变与闪烁',
-  ].filter(Boolean);
-
-  return parts.join('。');
-}
-
-/** 为图片生成 prompt 添加全局风格前缀 */
-export function buildFramePrompt(
-  shotPrompt: string,
-  analysis?: VideoAnalysisData,
-  productInfo?: ProductInfo | null,
-): string {
-  const videoStyle = productInfo?.videoStyle || analysis?.video_style;
-  if (!videoStyle || !shotPrompt) return shotPrompt;
-  return `${trimTrailingPeriod(videoStyle)}。${shotPrompt}`;
 }
 
 export function buildScriptRewritePrompt(params: {
@@ -235,51 +171,6 @@ export function applyRewriteShotUpdates(
   });
 }
 
-export function readStoredModelSelection(
-  key: string,
-  fallbackModel: string
-): { modelId: string; modelRef: ModelRef | null } {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) {
-      return { modelId: fallbackModel, modelRef: null };
-    }
-
-    const parsed = JSON.parse(raw) as {
-      modelId?: string;
-      profileId?: string | null;
-    };
-
-    if (typeof parsed.modelId === 'string' && parsed.modelId.trim()) {
-      return {
-        modelId: parsed.modelId.trim(),
-        modelRef: createModelRef(parsed.profileId || null, parsed.modelId),
-      };
-    }
-  } catch {
-    // 兼容旧格式：直接存储 modelId 字符串
-  }
-
-  return {
-    modelId: localStorage.getItem(key) || fallbackModel,
-    modelRef: null,
-  };
-}
-
-export function writeStoredModelSelection(
-  key: string,
-  modelId: string,
-  modelRef?: ModelRef | null
-): void {
-  localStorage.setItem(
-    key,
-    JSON.stringify({
-      modelId,
-      profileId: modelRef?.profileId || null,
-    })
-  );
-}
-
 // ── 脚本版本管理 ──
 
 const MAX_SCRIPT_VERSIONS = 10;
@@ -304,34 +195,26 @@ export function addVersionToRecord(
   record: AnalysisRecord,
   version: ScriptVersion
 ): Partial<AnalysisRecord> {
-  const versions = [version, ...(record.scriptVersions || [])].slice(0, MAX_SCRIPT_VERSIONS);
-  return {
-    scriptVersions: versions,
-    activeVersionId: version.id,
+  return appendVersionToRecord(record, 'scriptVersions', version, MAX_SCRIPT_VERSIONS, {
     editedShots: version.shots,
-  };
+  });
 }
 
 /** 原始分析版本的特殊 ID */
-export const ORIGINAL_VERSION_ID = 'original';
+export const ORIGINAL_VERSION_ID = DEFAULT_ORIGINAL_VERSION_ID;
 
 /** 切换到指定版本，返回 record patch；版本不存在返回 null */
 export function switchToVersion(
   record: AnalysisRecord,
   versionId: string
 ): Partial<AnalysisRecord> | null {
-  if (versionId === ORIGINAL_VERSION_ID) {
-    return {
-      activeVersionId: ORIGINAL_VERSION_ID,
+  return switchVersionInRecord(record, 'scriptVersions', versionId, {
+    getVersionPatch: (version) => ({ editedShots: version.shots }),
+    getOriginalPatch: () => ({
       editedShots: [...record.analysis.shots],
-    };
-  }
-  const version = record.scriptVersions?.find(v => v.id === versionId);
-  if (!version) return null;
-  return {
-    activeVersionId: versionId,
-    editedShots: version.shots,
-  };
+    }),
+    originalVersionId: ORIGINAL_VERSION_ID,
+  });
 }
 
 /** 更新 editedShots 时同步更新 scriptVersions 中活跃版本的 shots */
@@ -339,11 +222,5 @@ export function updateActiveShotsInRecord(
   record: AnalysisRecord,
   updatedShots: VideoShot[]
 ): Partial<AnalysisRecord> {
-  const patch: Partial<AnalysisRecord> = { editedShots: updatedShots };
-  if (record.activeVersionId && record.scriptVersions) {
-    patch.scriptVersions = record.scriptVersions.map(v =>
-      v.id === record.activeVersionId ? { ...v, shots: updatedShots } : v
-    );
-  }
-  return patch;
+  return updateActiveVersionShotsInRecord(record, 'scriptVersions', updatedShots);
 }

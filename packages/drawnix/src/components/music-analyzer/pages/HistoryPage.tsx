@@ -6,7 +6,12 @@ import { useSharedTaskState } from '../../../hooks/useTaskQueue';
 import type { Task } from '../../../types/task.types';
 import { TaskStatus, TaskType } from '../../../types/task.types';
 import { ConfirmDialog } from '../../dialog/ConfirmDialog';
-import { HoverTip } from '../../shared';
+import {
+  HoverTip,
+  appendTaskToRelatedGroup,
+  findRecordIdFromBatch,
+  sortRelatedTaskGroups,
+} from '../../shared';
 
 interface RelatedTasks {
   rewrite: Task[];
@@ -107,6 +112,7 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({
   const relatedTasksMap = useMemo(() => {
     const map = new Map<string, RelatedTasks>();
     const recordIds = new Set(records.map((r) => r.id));
+    const createEmptyGroups = (): RelatedTasks => ({ rewrite: [], lyricsGen: [], audio: [] });
 
     for (const task of allTasks) {
       const params = task.params;
@@ -119,8 +125,7 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({
         recordIds.has(params.musicAnalyzerRecordId)
       ) {
         const rid = params.musicAnalyzerRecordId as string;
-        if (!map.has(rid)) map.set(rid, { rewrite: [], lyricsGen: [], audio: [] });
-        map.get(rid)!.rewrite.push(task);
+        appendTaskToRelatedGroup(map, rid, 'rewrite', task, createEmptyGroups);
         continue;
       }
 
@@ -132,8 +137,7 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({
         recordIds.has(params.musicAnalyzerRecordId)
       ) {
         const rid = params.musicAnalyzerRecordId as string;
-        if (!map.has(rid)) map.set(rid, { rewrite: [], lyricsGen: [], audio: [] });
-        map.get(rid)!.lyricsGen.push(task);
+        appendTaskToRelatedGroup(map, rid, 'lyricsGen', task, createEmptyGroups);
         continue;
       }
 
@@ -143,25 +147,14 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({
         typeof params.batchId === 'string' &&
         (params.batchId as string).startsWith('ma_')
       ) {
-        const batchId = params.batchId as string;
-        const rest = batchId.slice(3);
-        for (const rid of recordIds) {
-          if (rest === rid || rest.startsWith(rid + '_')) {
-            if (!map.has(rid)) map.set(rid, { rewrite: [], lyricsGen: [], audio: [] });
-            map.get(rid)!.audio.push(task);
-            break;
-          }
+        const rid = findRecordIdFromBatch(params.batchId as string, 'ma_', recordIds);
+        if (rid) {
+          appendTaskToRelatedGroup(map, rid, 'audio', task, createEmptyGroups);
         }
       }
     }
 
-    for (const related of map.values()) {
-      related.rewrite.sort((a, b) => b.createdAt - a.createdAt);
-      related.lyricsGen.sort((a, b) => b.createdAt - a.createdAt);
-      related.audio.sort((a, b) => b.createdAt - a.createdAt);
-    }
-
-    return map;
+    return sortRelatedTaskGroups(map);
   }, [allTasks, records]);
 
   const handleToggleStar = useCallback(

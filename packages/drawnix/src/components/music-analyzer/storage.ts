@@ -1,6 +1,13 @@
-import { kvStorageService } from '../../services/kv-storage-service';
 import { unifiedCacheService } from '../../services/unified-cache-service';
 import { normalizeMusicAnalysisData } from '../../services/music-analysis-service';
+import {
+  addRecordWithCap,
+  deleteRecordById,
+  loadRecordsByKey,
+  saveRecordsByKey,
+  updateRecordById,
+  type WorkflowRecordStorageOptions,
+} from '../shared/workflow';
 import type { MusicAnalysisRecord } from './types';
 
 const STORAGE_KEY = 'music-analyzer:records';
@@ -24,64 +31,41 @@ function normalizeRecord(record: MusicAnalysisRecord): MusicAnalysisRecord {
   };
 }
 
+function cleanupRecordAudioCache(record: MusicAnalysisRecord): void {
+  if (!record.sourceSnapshot?.cacheUrl) {
+    return;
+  }
+
+  void unifiedCacheService.deleteCache(record.sourceSnapshot.cacheUrl).catch((error) => {
+    console.warn('[MusicAnalyzer] Failed to delete audio cache:', error);
+  });
+}
+
+const storageOptions: WorkflowRecordStorageOptions<MusicAnalysisRecord> = {
+  normalizeRecord,
+  onPruneRecord: cleanupRecordAudioCache,
+  onDeleteRecord: cleanupRecordAudioCache,
+};
+
 export async function loadRecords(): Promise<MusicAnalysisRecord[]> {
-  const records = await kvStorageService.get<MusicAnalysisRecord[]>(STORAGE_KEY);
-  return Array.isArray(records) ? records.map(normalizeRecord) : [];
+  return loadRecordsByKey<MusicAnalysisRecord>(STORAGE_KEY, storageOptions);
 }
 
 export async function saveRecords(records: MusicAnalysisRecord[]): Promise<void> {
-  await kvStorageService.set(STORAGE_KEY, records);
+  await saveRecordsByKey(STORAGE_KEY, records, storageOptions);
 }
 
 export async function addRecord(record: MusicAnalysisRecord): Promise<MusicAnalysisRecord[]> {
-  const records = await loadRecords();
-  records.unshift(record);
-
-  while (records.length > MAX_RECORDS) {
-    let idx = -1;
-    for (let i = records.length - 1; i >= 0; i -= 1) {
-      if (!records[i].starred) {
-        idx = i;
-        break;
-      }
-    }
-    if (idx === -1) break;
-    const [removed] = records.splice(idx, 1);
-    if (removed?.sourceSnapshot?.cacheUrl) {
-      void unifiedCacheService
-        .deleteCache(removed.sourceSnapshot.cacheUrl)
-        .catch((error) => {
-          console.warn('[MusicAnalyzer] Failed to delete pruned audio cache:', error);
-        });
-    }
-  }
-
-  await saveRecords(records);
-  return records;
+  return addRecordWithCap(STORAGE_KEY, record, MAX_RECORDS, storageOptions);
 }
 
 export async function updateRecord(
   id: string,
   patch: Partial<MusicAnalysisRecord>
 ): Promise<MusicAnalysisRecord[]> {
-  const records = await loadRecords();
-  const index = records.findIndex((item) => item.id === id);
-  if (index >= 0) {
-    records[index] = { ...records[index], ...patch };
-    await saveRecords(records);
-  }
-  return records;
+  return updateRecordById(STORAGE_KEY, id, patch, storageOptions);
 }
 
 export async function deleteRecord(id: string): Promise<MusicAnalysisRecord[]> {
-  const records = await loadRecords();
-  const target = records.find((item) => item.id === id);
-  const filtered = records.filter((item) => item.id !== id);
-  await saveRecords(filtered);
-  if (target?.sourceSnapshot?.cacheUrl) {
-    void unifiedCacheService.deleteCache(target.sourceSnapshot.cacheUrl).catch((error) => {
-      console.warn('[MusicAnalyzer] Failed to delete audio cache:', error);
-    });
-  }
-  return filtered;
+  return deleteRecordById(STORAGE_KEY, id, storageOptions);
 }

@@ -30,15 +30,19 @@ import { extractFrameFromUrl } from '../../../utils/video-frame-cache';
 import { buildBatchVideoReferenceImages, waitForBatchVideoTask } from '../../../utils/batch-video-generation';
 import { VideoPosterPreview } from '../../shared/VideoPosterPreview';
 import { HoverTip } from '../../shared';
+import { useWorkflowAssetActions } from '../../shared/workflow';
+import {
+  buildVideoAnalyzerResetPayload,
+  buildVideoAnalyzerWorkflowExportOptions,
+} from '../generate-page-helpers';
 import {
   readStoredModelSelection,
   writeStoredModelSelection,
   updateActiveShotsInRecord,
 } from '../utils';
 import {
+  collectWorkflowExportAssets,
   exportWorkflowAssetsZip,
-  resetCharacterReferenceImages,
-  resetGeneratedShots,
 } from '../../../utils/workflow-generation-utils';
 
 const STORAGE_KEY_IMAGE_MODEL = 'video-analyzer:image-model';
@@ -88,7 +92,6 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
   const batchStopRef = useRef(false);
   const batchAbortControllerRef = useRef<AbortController | null>(null);
   const activeBatchTaskIdRef = useRef<string | null>(null);
-  const exportResetTimerRef = useRef<number | null>(null);
 
   const [refImages, setRefImages] = useState<ReferenceImage[]>([]);
   const [charLibraryTarget, setCharLibraryTarget] = useState<string | null>(null); // charId
@@ -129,8 +132,6 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
     currentIndex: -1,
     retryCount: 0,
   });
-  const [isExportingAssets, setIsExportingAssets] = useState(false);
-  const [exportProgress, setExportProgress] = useState(0);
   const [insertGeneratedVideosToCanvas, setInsertGeneratedVideosToCanvas] = useState(false);
 
   const videoModelConfig = useMemo(() => getVideoModelConfig(videoModel), [videoModel]);
@@ -142,41 +143,7 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
     () => record.characters || record.analysis.characters || [],
     [record.characters, record.analysis.characters]
   );
-  const exportableAssets = useMemo(() => (
-    shots.flatMap((shot, index) => {
-      const items: Array<{
-        url: string;
-        type: 'image' | 'video';
-        kind: 'first' | 'last' | 'video';
-        shotIndex: number;
-      }> = [];
-      if (shot.generated_first_frame_url) {
-        items.push({
-          url: shot.generated_first_frame_url,
-          type: 'image',
-          kind: 'first',
-          shotIndex: index,
-        });
-      }
-      if (shot.generated_last_frame_url) {
-        items.push({
-          url: shot.generated_last_frame_url,
-          type: 'image',
-          kind: 'last',
-          shotIndex: index,
-        });
-      }
-      if (shot.generated_video_url) {
-        items.push({
-          url: shot.generated_video_url,
-          type: 'video',
-          kind: 'video',
-          shotIndex: index,
-        });
-      }
-      return items;
-    })
-  ), [shots]);
+  const exportableAssets = useMemo(() => collectWorkflowExportAssets(shots), [shots]);
 
   useEffect(() => {
     latestRecordRef.current = record;
@@ -185,15 +152,6 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
   useEffect(() => {
     latestShotsRef.current = shots;
   }, [shots]);
-
-  useEffect(() => {
-    return () => {
-      if (exportResetTimerRef.current !== null) {
-        window.clearTimeout(exportResetTimerRef.current);
-        exportResetTimerRef.current = null;
-      }
-    };
-  }, []);
 
   const applyRecordPatch = useCallback(async (patch: Partial<AnalysisRecord>) => {
     const current = latestRecordRef.current;
@@ -320,56 +278,29 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
     }
   }, [board]);
 
-  const handleDownloadAssetsZip = useCallback(async () => {
-    if (isExportingAssets) {
-      return;
-    }
-
-    setIsExportingAssets(true);
-    setExportProgress(0);
-
-    try {
-      const currentRecord = latestRecordRef.current;
-      const currentShots = latestShotsRef.current;
-      const scriptMarkdown = formatShotsMarkdown(
-        currentShots,
-        currentRecord.analysis,
-        currentRecord.productInfo
-      );
-      const result = await exportWorkflowAssetsZip({
-        recordId: currentRecord.id,
-        fileNamePrefix: 'va',
-        zipBaseName: 'video_analyzer_assets',
-        scriptMarkdown,
-        recordMeta: {
-          id: currentRecord.id,
-          source: currentRecord.source,
-          sourceLabel: currentRecord.sourceLabel,
-          prompt: currentRecord.productInfo?.prompt || '',
-          aspectRatio: currentRecord.analysis.aspect_ratio || '16x9',
-          videoStyle: currentRecord.productInfo?.videoStyle || currentRecord.analysis.video_style || '',
-          bgmMood: currentRecord.productInfo?.bgmMood || currentRecord.analysis.bgm_mood || '',
-          shotCount: currentShots.length,
-        },
-        shots: currentShots,
-        assets: exportableAssets,
-        onProgress: setExportProgress,
-      });
-      MessagePlugin.success(`素材导出完成，共 ${result.assetCount} 个文件`);
-    } catch (error) {
-      console.error('[VideoAnalyzer] Failed to export assets:', error);
-      MessagePlugin.error('素材导出失败');
-    } finally {
-      if (exportResetTimerRef.current !== null) {
-        window.clearTimeout(exportResetTimerRef.current);
-      }
-      exportResetTimerRef.current = window.setTimeout(() => {
-        exportResetTimerRef.current = null;
-        setIsExportingAssets(false);
-        setExportProgress(0);
-      }, 300);
-    }
-  }, [exportableAssets, isExportingAssets]);
+  const { isExportingAssets, exportProgress, handleExportAssets: handleDownloadAssetsZip } =
+    useWorkflowAssetActions({
+      onExport: async (onProgress) => {
+        const currentRecord = latestRecordRef.current;
+        const currentShots = latestShotsRef.current;
+        const result = await exportWorkflowAssetsZip({
+          ...buildVideoAnalyzerWorkflowExportOptions(
+            currentRecord,
+            currentShots,
+            exportableAssets
+          ),
+          onProgress,
+        });
+        return result;
+      },
+      onExportSuccess: (result) => {
+        MessagePlugin.success(`素材导出完成，共 ${result.assetCount} 个文件`);
+      },
+      onExportError: (error) => {
+        console.error('[VideoAnalyzer] Failed to export assets:', error);
+        MessagePlugin.error('素材导出失败');
+      },
+    });
 
   // 参考图 URL 列表（用于传给批量生成接口）
   const refImageUrls = useMemo(() => refImages.map(img => img.url).filter(Boolean), [refImages]);
@@ -1215,11 +1146,12 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
   ]);
 
   const handleResetAllGenerated = useCallback(async () => {
-    const clearedShots = resetGeneratedShots(latestShotsRef.current);
-    const currentCharacters = latestRecordRef.current.characters || latestRecordRef.current.analysis.characters || [];
-    const clearedChars = resetCharacterReferenceImages(currentCharacters);
-    await applyUpdatedShots(clearedShots);
-    await applyRecordPatch({ characters: clearedChars });
+    const resetResult = buildVideoAnalyzerResetPayload(
+      latestRecordRef.current,
+      latestShotsRef.current
+    );
+    await applyUpdatedShots(resetResult.shots);
+    await applyRecordPatch({ characters: resetResult.characters });
   }, [applyUpdatedShots, applyRecordPatch]);
 
   const thumbStyle = useMemo(() => {

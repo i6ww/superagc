@@ -14,6 +14,11 @@ import {
 } from '../../shared/media-preview';
 import { ConfirmDialog } from '../../dialog/ConfirmDialog';
 import {
+  appendTaskToRelatedGroup,
+  findRecordIdFromBatch,
+  sortRelatedTaskGroups,
+} from '../../shared';
+import {
   HistoryRecordCard,
   getTaskMediaUrls,
   type RelatedTasks,
@@ -99,6 +104,7 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({
   const relatedTasksMap = useMemo(() => {
     const map = new Map<string, RelatedTasks>();
     const recordIds = new Set(records.map(r => r.id));
+    const createEmptyGroups = (): RelatedTasks => ({ rewrite: [], image: [], video: [] });
 
     for (const task of allTasks) {
       const params = task.params;
@@ -111,8 +117,7 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({
         recordIds.has(params.videoAnalyzerRecordId)
       ) {
         const rid = params.videoAnalyzerRecordId as string;
-        if (!map.has(rid)) map.set(rid, { rewrite: [], image: [], video: [] });
-        map.get(rid)!.rewrite.push(task);
+        appendTaskToRelatedGroup(map, rid, 'rewrite', task, createEmptyGroups);
         continue;
       }
 
@@ -122,29 +127,15 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({
         typeof params.batchId === 'string' &&
         params.batchId.startsWith('va_')
       ) {
-        const batchId = params.batchId as string;
-        // 从 batchId 提取 recordId: va_{recordId} 或 va_{recordId}_shot...
-        const rest = batchId.slice(3); // 去掉 'va_'
-        // recordId 是 UUID 格式，找到第一个匹配的 recordId
-        for (const rid of recordIds) {
-          if (rest === rid || rest.startsWith(rid + '_')) {
-            if (!map.has(rid)) map.set(rid, { rewrite: [], image: [], video: [] });
-            const group = task.type === TaskType.IMAGE ? 'image' : 'video';
-            map.get(rid)![group].push(task);
-            break;
-          }
+        const rid = findRecordIdFromBatch(params.batchId as string, 'va_', recordIds);
+        if (rid) {
+          const group = task.type === TaskType.IMAGE ? 'image' : 'video';
+          appendTaskToRelatedGroup(map, rid, group, task, createEmptyGroups);
         }
       }
     }
 
-    // 按创建时间倒序排列
-    for (const related of map.values()) {
-      related.rewrite.sort((a, b) => b.createdAt - a.createdAt);
-      related.image.sort((a, b) => b.createdAt - a.createdAt);
-      related.video.sort((a, b) => b.createdAt - a.createdAt);
-    }
-
-    return map;
+    return sortRelatedTaskGroups(map);
   }, [allTasks, records]);
 
   const handleToggleStar = useCallback(async (e: React.MouseEvent, record: AnalysisRecord) => {

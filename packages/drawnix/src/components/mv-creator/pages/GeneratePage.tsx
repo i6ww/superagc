@@ -12,13 +12,14 @@ import { formatMVShotsMarkdown, updateActiveShotsInRecord } from '../utils';
 import { getValidVideoSize, getVideoModelConfig } from '../../../constants/video-model-config';
 import { mcpRegistry } from '../../../mcp/registry';
 import { quickInsert, setCanvasBoard } from '../../../mcp/tools/canvas-insertion';
-import { ShotCard } from '../../video-analyzer/components/ShotCard';
 import {
+  ShotCard,
   buildVideoPrompt,
   buildFramePrompt,
   readStoredModelSelection,
+  useWorkflowAssetActions,
   writeStoredModelSelection,
-} from '../../video-analyzer/utils';
+} from '../../shared/workflow';
 import { ReferenceImageUpload } from '../../ttd-dialog/shared';
 import { extractFrameFromUrl } from '../../../utils/video-frame-cache';
 import type { ReferenceImage } from '../../ttd-dialog/shared';
@@ -34,12 +35,12 @@ import { buildBatchVideoReferenceImages, waitForBatchVideoTask } from '../../../
 import { MediaLibraryModal } from '../../media-library';
 import { VideoPosterPreview } from '../../shared/VideoPosterPreview';
 import { HoverTip } from '../../shared';
+import { buildMVResetPayload, buildMVWorkflowExportOptions } from '../generate-page-helpers';
 import { SelectionMode, AssetType } from '../../../types/asset.types';
 import type { Asset } from '../../../types/asset.types';
 import {
+  collectWorkflowExportAssets,
   exportWorkflowAssetsZip,
-  resetCharacterReferenceImages,
-  resetGeneratedShots,
 } from '../../../utils/workflow-generation-utils';
 
 const STORAGE_KEY_IMAGE_MODEL = 'mv-creator:image-model';
@@ -86,7 +87,6 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
   const batchStopRef = useRef(false);
   const batchAbortControllerRef = useRef<AbortController | null>(null);
   const activeBatchTaskIdRef = useRef<string | null>(null);
-  const exportResetTimerRef = useRef<number | null>(null);
 
   const [refImages, setRefImages] = useState<ReferenceImage[]>([]);
   const characters = useMemo<VideoCharacter[]>(
@@ -124,8 +124,6 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
     currentIndex: -1,
     retryCount: 0,
   });
-  const [isExportingAssets, setIsExportingAssets] = useState(false);
-  const [exportProgress, setExportProgress] = useState(0);
   const [insertGeneratedVideosToCanvas, setInsertGeneratedVideosToCanvas] = useState(false);
 
   const videoModelConfig = useMemo(() => getVideoModelConfig(videoModel), [videoModel]);
@@ -139,15 +137,6 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
   useEffect(() => {
     latestShotsRef.current = shots;
   }, [shots]);
-
-  useEffect(() => {
-    return () => {
-      if (exportResetTimerRef.current !== null) {
-        window.clearTimeout(exportResetTimerRef.current);
-        exportResetTimerRef.current = null;
-      }
-    };
-  }, []);
 
   const applyRecordPatch = useCallback(async (patch: Partial<MVRecord>) => {
     const current = latestRecordRef.current;
@@ -205,41 +194,7 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
   }, [applyRecordPatch, aspectRatio, videoModel]);
 
   const refImageUrls = useMemo(() => refImages.map(img => img.url).filter(Boolean), [refImages]);
-  const exportableAssets = useMemo(() => (
-    shots.flatMap((shot, index) => {
-      const items: Array<{
-        url: string;
-        type: 'image' | 'video';
-        kind: 'first' | 'last' | 'video';
-        shotIndex: number;
-      }> = [];
-      if (shot.generated_first_frame_url) {
-        items.push({
-          url: shot.generated_first_frame_url,
-          type: 'image',
-          kind: 'first',
-          shotIndex: index,
-        });
-      }
-      if (shot.generated_last_frame_url) {
-        items.push({
-          url: shot.generated_last_frame_url,
-          type: 'image',
-          kind: 'last',
-          shotIndex: index,
-        });
-      }
-      if (shot.generated_video_url) {
-        items.push({
-          url: shot.generated_video_url,
-          type: 'video',
-          kind: 'video',
-          shotIndex: index,
-        });
-      }
-      return items;
-    })
-  ), [shots]);
+  const exportableAssets = useMemo(() => collectWorkflowExportAssets(shots), [shots]);
 
   const handleCharacterRefImageChange = useCallback(async (charId: string, url: string | undefined) => {
     const base = latestRecordRef.current.characters || [];
@@ -281,65 +236,25 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
     }
   }, [board]);
 
-  const handleDownloadAssetsZip = useCallback(async () => {
-    if (isExportingAssets) {
-      return;
-    }
-
-    setIsExportingAssets(true);
-    setExportProgress(0);
-
-    try {
-      const currentRecord = latestRecordRef.current;
-      const currentShots = latestShotsRef.current;
-      const scriptMarkdown = formatMVShotsMarkdown(currentRecord, currentShots);
-      const selectedAudioUrl =
-        currentRecord.selectedClipAudioUrl ||
-        currentRecord.generatedClips?.find(
-          (clip) => clip.clipId === currentRecord.selectedClipId
-        )?.audioUrl ||
-        null;
-      const result = await exportWorkflowAssetsZip({
-        recordId: currentRecord.id,
-        fileNamePrefix: 'mv',
-        zipBaseName: 'mv_assets',
-        scriptMarkdown,
-        recordMeta: {
-          id: currentRecord.id,
-          creationPrompt: currentRecord.creationPrompt || '',
-          musicTitle: currentRecord.musicTitle || '',
-          musicStyleTags: currentRecord.musicStyleTags || [],
-          aspectRatio: currentRecord.aspectRatio || '16x9',
-          videoStyle: currentRecord.videoStyle || '',
-          shotCount: currentShots.length,
-        },
-        shots: currentShots,
-        assets: exportableAssets,
-        audioAsset: selectedAudioUrl ? {
-          url: selectedAudioUrl,
-          fallbackExtension: 'mp3',
-          downloadErrorMessage: '音乐下载失败',
-        } : {
-          url: '',
-          missingErrorMessage: '缺少已选中的音乐文件',
-        },
-        onProgress: setExportProgress,
-      });
-      MessagePlugin.success(`素材导出完成，共 ${result.assetCount} 个文件`);
-    } catch (error) {
-      console.error('[MVCreator] Failed to export mv assets:', error);
-      MessagePlugin.error('素材导出失败');
-    } finally {
-      if (exportResetTimerRef.current !== null) {
-        window.clearTimeout(exportResetTimerRef.current);
-      }
-      exportResetTimerRef.current = window.setTimeout(() => {
-        exportResetTimerRef.current = null;
-        setIsExportingAssets(false);
-        setExportProgress(0);
-      }, 300);
-    }
-  }, [exportableAssets, isExportingAssets]);
+  const { isExportingAssets, exportProgress, handleExportAssets: handleDownloadAssetsZip } =
+    useWorkflowAssetActions({
+      onExport: async (onProgress) => {
+        const currentRecord = latestRecordRef.current;
+        const currentShots = latestShotsRef.current;
+        const result = await exportWorkflowAssetsZip({
+          ...buildMVWorkflowExportOptions(currentRecord, currentShots, exportableAssets),
+          onProgress,
+        });
+        return result;
+      },
+      onExportSuccess: (result) => {
+        MessagePlugin.success(`素材导出完成，共 ${result.assetCount} 个文件`);
+      },
+      onExportError: (error) => {
+        console.error('[MVCreator] Failed to export mv assets:', error);
+        MessagePlugin.error('素材导出失败');
+      },
+    });
 
   const handleGenerateCharacterRef = useCallback((char: VideoCharacter) => {
     const charBatchId = `mv_${record.id}_char${char.id}_ref`;
@@ -1248,10 +1163,9 @@ export const GeneratePage: React.FC<GeneratePageProps> = ({
   ]);
 
   const handleResetAllGenerated = useCallback(async () => {
-    const clearedShots = resetGeneratedShots(shots);
-    const clearedChars = resetCharacterReferenceImages(record.characters || []);
-    await applyUpdatedShots(clearedShots);
-    await applyRecordPatch({ characters: clearedChars });
+    const resetResult = buildMVResetPayload(record, shots);
+    await applyUpdatedShots(resetResult.shots);
+    await applyRecordPatch({ characters: resetResult.characters });
   }, [shots, record.characters, applyUpdatedShots, applyRecordPatch]);
 
   const thumbStyle = useMemo(() => {

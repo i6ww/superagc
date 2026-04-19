@@ -13,6 +13,16 @@ import {
   parseLyricsRewriteResult,
 } from './utils';
 import {
+  extractBatchRecordId,
+  extractGeneratedClipsFromAudioTask,
+  parseStructuredOrChatJson,
+  readTaskAction,
+  readTaskChatResponse,
+  readTaskStringParam,
+  syncGeneratedClipsForRecord,
+  updateWorkflowRecord,
+} from '../shared/workflow';
+import {
   normalizeMusicAnalysisData,
   type MusicAnalysisData,
 } from '../../services/music-analysis-service';
@@ -20,25 +30,14 @@ import {
 type MusicAnalyzerTaskAction = 'analyze' | 'rewrite' | 'lyrics-gen';
 
 function getTaskAction(task: Task): MusicAnalyzerTaskAction | null {
-  const action = (task.params as { musicAnalyzerAction?: unknown }).musicAnalyzerAction;
-  return action === 'analyze' || action === 'rewrite' || action === 'lyrics-gen' ? action : null;
-}
-
-function getTaskChatResponse(task: Task): string {
-  return String(task.result?.chatResponse || '').trim();
+  return readTaskAction(task, 'musicAnalyzerAction', ['analyze', 'rewrite', 'lyrics-gen'] as const);
 }
 
 function parseAnalysisResult(task: Task): MusicAnalysisData {
-  const structured = task.result?.analysisData;
-  if (structured && typeof structured === 'object') {
-    return normalizeMusicAnalysisData(structured);
-  }
-
-  const raw = getTaskChatResponse(task);
-  if (!raw) {
-    throw new Error('分析任务缺少结果内容');
-  }
-  return normalizeMusicAnalysisData(JSON.parse(raw));
+  return parseStructuredOrChatJson(task, {
+    missingMessage: '分析任务缺少结果内容',
+    fromStructured: (structured) => normalizeMusicAnalysisData(structured),
+  });
 }
 
 function getTaskSourceSnapshot(task: Task): MusicAnalysisSourceSnapshot | null {
@@ -125,9 +124,7 @@ export async function syncMusicAnalyzerTask(task: Task): Promise<{
 
   // lyrics-gen: Suno 歌词生成或文本草稿生成完成 → 回填到 record
   if (action === 'lyrics-gen') {
-    const recordId = String(
-      (task.params as { musicAnalyzerRecordId?: unknown }).musicAnalyzerRecordId || ''
-    ).trim();
+    const recordId = readTaskStringParam(task, 'musicAnalyzerRecordId');
     if (!recordId) return null;
 
     const records = await loadRecords();
@@ -162,30 +159,16 @@ export async function syncMusicAnalyzerTask(task: Task): Promise<{
         )
       : {};
 
-    const nextRecords = await updateRecord(recordId, {
+    return updateWorkflowRecord(target, {
       title: nextTitle,
       styleTags: nextStyleTags,
       lyricsDraft: nextLyricsDraft,
       ...versionPatch,
       pendingLyricsGenTaskId: null,
-    });
-    const updatedRecord =
-      nextRecords.find((record) => record.id === recordId) ||
-      ({
-        ...target,
-        title: nextTitle,
-        styleTags: nextStyleTags,
-        lyricsDraft: nextLyricsDraft,
-        ...versionPatch,
-        pendingLyricsGenTaskId: null,
-      } as MusicAnalysisRecord);
-
-    return { records: nextRecords, record: updatedRecord };
+    }, updateRecord);
   }
 
-  const recordId = String(
-    (task.params as { musicAnalyzerRecordId?: unknown }).musicAnalyzerRecordId || ''
-  ).trim();
+  const recordId = readTaskStringParam(task, 'musicAnalyzerRecordId');
   if (!recordId) {
     return null;
   }
@@ -212,24 +195,13 @@ export async function syncMusicAnalyzerTask(task: Task): Promise<{
   );
   const versionPatch = addLyricsVersionToRecord(target, version);
 
-  const nextRecords = await updateRecord(recordId, {
+  return updateWorkflowRecord(target, {
     title: rewriteResult.title || target.title,
     styleTags: rewriteResult.styleTags.length > 0 ? rewriteResult.styleTags : target.styleTags,
     lyricsDraft: rewriteResult.lyricsDraft || target.lyricsDraft,
     pendingRewriteTaskId: null,
     ...versionPatch,
-  });
-  const updatedRecord =
-    nextRecords.find((record) => record.id === recordId) ||
-    ({
-      ...target,
-      title: rewriteResult.title || target.title,
-      styleTags: rewriteResult.styleTags.length > 0 ? rewriteResult.styleTags : target.styleTags,
-      lyricsDraft: rewriteResult.lyricsDraft || target.lyricsDraft,
-      pendingRewriteTaskId: null,
-    } as MusicAnalysisRecord);
-
-  return { records: nextRecords, record: updatedRecord };
+  }, updateRecord);
 }
 
 /** 从 Suno 歌词生成任务结果中提取歌词 */
@@ -271,42 +243,7 @@ function parseLyricsGenResult(task: Task): LyricsRewriteResult | null {
 
 /** 从已完成的 AUDIO 任务中提取 GeneratedClip */
 export function extractClipsFromTask(task: Task): GeneratedClip[] {
-  if (task.type !== TaskType.AUDIO || task.status !== 'completed' || !task.result) {
-    return [];
-  }
-
-  const clips: GeneratedClip[] = [];
-  const result = task.result;
-
-  // Suno 返回的 clips 数组（AudioClipResult[]）
-  if (Array.isArray(result.clips)) {
-    for (const clip of result.clips) {
-      if (clip.audioUrl) {
-        clips.push({
-          clipId: clip.clipId || clip.id || '',
-          audioUrl: clip.audioUrl,
-          imageUrl: clip.imageUrl || clip.imageLargeUrl,
-          title: clip.title,
-          duration: clip.duration ?? null,
-          taskId: result.providerTaskId || task.remoteId || task.id,
-        });
-      }
-    }
-  }
-
-  // 单个 url 结果
-  if (clips.length === 0 && result.url) {
-    clips.push({
-      clipId: result.primaryClipId || '',
-      audioUrl: result.url,
-      imageUrl: result.previewImageUrl,
-      title: result.title,
-      duration: result.duration ?? null,
-      taskId: result.providerTaskId || task.remoteId || task.id,
-    });
-  }
-
-  return clips;
+  return extractGeneratedClipsFromAudioTask(task) as GeneratedClip[];
 }
 
 /** 同步批量生成任务完成 → 回填 generatedClips */
@@ -314,64 +251,10 @@ export async function syncMusicGenerationTask(
   task: Task,
   recordId: string
 ): Promise<{ records: MusicAnalysisRecord[]; record: MusicAnalysisRecord } | null> {
-  if (task.type !== TaskType.AUDIO || task.status !== 'completed') return null;
-
-  const clips = extractClipsFromTask(task);
-  if (clips.length === 0) return null;
-
-  const records = await loadRecords();
-  const target = records.find((r) => r.id === recordId);
-  if (!target) return null;
-
-  const existingClips = target.generatedClips || [];
-  const mergeKey = (clip: GeneratedClip): string => {
-    const clipId = String(clip.clipId || '').trim();
-    if (clipId) {
-      return `clip:${clipId}`;
-    }
-    return `audio:${clip.audioUrl}`;
-  };
-
-  const mergedMap = new Map<string, GeneratedClip>();
-  existingClips.forEach((clip) => {
-    mergedMap.set(mergeKey(clip), clip);
+  return syncGeneratedClipsForRecord(task, recordId, {
+    loadRecords,
+    updateRecord,
   });
-
-  let changed = false;
-  clips.forEach((clip) => {
-    const key = mergeKey(clip);
-    const existing = mergedMap.get(key);
-    if (!existing) {
-      mergedMap.set(key, clip);
-      changed = true;
-      return;
-    }
-
-    const nextClip: GeneratedClip = {
-      ...existing,
-      ...clip,
-      taskId: clip.taskId || existing.taskId,
-      clipId: clip.clipId || existing.clipId,
-      audioUrl: clip.audioUrl || existing.audioUrl,
-    };
-    if (JSON.stringify(existing) !== JSON.stringify(nextClip)) {
-      mergedMap.set(key, nextClip);
-      changed = true;
-    }
-  });
-  if (!changed) return { records, record: target };
-
-  const mergedClips = Array.from(mergedMap.values());
-
-  const nextRecords = await updateRecord(recordId, {
-    generatedClips: mergedClips,
-  });
-  const updatedRecord = nextRecords.find((r) => r.id === recordId) || {
-    ...target,
-    generatedClips: mergedClips,
-  } as MusicAnalysisRecord;
-
-  return { records: nextRecords, record: updatedRecord };
 }
 
 export function isMusicAnalyzerTask(task: Task): boolean {
@@ -382,9 +265,6 @@ export function isMusicAnalyzerTask(task: Task): boolean {
 export function getMusicGenerationRecordId(task: Task): string | null {
   if (task.type !== TaskType.AUDIO) return null;
   const batchId = (task.params as { batchId?: string }).batchId;
-  if (!batchId || !batchId.startsWith('ma_')) return null;
-  // batchId 格式: ma_{recordId}_gen_{index} 或 ma_{recordId}_cont_{clipId}_{at}
-  const rest = batchId.slice(3); // 去掉 'ma_'
-  const underscoreIdx = rest.indexOf('_');
-  return underscoreIdx > 0 ? rest.slice(0, underscoreIdx) : rest;
+  if (!batchId) return null;
+  return extractBatchRecordId(batchId, { prefix: 'ma_' });
 }

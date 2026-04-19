@@ -10,7 +10,12 @@ import { useSharedTaskState } from '../../../hooks/useTaskQueue';
 import type { Task } from '../../../types/task.types';
 import { TaskStatus, TaskType } from '../../../types/task.types';
 import { ConfirmDialog } from '../../dialog/ConfirmDialog';
-import { HoverTip } from '../../shared';
+import {
+  HoverTip,
+  appendTaskToRelatedGroup,
+  findRecordIdFromBatch,
+  sortRelatedTaskGroups,
+} from '../../shared';
 
 function statusLabel(status: TaskStatus): string {
   switch (status) {
@@ -65,6 +70,12 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({
   const relatedTasksMap = useMemo(() => {
     const map = new Map<string, RelatedTasks>();
     const recordIds = new Set(records.map(r => r.id));
+    const createEmptyGroups = (): RelatedTasks => ({
+      storyboard: [],
+      music: [],
+      video: [],
+      image: [],
+    });
 
     for (const task of allTasks) {
       const params = task.params;
@@ -77,8 +88,7 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({
         recordIds.has(params.mvCreatorRecordId)
       ) {
         const rid = params.mvCreatorRecordId as string;
-        if (!map.has(rid)) map.set(rid, { storyboard: [], music: [], video: [], image: [] });
-        map.get(rid)!.storyboard.push(task);
+        appendTaskToRelatedGroup(map, rid, 'storyboard', task, createEmptyGroups);
         continue;
       }
 
@@ -86,26 +96,21 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({
       const batchId = typeof params.batchId === 'string' ? params.batchId : '';
       if (!batchId.startsWith('mv_')) continue;
 
-      const rest = batchId.slice(3);
-      for (const rid of recordIds) {
-        if (rest === rid || rest.startsWith(rid + '_')) {
-          if (!map.has(rid)) map.set(rid, { storyboard: [], music: [], video: [], image: [] });
-          const related = map.get(rid)!;
-          if (task.type === TaskType.AUDIO) related.music.push(task);
-          else if (task.type === TaskType.VIDEO) related.video.push(task);
-          else if (task.type === TaskType.IMAGE) related.image.push(task);
-          break;
-        }
+      const rid = findRecordIdFromBatch(batchId, 'mv_', recordIds);
+      if (!rid) {
+        continue;
+      }
+
+      if (task.type === TaskType.AUDIO) {
+        appendTaskToRelatedGroup(map, rid, 'music', task, createEmptyGroups);
+      } else if (task.type === TaskType.VIDEO) {
+        appendTaskToRelatedGroup(map, rid, 'video', task, createEmptyGroups);
+      } else if (task.type === TaskType.IMAGE) {
+        appendTaskToRelatedGroup(map, rid, 'image', task, createEmptyGroups);
       }
     }
 
-    for (const related of map.values()) {
-      related.storyboard.sort((a, b) => b.createdAt - a.createdAt);
-      related.music.sort((a, b) => b.createdAt - a.createdAt);
-      related.video.sort((a, b) => b.createdAt - a.createdAt);
-      related.image.sort((a, b) => b.createdAt - a.createdAt);
-    }
-    return map;
+    return sortRelatedTaskGroups(map);
   }, [allTasks, records]);
 
   const handleToggleStar = useCallback(

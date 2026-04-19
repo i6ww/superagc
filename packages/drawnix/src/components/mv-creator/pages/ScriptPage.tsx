@@ -5,18 +5,18 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import type { MVRecord, VideoShot } from '../types';
 import { updateRecord } from '../storage';
-import { ShotCard } from '../../video-analyzer/components/ShotCard';
-import { ComboInput } from '../../video-analyzer/components/ComboInput';
+import {
+  ShotCard,
+  ComboInput,
+  CharacterDescriptionList,
+} from '../../shared/workflow';
 import { ModelDropdown } from '../../ai-input-bar/ModelDropdown';
 import { useSelectableModels } from '../../../hooks/use-runtime-models';
 import { getSelectionKey } from '../../../utils/model-selection';
 import type { ModelRef } from '../../../utils/settings-manager';
 import { getVideoModelConfig } from '../../../constants/video-model-config';
 import { computeSegmentPlan } from '../../../utils/segment-plan';
-import {
-  readStoredModelSelection,
-  writeStoredModelSelection,
-} from '../../video-analyzer/utils';
+import { readStoredModelSelection, writeStoredModelSelection } from '../../shared/workflow';
 import {
   buildMVScriptRewritePrompt,
   switchToVersion,
@@ -429,27 +429,10 @@ export const ScriptPage: React.FC<ScriptPageProps> = ({
 
       {rewriteProgress && !rewriting && <div className="ma-progress">{rewriteProgress}</div>}
 
-      {/* 角色列表（可编辑描述） */}
-      {record.characters && record.characters.length > 0 && (
-        <div className="va-characters">
-          {record.characters.map(char => (
-            <div key={char.id} className="va-character-item">
-              <div className="va-character-info" style={{ flex: 1 }}>
-                <span className="va-character-name">{char.name}</span>
-                <textarea
-                  ref={autoResizeRef}
-                  className="va-edit-textarea va-auto-resize"
-                  rows={estimateRows(char.description)}
-                  value={char.description}
-                  onChange={e => handleCharacterDescChange(char.id, e.target.value)}
-                  onInput={e => autoResize(e.currentTarget)}
-                  placeholder="角色外貌描述（英文，用于文生图）"
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      <CharacterDescriptionList
+        characters={record.characters || []}
+        onChange={handleCharacterDescChange}
+      />
 
       {/* 分镜列表（可编辑） */}
       <div className="va-shots">

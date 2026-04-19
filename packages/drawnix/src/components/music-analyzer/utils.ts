@@ -7,6 +7,11 @@ import type { MusicAnalysisData } from '../../services/music-analysis-service';
 import type { ModelConfig } from '../../constants/model-config';
 import { createModelRef, type ModelRef } from '../../utils/settings-manager';
 import { SUNO_METATAG_GUIDE } from '../../services/music-analysis-service';
+import {
+  DEFAULT_ORIGINAL_VERSION_ID,
+  appendVersionToRecord,
+  switchVersionInRecord,
+} from '../shared/workflow';
 
 export function readStoredModelSelection(
   key: string,
@@ -153,7 +158,7 @@ export function getDefaultRewritePrompt(
 
 const MAX_LYRICS_VERSIONS = 10;
 
-export const ORIGINAL_VERSION_ID = 'original';
+export const ORIGINAL_VERSION_ID = DEFAULT_ORIGINAL_VERSION_ID;
 
 /** 从当前歌词状态创建一个版本快照 */
 export function createLyricsVersion(
@@ -177,14 +182,11 @@ export function addLyricsVersionToRecord(
   record: MusicAnalysisRecord,
   version: LyricsVersion
 ): Partial<MusicAnalysisRecord> {
-  const versions = [version, ...(record.lyricsVersions || [])].slice(0, MAX_LYRICS_VERSIONS);
-  return {
-    lyricsVersions: versions,
-    activeVersionId: version.id,
+  return appendVersionToRecord(record, 'lyricsVersions', version, MAX_LYRICS_VERSIONS, {
     title: version.title,
     styleTags: version.styleTags,
     lyricsDraft: version.lyricsDraft,
-  };
+  });
 }
 
 /** 切换到指定版本，返回 record patch；版本不存在返回 null */
@@ -192,31 +194,29 @@ export function switchToLyricsVersion(
   record: MusicAnalysisRecord,
   versionId: string
 ): Partial<MusicAnalysisRecord> | null {
-  if (versionId === ORIGINAL_VERSION_ID) {
-    // 回到原始分析结果或 scratch 初始值
-    const analysis = record.analysis;
-    return {
-      activeVersionId: ORIGINAL_VERSION_ID,
-      title:
-        analysis?.sunoTitle ||
-        analysis?.titleSuggestions?.[0] ||
-        record.creationPrompt?.slice(0, 20) ||
-        '',
-      styleTags:
-        analysis?.sunoStyleTags?.length
-          ? [...analysis.sunoStyleTags]
-          : analysis?.genreTags
-          ? [...analysis.genreTags]
-          : [],
-      lyricsDraft: analysis?.sunoLyricsDraft || '',
-    };
-  }
-  const version = record.lyricsVersions?.find(v => v.id === versionId);
-  if (!version) return null;
-  return {
-    activeVersionId: versionId,
-    title: version.title,
-    styleTags: [...version.styleTags],
-    lyricsDraft: version.lyricsDraft,
-  };
+  return switchVersionInRecord(record, 'lyricsVersions', versionId, {
+    getVersionPatch: (version) => ({
+      title: version.title,
+      styleTags: [...version.styleTags],
+      lyricsDraft: version.lyricsDraft,
+    }),
+    getOriginalPatch: (currentRecord) => {
+      const analysis = currentRecord.analysis;
+      return {
+        title:
+          analysis?.sunoTitle ||
+          analysis?.titleSuggestions?.[0] ||
+          currentRecord.creationPrompt?.slice(0, 20) ||
+          '',
+        styleTags:
+          analysis?.sunoStyleTags?.length
+            ? [...analysis.sunoStyleTags]
+            : analysis?.genreTags
+            ? [...analysis.genreTags]
+            : [],
+        lyricsDraft: analysis?.sunoLyricsDraft || '',
+      };
+    },
+    originalVersionId: ORIGINAL_VERSION_ID,
+  });
 }

@@ -9,6 +9,7 @@ import { quickInsert } from '../../../mcp/tools/canvas-insertion';
 import { updateRecord } from '../storage';
 import { ShotCard } from '../components/ShotCard';
 import { ComboInput } from '../components/ComboInput';
+import { CharacterDescriptionList } from '../../shared/workflow';
 import { ModelDropdown } from '../../ai-input-bar/ModelDropdown';
 import { useSelectableModels } from '../../../hooks/use-runtime-models';
 import { computeSegmentPlan, type SegmentPlan } from '../../../utils/segment-plan';
@@ -262,6 +263,7 @@ export const ScriptPage: React.FC<ScriptPageProps> = ({
         recordAnalysis: record.analysis,
         productInfo,
         videoModel,
+        characters,
       });
       const task = taskQueueService.createTask(
         {
@@ -287,7 +289,17 @@ export const ScriptPage: React.FC<ScriptPageProps> = ({
     } finally {
       setRewriting(false);
     }
-  }, [record, productInfo, shots, videoModel, scriptModel, scriptModelRef, onRecordUpdate, onRecordsChange]);
+  }, [
+    record,
+    productInfo,
+    shots,
+    videoModel,
+    characters,
+    scriptModel,
+    scriptModelRef,
+    onRecordUpdate,
+    onRecordsChange,
+  ]);
 
   useEffect(() => {
     if (!pendingRewriteTaskId) {
@@ -498,26 +510,10 @@ export const ScriptPage: React.FC<ScriptPageProps> = ({
         {error && <div className="va-error">{error}</div>}
       </div>
 
-      {characters.length > 0 && (
-        <div className="va-characters">
-          {characters.map(char => (
-            <div key={char.id} className="va-character-item">
-              <div className="va-character-info" style={{ flex: 1 }}>
-                <span className="va-character-name">{char.name}</span>
-                <textarea
-                  ref={autoResizeRef}
-                  className="va-edit-textarea va-auto-resize"
-                  rows={estimateRows(char.description)}
-                  value={char.description}
-                  onChange={e => handleCharacterDescChange(char.id, e.target.value)}
-                  onInput={e => autoResize(e.currentTarget)}
-                  placeholder="角色外貌描述（英文，用于文生图）"
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      <CharacterDescriptionList
+        characters={characters}
+        onChange={handleCharacterDescChange}
+      />
 
       {/* 镜头脚本列表 */}
       <div className="va-shots">

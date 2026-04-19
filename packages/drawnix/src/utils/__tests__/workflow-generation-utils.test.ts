@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import type { VideoCharacter, VideoShot } from '../../services/video-analysis-service';
 import {
   buildWorkflowDownloadScript,
+  collectWorkflowExportAssets,
   getWorkflowExportBaseName,
   getWorkflowExportIndexWidth,
   resetCharacterReferenceImages,
   resetGeneratedShots,
+  resetWorkflowGeneratedAssets,
 } from '../workflow-generation-utils';
 
 describe('workflow-generation-utils', () => {
@@ -52,6 +54,38 @@ describe('workflow-generation-utils', () => {
     }]);
   });
 
+  it('resets workflow shots and character refs together', () => {
+    const shots: VideoShot[] = [{
+      id: 'shot_1',
+      startTime: 0,
+      endTime: 3,
+      description: 'desc',
+      type: 'opening',
+      label: '开场',
+      generated_video_url: 'video-url',
+    }];
+    const characters: VideoCharacter[] = [{
+      id: 'char_1',
+      name: '主角',
+      description: 'young woman',
+      referenceImageUrl: 'ref-url',
+    }];
+
+    expect(resetWorkflowGeneratedAssets(shots, characters)).toEqual({
+      shots: [{
+        ...shots[0],
+        generated_first_frame_url: undefined,
+        generated_last_frame_url: undefined,
+        generated_video_url: undefined,
+        suppressed_generated_urls: undefined,
+      }],
+      characters: [{
+        ...characters[0],
+        referenceImageUrl: undefined,
+      }],
+    });
+  });
+
   it('builds stable export names and download script', () => {
     expect(getWorkflowExportIndexWidth(12)).toBe(2);
     expect(getWorkflowExportBaseName(0, 'first', 2)).toBe('01.首帧');
@@ -59,5 +93,32 @@ describe('workflow-generation-utils', () => {
     const script = buildWorkflowDownloadScript('00.manifest.json');
     expect(script).toContain('00.manifest.json');
     expect(script).toContain('download_if_missing');
+  });
+
+  it('collects exportable shot assets in display order', () => {
+    const shots: VideoShot[] = [{
+      id: 'shot_1',
+      startTime: 0,
+      endTime: 3,
+      description: 'desc',
+      type: 'opening',
+      label: '开场',
+      generated_first_frame_url: 'first-url',
+      generated_video_url: 'video-url',
+    }, {
+      id: 'shot_2',
+      startTime: 3,
+      endTime: 6,
+      description: 'desc',
+      type: 'scene',
+      label: '转场',
+      generated_last_frame_url: 'last-url',
+    }];
+
+    expect(collectWorkflowExportAssets(shots)).toEqual([
+      { url: 'first-url', type: 'image', kind: 'first', shotIndex: 0 },
+      { url: 'video-url', type: 'video', kind: 'video', shotIndex: 0 },
+      { url: 'last-url', type: 'image', kind: 'last', shotIndex: 1 },
+    ]);
   });
 });

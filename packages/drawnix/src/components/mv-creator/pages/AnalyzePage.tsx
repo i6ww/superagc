@@ -18,8 +18,11 @@ import { useSelectableModels } from '../../../hooks/use-runtime-models';
 import { getSelectionKey } from '../../../utils/model-selection';
 import type { ModelRef } from '../../../utils/settings-manager';
 import { getVideoModelConfig } from '../../../constants/video-model-config';
-import { readStoredModelSelection, writeStoredModelSelection } from '../../video-analyzer/utils';
-import { ShotCard } from '../../video-analyzer/components/ShotCard';
+import {
+  readStoredModelSelection,
+  writeStoredModelSelection,
+  ShotCard,
+} from '../../shared/workflow';
 
 const STORAGE_KEY_PROMPT = 'mv-creator:creation-prompt';
 const STORAGE_KEY_VIDEO_MODEL = 'mv-creator:video-model';

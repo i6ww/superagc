@@ -5,6 +5,12 @@
 import type { MVRecord, StoryboardVersion, VideoShot, VideoCharacter } from './types';
 import { computeSegmentPlan } from '../../utils/segment-plan';
 import { getVideoModelConfig } from '../../constants/video-model-config';
+import {
+  DEFAULT_ORIGINAL_VERSION_ID,
+  appendVersionToRecord,
+  switchVersionInRecord,
+  updateActiveVersionShotsInRecord,
+} from '../shared/workflow';
 
 // ── 分镜版本管理 ──
 
@@ -28,48 +34,32 @@ export function addStoryboardVersionToRecord(
   record: MVRecord,
   version: StoryboardVersion
 ): Partial<MVRecord> {
-  const versions = [version, ...(record.storyboardVersions || [])].slice(
-    0,
-    MAX_STORYBOARD_VERSIONS
-  );
-  return {
-    storyboardVersions: versions,
-    activeVersionId: version.id,
+  return appendVersionToRecord(record, 'storyboardVersions', version, MAX_STORYBOARD_VERSIONS, {
     editedShots: version.shots,
-  };
+  });
 }
 
-export const ORIGINAL_VERSION_ID = 'original';
+export const ORIGINAL_VERSION_ID = DEFAULT_ORIGINAL_VERSION_ID;
 
 export function switchToVersion(
   record: MVRecord,
   versionId: string
 ): Partial<MVRecord> | null {
-  if (versionId === ORIGINAL_VERSION_ID) {
-    const firstVersion = record.storyboardVersions?.[record.storyboardVersions.length - 1];
-    return firstVersion
-      ? { activeVersionId: ORIGINAL_VERSION_ID, editedShots: [...firstVersion.shots] }
-      : null;
-  }
-  const version = record.storyboardVersions?.find(v => v.id === versionId);
-  if (!version) return null;
-  return {
-    activeVersionId: versionId,
-    editedShots: version.shots,
-  };
+  return switchVersionInRecord(record, 'storyboardVersions', versionId, {
+    getVersionPatch: (version) => ({ editedShots: version.shots }),
+    getOriginalPatch: (currentRecord) => {
+      const firstVersion = currentRecord.storyboardVersions?.[currentRecord.storyboardVersions.length - 1];
+      return firstVersion ? { editedShots: [...firstVersion.shots] } : null;
+    },
+    originalVersionId: ORIGINAL_VERSION_ID,
+  });
 }
 
 export function updateActiveShotsInRecord(
   record: MVRecord,
   updatedShots: VideoShot[]
 ): Partial<MVRecord> {
-  const patch: Partial<MVRecord> = { editedShots: updatedShots };
-  if (record.activeVersionId && record.storyboardVersions) {
-    patch.storyboardVersions = record.storyboardVersions.map(v =>
-      v.id === record.activeVersionId ? { ...v, shots: updatedShots } : v
-    );
-  }
-  return patch;
+  return updateActiveVersionShotsInRecord(record, 'storyboardVersions', updatedShots);
 }
 
 export function formatMVShotsMarkdown(
