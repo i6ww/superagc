@@ -1,3 +1,26 @@
+## 0.6.33 (2026-04-20)
+
+### 🚀 Features
+
+- 阿米 增加提示词优化弹窗并沉淀经验文档 ([2bff4974](https://github.com/ljquan/aitu/commit/2bff4974))
+
+### 🩹 Fixes
+
+- 阿米 恢复生成页视频重生默认参考图 ([34427731](https://github.com/ljquan/aitu/commit/34427731))
+- 阿米 补齐视频路由热修缺失导入 ([9bd66dc8](https://github.com/ljquan/aitu/commit/9bd66dc8))
+- 阿米 修正视频弹窗模型路由串供应商 ([ac220fc9](https://github.com/ljquan/aitu/commit/ac220fc9))
+- 阿米 修正 MV 生成链路与风格选择 ([cbb504e3](https://github.com/ljquan/aitu/commit/cbb504e3))
+- 修复任务结果为空时素材转换崩溃的问题 ([526cd471](https://github.com/ljquan/aitu/commit/526cd471))
+
+### 🔧 Chores
+
+- refactor: 阿米 收敛 workflow 共享内核 ([b81d268d](https://github.com/ljquan/aitu/commit/b81d268d))
+- refactor: 统一 hover tips 交互 ([d5474e2b](https://github.com/ljquan/aitu/commit/d5474e2b))
+
+### ❤️  Thank You
+
+- liquid <ljquan@qq.com>
+
 ## 0.6.32 (2026-04-18)
 
 ### 🚀 Features
