@@ -1,6 +1,6 @@
 {
   "version": "0.6.35",
-  "buildTime": "2026-04-20T14:04:06.431Z",
+  "buildTime": "2026-04-20T14:04:06.970Z",
   "gitCommit": "unknown",
   "changelog": [
     "修复版本记录类型定义和函数调用错误",

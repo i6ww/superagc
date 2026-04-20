@@ -12,7 +12,15 @@ import {
   useDocumentTitle,
   markTabSyncVersion,
 } from '@drawnix/drawnix';
-import { PlaitBoard, PlaitElement, PlaitTheme, Viewport, updateViewBox, initializeViewBox, updateViewportOffset } from '@plait/core';
+import {
+  PlaitBoard,
+  PlaitElement,
+  PlaitTheme,
+  Viewport,
+  updateViewBox,
+  initializeViewBox,
+  updateViewportOffset,
+} from '@plait/core';
 import { MessagePlugin } from 'tdesign-react';
 import { ErrorFallbackUI, safeModeReload, goToDebug } from './ErrorBoundary';
 import { collectAndDownloadErrorLog } from '../utils/error-log-exporter';
@@ -25,6 +33,19 @@ const BOARD_URL_PARAM = 'board';
 
 // Global flag to prevent duplicate initialization in StrictMode
 let appInitialized = false;
+
+type BootController = {
+  markReady: () => void;
+  markError: (message?: string) => void;
+};
+
+function getBootController(): BootController | undefined {
+  if (typeof window === 'undefined') {
+    return undefined;
+  }
+  return (window as Window & { __OPENTU_BOOT__?: BootController })
+    .__OPENTU_BOOT__;
+}
 
 /**
  * 从 URL 获取画布 ID 参数
@@ -39,7 +60,10 @@ function getBoardIdFromUrl(): string | null {
  * @param boardId 画布 ID
  * @param replace 是否使用 replaceState（默认 false，使用 pushState）
  */
-function updateBoardIdInUrl(boardId: string | null, replace: boolean = false): void {
+function updateBoardIdInUrl(
+  boardId: string | null,
+  replace: boolean = false
+): void {
   const url = new URL(window.location.href);
   if (boardId) {
     url.searchParams.set(BOARD_URL_PARAM, boardId);
@@ -89,11 +113,25 @@ export function App() {
   // 使用 useDocumentTitle hook 管理页面标题
   useDocumentTitle(currentBoardId);
 
+  useEffect(() => {
+    const bootController = getBootController();
+    if (!bootController) {
+      return;
+    }
+
+    if (showCrashDialog || initError || !isLoading) {
+      bootController.markReady();
+    }
+  }, [initError, isLoading, showCrashDialog]);
+
   // Initialize workspace and handle migration
   useEffect(() => {
     const initialize = async () => {
       // 检查是否需要显示崩溃恢复对话框
-      if (crashRecoveryService.shouldShowSafeModePrompt() && !crashRecoveryService.isSafeMode()) {
+      if (
+        crashRecoveryService.shouldShowSafeModePrompt() &&
+        !crashRecoveryService.isSafeMode()
+      ) {
         setShowCrashDialog(true);
         setIsLoading(false);
         return;
@@ -107,9 +145,14 @@ export function App() {
         // 使用 switchBoard 确保加载完整数据
         const currentBoardId = workspaceService.getState().currentBoardId;
         // 验证画板是否存在，防止旧状态中的 currentBoardId 指向不存在的画板
-        
-        if (currentBoardId && workspaceService.getBoardMetadata(currentBoardId)) {
-          const currentBoard = await workspaceService.switchBoard(currentBoardId);
+
+        if (
+          currentBoardId &&
+          workspaceService.getBoardMetadata(currentBoardId)
+        ) {
+          const currentBoard = await workspaceService.switchBoard(
+            currentBoardId
+          );
           setValue({
             children: currentBoard.elements || [],
             viewport: currentBoard.viewport,
@@ -136,26 +179,33 @@ export function App() {
         // 安全模式：优先复用已有的空白安全模式画板，否则创建新的
         if (crashRecoveryService.isSafeMode()) {
           console.log('[App] Safe mode: looking for existing safe mode board');
-          
+
           // 查找已有的安全模式画板（名称以 "安全模式" 开头且元素为空）
           const allBoards = workspaceService.getAllBoards();
           const safeModeBoard = allBoards.find(
-            b => b.name.startsWith('安全模式') && (!b.elements || b.elements.length === 0)
+            (b) =>
+              b.name.startsWith('安全模式') &&
+              (!b.elements || b.elements.length === 0)
           );
-          
+
           if (safeModeBoard) {
-            console.log('[App] Safe mode: reusing existing board:', safeModeBoard.name);
+            console.log(
+              '[App] Safe mode: reusing existing board:',
+              safeModeBoard.name
+            );
             await workspaceService.switchBoard(safeModeBoard.id);
             setCurrentBoardId(safeModeBoard.id);
           } else {
             console.log('[App] Safe mode: creating new blank board');
             // 使用时间戳生成唯一名称，避免名称冲突
-            const timestamp = new Date().toLocaleString('zh-CN', {
-              month: '2-digit',
-              day: '2-digit',
-              hour: '2-digit',
-              minute: '2-digit',
-            }).replace(/\//g, '-');
+            const timestamp = new Date()
+              .toLocaleString('zh-CN', {
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+              })
+              .replace(/\//g, '-');
             const board = await workspaceService.createBoard({
               name: `安全模式 ${timestamp}`,
               elements: [],
@@ -165,20 +215,21 @@ export function App() {
               setCurrentBoardId(board.id);
             }
           }
-          
+
           setValue({ children: [] });
           isDataReadyRef.current = true;
           setIsDataReady(true);
           setIsLoading(false);
           crashRecoveryService.markLoadingComplete();
-          
+
           // 安全模式成功加载后，清除安全模式标记（下次正常加载）
           crashRecoveryService.disableSafeMode();
-          
+
           // 提示用户当前处于安全模式
           setTimeout(() => {
             MessagePlugin.warning({
-              content: '当前处于安全模式，已创建空白画布。可从侧边栏切换到其他画布。',
+              content:
+                '当前处于安全模式，已创建空白画布。可从侧边栏切换到其他画布。',
               duration: 8000,
               closeBtn: true,
             });
@@ -188,7 +239,7 @@ export function App() {
 
         // Load current board data if available
         let currentBoard: Board | null = null;
-        
+
         // 优先使用 URL 参数中的画布 ID
         const urlBoardId = getBoardIdFromUrl();
         const stateBoardId = workspaceService.getState().currentBoardId;
@@ -197,7 +248,10 @@ export function App() {
         let targetBoardId: string | null = null;
         if (urlBoardId && workspaceService.getBoardMetadata(urlBoardId)) {
           targetBoardId = urlBoardId;
-        } else if (stateBoardId && workspaceService.getBoardMetadata(stateBoardId)) {
+        } else if (
+          stateBoardId &&
+          workspaceService.getBoardMetadata(stateBoardId)
+        ) {
           targetBoardId = stateBoardId;
         }
 
@@ -232,7 +286,7 @@ export function App() {
 
         if (currentBoard) {
           const elements = currentBoard.elements || [];
-          
+
           // 先设置原始元素，让页面先渲染
           setValue({
             children: elements,
@@ -271,48 +325,53 @@ export function App() {
   }, []);
 
   // Handle board switching
-  const handleBoardSwitch = useCallback(async (board: Board, skipUrlUpdate: boolean = false) => {
-    try {
-      // 立即更新 URL 和 sessionStorage，确保刷新页面时能恢复到正确的画板
-      // 必须在任何异步操作之前执行，避免刷新时丢失画板选择
-      if (!skipUrlUpdate) {
-        updateBoardIdInUrl(board.id);
-        const workspaceService = WorkspaceService.getInstance();
-        workspaceService.persistCurrentBoardId(board.id);
-      }
-      setCurrentBoardId(board.id);
-
-      // 切换画布时重置脏标志，新画布的初始数据不需要保存
-      localDirtyRef.current = false;
-
-      // 在设置 state 之前，预先恢复失效的视频 URL
-      const elements = await recoverVideoUrlsInElements(board.elements || []);
-
-      setValue({
-        children: elements,
-        viewport: board.viewport,
-        theme: board.theme,
-      });
-
-      // 等待 React 更新完成后，手动触发画布边界更新
-      // 使用 setTimeout 而不是 queueMicrotask，给 React 更多时间完成 DOM 更新
-      setTimeout(() => {
-        if (boardRef.current) {
-          // 完整的边界更新流程
-          initializeViewBox(boardRef.current);
-          updateViewBox(boardRef.current);
-          updateViewportOffset(boardRef.current);
+  const handleBoardSwitch = useCallback(
+    async (board: Board, skipUrlUpdate: boolean = false) => {
+      try {
+        // 立即更新 URL 和 sessionStorage，确保刷新页面时能恢复到正确的画板
+        // 必须在任何异步操作之前执行，避免刷新时丢失画板选择
+        if (!skipUrlUpdate) {
+          updateBoardIdInUrl(board.id);
+          const workspaceService = WorkspaceService.getInstance();
+          workspaceService.persistCurrentBoardId(board.id);
         }
-      }, 0);
-    } catch (error) {
-      console.error('[App] Board switch failed:', error);
-      MessagePlugin.error({
-        content: `切换画板失败: ${error instanceof Error ? error.message : '未知错误'}`,
-        duration: 5000,
-        closeBtn: true,
-      });
-    }
-  }, []);
+        setCurrentBoardId(board.id);
+
+        // 切换画布时重置脏标志，新画布的初始数据不需要保存
+        localDirtyRef.current = false;
+
+        // 在设置 state 之前，预先恢复失效的视频 URL
+        const elements = await recoverVideoUrlsInElements(board.elements || []);
+
+        setValue({
+          children: elements,
+          viewport: board.viewport,
+          theme: board.theme,
+        });
+
+        // 等待 React 更新完成后，手动触发画布边界更新
+        // 使用 setTimeout 而不是 queueMicrotask，给 React 更多时间完成 DOM 更新
+        setTimeout(() => {
+          if (boardRef.current) {
+            // 完整的边界更新流程
+            initializeViewBox(boardRef.current);
+            updateViewBox(boardRef.current);
+            updateViewportOffset(boardRef.current);
+          }
+        }, 0);
+      } catch (error) {
+        console.error('[App] Board switch failed:', error);
+        MessagePlugin.error({
+          content: `切换画板失败: ${
+            error instanceof Error ? error.message : '未知错误'
+          }`,
+          duration: 5000,
+          closeBtn: true,
+        });
+      }
+    },
+    []
+  );
 
   // Handle browser back/forward navigation
   useEffect(() => {
@@ -371,7 +430,10 @@ export function App() {
 
         // 验证画板是否存在
         if (!workspaceService.getBoardMetadata(currentBoardId)) {
-          console.warn('[App] handleTabSyncNeeded: board not found', currentBoardId);
+          console.warn(
+            '[App] handleTabSyncNeeded: board not found',
+            currentBoardId
+          );
           return;
         }
 
@@ -379,7 +441,10 @@ export function App() {
           // 加载画板完整数据
           currentBoard = await workspaceService.switchBoard(currentBoardId);
         } catch (error) {
-          console.error('[App] handleTabSyncNeeded: failed to load board', error);
+          console.error(
+            '[App] handleTabSyncNeeded: failed to load board',
+            error
+          );
           return;
         }
       }
@@ -389,7 +454,9 @@ export function App() {
 
       if (updatedBoard) {
         // 恢复视频 URL
-        const elements = await recoverVideoUrlsInElements(updatedBoard.elements || []);
+        const elements = await recoverVideoUrlsInElements(
+          updatedBoard.elements || []
+        );
 
         // 更新 React 状态，触发重新渲染
         setValue({
@@ -412,83 +479,84 @@ export function App() {
   }, []);
 
   // Handle board changes (auto-save)
-  const handleBoardChange = useCallback(
-    (data: BoardChangeData) => {
-      setValue(data);
-      // 同步更新最新 viewport
-      latestViewportRef.current = data.viewport;
+  const handleBoardChange = useCallback((data: BoardChangeData) => {
+    setValue(data);
+    // 同步更新最新 viewport
+    latestViewportRef.current = data.viewport;
 
-      // 只在数据准备好之后才保存，避免在初始化时保存空数据
-      // 使用 ref 而非 state，避免闭包捕获旧值（Wrapper 中 BOARD_TO_AFTER_CHANGE 不会因 onChange 变化而更新）
-      if (!isDataReadyRef.current) {
-        return;
-      }
+    // 只在数据准备好之后才保存，避免在初始化时保存空数据
+    // 使用 ref 而非 state，避免闭包捕获旧值（Wrapper 中 BOARD_TO_AFTER_CHANGE 不会因 onChange 变化而更新）
+    if (!isDataReadyRef.current) {
+      return;
+    }
 
-      // 同步期间不保存，防止用旧数据覆盖其他标签页保存的新数据
-      if (isSyncingRef.current) {
-        return;
-      }
+    // 同步期间不保存，防止用旧数据覆盖其他标签页保存的新数据
+    if (isSyncingRef.current) {
+      return;
+    }
 
-      // 标记本标签页有用户主动修改
-      localDirtyRef.current = true;
+    // 标记本标签页有用户主动修改
+    localDirtyRef.current = true;
 
-      // Save to current board
-      const workspaceService = WorkspaceService.getInstance();
+    // Save to current board
+    const workspaceService = WorkspaceService.getInstance();
 
-      // 额外安全检查：确保当前画板已经完全加载
-      const currentBoard = workspaceService.getCurrentBoard();
-      if (!currentBoard) {
-        console.warn('[App] handleBoardChange: board not fully loaded, skipping save');
-        return;
-      }
+    // 额外安全检查：确保当前画板已经完全加载
+    const currentBoard = workspaceService.getCurrentBoard();
+    if (!currentBoard) {
+      console.warn(
+        '[App] handleBoardChange: board not fully loaded, skipping save'
+      );
+      return;
+    }
 
-      workspaceService.saveCurrentBoard(data).then(() => {
+    workspaceService
+      .saveCurrentBoard(data)
+      .then(() => {
         // 通知其他标签页数据已更新
         markTabSyncVersion(currentBoard.id);
-      }).catch((err: Error) => {
+      })
+      .catch((err: Error) => {
         console.error('[App] Failed to save board:', err);
       });
-    },
-    []
-  );
+  }, []);
 
   // Handle viewport changes (pan/zoom) - 单独保存 viewport
-  const handleViewportChange = useCallback(
-    (viewport: Viewport) => {
-      // 更新最新 viewport
-      latestViewportRef.current = viewport;
+  const handleViewportChange = useCallback((viewport: Viewport) => {
+    // 更新最新 viewport
+    latestViewportRef.current = viewport;
 
-      // 同步期间不保存 viewport，防止用旧数据覆盖
+    // 同步期间不保存 viewport，防止用旧数据覆盖
+    if (isSyncingRef.current) {
+      return;
+    }
+
+    // 防抖保存
+    if (viewportSaveTimerRef.current) {
+      clearTimeout(viewportSaveTimerRef.current);
+    }
+    viewportSaveTimerRef.current = setTimeout(() => {
+      // 再次检查同步状态
       if (isSyncingRef.current) {
         return;
       }
 
-      // 防抖保存
-      if (viewportSaveTimerRef.current) {
-        clearTimeout(viewportSaveTimerRef.current);
-      }
-      viewportSaveTimerRef.current = setTimeout(() => {
-        // 再次检查同步状态
-        if (isSyncingRef.current) {
-          return;
-        }
-
-        const workspaceService = WorkspaceService.getInstance();
-        const currentBoard = workspaceService.getCurrentBoard();
-        if (currentBoard) {
-          // 只保存 viewport，不影响其他数据
-          workspaceService.saveCurrentBoard({
+      const workspaceService = WorkspaceService.getInstance();
+      const currentBoard = workspaceService.getCurrentBoard();
+      if (currentBoard) {
+        // 只保存 viewport，不影响其他数据
+        workspaceService
+          .saveCurrentBoard({
             children: currentBoard.elements,
             viewport: viewport,
             theme: currentBoard.theme,
-          }).catch((err: Error) => {
+          })
+          .catch((err: Error) => {
             console.error('[App] Failed to save viewport:', err);
           });
-        }
-      }, VIEWPORT_SAVE_DEBOUNCE);
-    },
-    []
-  );
+      }
+    }, VIEWPORT_SAVE_DEBOUNCE);
+  }, []);
 
   // 页面关闭/隐藏前保存 viewport
   useEffect(() => {
@@ -514,13 +582,15 @@ export function App() {
         if (currentBoard) {
           // 直接更新内存中的 viewport
           currentBoard.viewport = viewport;
-          workspaceService.saveCurrentBoard({
-            children: currentBoard.elements,
-            viewport: viewport,
-            theme: currentBoard.theme,
-          }).catch(() => {
-            // 忽略错误
-          });
+          workspaceService
+            .saveCurrentBoard({
+              children: currentBoard.elements,
+              viewport: viewport,
+              theme: currentBoard.theme,
+            })
+            .catch(() => {
+              // 忽略错误
+            });
         }
       }
     };
@@ -538,7 +608,7 @@ export function App() {
 
     window.addEventListener('beforeunload', handleBeforeUnload);
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    
+
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
