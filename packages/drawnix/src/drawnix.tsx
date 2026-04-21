@@ -185,10 +185,7 @@ export type DrawnixProps = {
   currentBoardId?: string | null;
 } & Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange'>;
 
-const DEFAULT_IDLE_PREFETCH_GROUPS: IdlePrefetchGroup[] = [
-  'ai-chat',
-  'tool-windows',
-];
+const DEFAULT_IDLE_PREFETCH_GROUPS: IdlePrefetchGroup[] = [];
 
 export const Drawnix: React.FC<DrawnixProps> = ({
   value,

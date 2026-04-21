@@ -110,7 +110,7 @@
       name="viewport"
       content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
     />
-    <meta name="app-version" content="0.6.36" />
+    <meta name="app-version" content="0.6.39" />
     <style>
       :root {
         --app-boot-bg: radial-gradient(
@@ -467,16 +467,39 @@
 
         window.addEventListener(
           'error',
-          function () {
-            markError('资源加载失败，请刷新页面后重试。');
+          function (event) {
+            var target = event && event.target;
+            if (
+              target &&
+              target !== window &&
+              (target.src || target.href)
+            ) {
+              var resourceUrl = target.src || target.href || '';
+              var resourceName = resourceUrl.split('/').pop() || '资源文件';
+              markError(resourceName + ' 加载失败，请刷新页面后重试。');
+              return;
+            }
+
+            var message =
+              event && typeof event.message === 'string' && event.message.trim()
+                ? event.message.trim()
+                : '启动脚本执行失败，请刷新页面后重试。';
+            markError(message);
           },
           { once: true }
         );
 
         window.addEventListener(
           'unhandledrejection',
-          function () {
-            markError('启动过程中发生异常，请刷新页面后重试。');
+          function (event) {
+            var reason = event && event.reason;
+            var message =
+              reason && typeof reason.message === 'string'
+                ? reason.message
+                : typeof reason === 'string'
+                  ? reason
+                  : '启动过程中发生异常，请刷新页面后重试。';
+            markError(message);
           },
           { once: true }
         );

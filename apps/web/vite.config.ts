@@ -27,188 +27,11 @@ try {
 const IDLE_PREFETCH_GROUPS = [
   'ai-chat',
   'tool-windows',
-  'diagram-engines',
   'office-data',
   'external-skills',
 ] as const;
 
 type IdlePrefetchGroup = (typeof IDLE_PREFETCH_GROUPS)[number];
-
-const AI_CHAT_ENTRY_MODULES = [
-  '/packages/drawnix/src/components/version-update/version-update-prompt.tsx',
-] as const;
-
-const TOOL_WINDOW_ENTRY_MODULES = [
-  '/packages/drawnix/src/components/toolbox-drawer/ToolWinBoxManager.tsx',
-  '/packages/drawnix/src/components/toolbox-drawer/ToolboxDrawer.tsx',
-  '/packages/drawnix/src/components/project-drawer/ProjectDrawer.tsx',
-  '/packages/drawnix/src/components/backup-restore/backup-restore-dialog.tsx',
-  '/packages/drawnix/src/components/startup/DeferredSyncSettings.tsx',
-  '/packages/drawnix/src/components/command-palette/command-palette.tsx',
-  '/packages/drawnix/src/components/canvas-search/canvas-search.tsx',
-  '/packages/drawnix/src/components/performance-panel/PerformancePanel.tsx',
-] as const;
-
-const EDITOR_SHELL_SHARED_MODULES = [
-  '/packages/drawnix/src/runtime.ts',
-  '/packages/drawnix/src/i18n.tsx',
-  '/packages/drawnix/src/hooks/use-drawnix',
-  '/packages/drawnix/src/components/icons.tsx',
-  '/packages/drawnix/src/components/popover/',
-  '/packages/drawnix/src/components/shared/hover/',
-  '/packages/drawnix/src/components/shared/ContextMenu',
-  '/packages/drawnix/src/components/dialog/ConfirmDialog',
-  '/packages/drawnix/src/services/workspace-',
-  '/packages/drawnix/src/services/crash-recovery-service',
-  '/packages/drawnix/src/services/unified-cache-service',
-  '/packages/drawnix/src/services/kv-storage-service',
-  '/packages/drawnix/src/services/workflow-submission-service',
-  '/packages/drawnix/src/services/sw-channel/',
-  '/packages/drawnix/src/services/web-vitals-service',
-  '/packages/drawnix/src/services/page-report-service',
-  '/packages/drawnix/src/services/prevent-pinch-zoom-service',
-  '/packages/drawnix/src/services/db-cleanup-service',
-  '/packages/drawnix/src/services/storage-migration-service',
-  '/packages/drawnix/src/services/prompt-storage-service',
-  '/packages/drawnix/src/services/toolbar-config-service',
-  '/packages/drawnix/src/services/memory-monitor-service',
-  '/packages/drawnix/src/hooks/useDocumentTitle',
-  '/packages/drawnix/src/hooks/useTabSync',
-  '/packages/drawnix/src/hooks/useWorkflow',
-  '/packages/drawnix/src/hooks/useTaskWorkflowSync',
-  '/packages/drawnix/src/hooks/use-runtime-models',
-  '/packages/drawnix/src/contexts/AssetContext',
-  '/packages/drawnix/src/contexts/ChatDrawerContext',
-  '/packages/drawnix/src/contexts/ModelHealthContext',
-  '/packages/drawnix/src/contexts/WorkflowContext',
-  '/packages/drawnix/src/types/workspace.types',
-  '/packages/drawnix/src/types/asset.types',
-  '/packages/drawnix/src/types/audio-node.types',
-  '/packages/drawnix/src/types/audio-playlist.types',
-  '/packages/drawnix/src/types/card.types',
-  '/packages/drawnix/src/types/fill.types',
-  '/packages/drawnix/src/types/frame.types',
-  '/packages/drawnix/src/types/task.types',
-  '/packages/drawnix/src/utils/active-tasks',
-  '/packages/drawnix/src/utils/api-auth-error-event',
-  '/packages/drawnix/src/utils/common.ts',
-  '/packages/drawnix/src/utils/posthog-analytics',
-  '/packages/drawnix/src/components/startup/DeferredAIInputBar.tsx',
-  '/packages/drawnix/src/components/ai-input-bar/',
-  '/packages/drawnix/src/components/toolbox-drawer/ToolProviderWrapper',
-  '/packages/drawnix/src/components/toolbar/minimized-tools-bar/',
-  '/packages/drawnix/src/services/tool-window-service',
-  '/packages/drawnix/src/services/toolbox-service',
-  '/packages/drawnix/src/constants/built-in-tools',
-  '/packages/drawnix/src/tools/registry',
-] as const;
-
-function matchesAnyPath(
-  normalizedId: string,
-  patterns: readonly string[]
-): boolean {
-  return patterns.some((pattern) => normalizedId.includes(pattern));
-}
-
-function normalizeModuleId(id: string): string {
-  return id.replace(/\\/g, '/');
-}
-
-function resolveManualChunk(id: string): string | undefined {
-  const normalizedId = normalizeModuleId(id);
-
-  if (
-    normalizedId.includes('vite/preload-helper.js') ||
-    normalizedId.includes('commonjsHelpers.js') ||
-    normalizedId.includes('/node_modules/react/') ||
-    normalizedId.includes('/node_modules/react-dom/') ||
-    normalizedId.includes('/node_modules/scheduler/') ||
-    normalizedId.includes('/node_modules/tdesign-react/') ||
-    normalizedId.includes('/node_modules/@sentry/') ||
-    normalizedId.includes('/node_modules/classnames/') ||
-    normalizedId.includes('/node_modules/lodash-es/') ||
-    normalizedId.includes('/node_modules/react-is/') ||
-    normalizedId.includes('/node_modules/lucide-react/') ||
-    normalizedId.includes('/node_modules/@floating-ui/')
-  ) {
-    return 'editor-shell';
-  }
-
-  if (normalizedId.includes('/packages/utils/')) {
-    return 'editor-shell';
-  }
-
-  if (
-    normalizedId.includes('/node_modules/mermaid/') ||
-    normalizedId.includes('/node_modules/katex/') ||
-    normalizedId.includes('/node_modules/elkjs/') ||
-    normalizedId.includes('/@plait-board/mermaid-to-drawnix') ||
-    normalizedId.includes('/@plait-board/markdown-to-drawnix')
-  ) {
-    return 'diagram-engines';
-  }
-
-  if (
-    normalizedId.includes('/node_modules/xlsx/') ||
-    normalizedId.includes('/node_modules/pptxgenjs/')
-  ) {
-    return 'office-data';
-  }
-
-  if (
-    normalizedId.includes('/external-skill-service') ||
-    normalizedId.includes('/external-skills-bundle') ||
-    normalizedId.includes('/services/sw-capabilities/')
-  ) {
-    return 'external-skills';
-  }
-
-  // 首屏外功能只对“明确入口模块”手动分组，避免共享依赖整片被吸进延后 chunk。
-  if (matchesAnyPath(normalizedId, AI_CHAT_ENTRY_MODULES)) {
-    return 'ai-chat';
-  }
-
-  if (matchesAnyPath(normalizedId, EDITOR_SHELL_SHARED_MODULES)) {
-    return 'editor-shell';
-  }
-
-  if (
-    matchesAnyPath(normalizedId, TOOL_WINDOW_ENTRY_MODULES) ||
-    normalizedId.includes('/node_modules/winbox/')
-  ) {
-    return 'tool-windows';
-  }
-
-  if (
-    normalizedId.includes('/@plait/') ||
-    normalizedId.includes('/packages/react-board/') ||
-    normalizedId.includes('/packages/react-text/') ||
-    normalizedId.includes('/node_modules/mobile-detect/') ||
-    normalizedId.includes('/node_modules/roughjs/')
-  ) {
-    return 'editor-core';
-  }
-
-  if (
-    normalizedId.includes('/packages/drawnix/src/components/toolbar/') ||
-    normalizedId.includes(
-      '/packages/drawnix/src/components/audio-node-element/'
-    ) ||
-    normalizedId.includes(
-      '/packages/drawnix/src/components/view-navigation/'
-    ) ||
-    normalizedId.includes(
-      '/packages/drawnix/src/components/multi-selection-handles'
-    ) ||
-    normalizedId.includes('/packages/drawnix/src/plugins/') ||
-    normalizedId.includes('/packages/drawnix/src/data/') ||
-    normalizedId.includes('/packages/drawnix/src/drawnix.tsx')
-  ) {
-    return 'editor-shell';
-  }
-
-  return undefined;
-}
 
 /**
  * Vite 插件：生成 precache-manifest.json
@@ -384,7 +207,7 @@ function idlePrefetchManifestPlugin(): Plugin {
             {
               version: appVersion,
               timestamp: new Date().toISOString(),
-              defaults: ['ai-chat', 'tool-windows'],
+              defaults: [],
               groups,
             },
             null,
@@ -462,13 +285,6 @@ export default defineConfig({
     modulePreload: false,
     commonjsOptions: {
       transformMixedEsModules: true,
-    },
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          return resolveManualChunk(id);
-        },
-      },
     },
   },
 });
