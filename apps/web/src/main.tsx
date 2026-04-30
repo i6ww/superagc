@@ -21,9 +21,18 @@ import {
 import { sanitizeObject, sanitizeUrl } from '@aitu/utils';
 import { initSWConsoleCapture } from './utils/sw-console-capture';
 
+const isLocalhostEnv =
+  typeof window !== 'undefined' &&
+  (window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1');
+const forceEnableSWInLocal =
+  typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).get('sw') === '1';
+const shouldEnableServiceWorker = !isLocalhostEnv || forceEnableSWInLocal;
+
 // ===== 控制台日志捕获（尽早初始化，确保默认 console 被改写） =====
 // 必须在其他业务代码之前执行，否则后续工具（如 rrweb）可能先改写 console 导致捕获失效
-if ('serviceWorker' in navigator) {
+if ('serviceWorker' in navigator && shouldEnableServiceWorker) {
   initSWConsoleCapture();
 }
 
@@ -458,7 +467,7 @@ if (typeof window !== 'undefined') {
 }
 
 // 注册Service Worker来处理CORS问题和PWA功能
-if ('serviceWorker' in navigator) {
+if ('serviceWorker' in navigator && shouldEnableServiceWorker) {
   const isDevelopment =
     window.location.hostname === 'localhost' ||
     window.location.hostname === '127.0.0.1';

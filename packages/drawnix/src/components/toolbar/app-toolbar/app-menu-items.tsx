@@ -7,7 +7,6 @@ import {
   GithubIcon,
   BackupRestoreIcon,
   DebugLogIcon,
-  BookOpenIcon,
   CloudIcon,
   CleanBrokenLinksIcon,
   CommandPaletteIcon,
@@ -275,27 +274,9 @@ export const QuickCommands = () => {
 };
 QuickCommands.displayName = 'QuickCommands';
 
-export const UserManual = () => {
-  const { t } = useI18n();
-  return (
-    <MenuItem
-      icon={<BookOpenIcon />}
-      data-track="toolbar_click_menu_manual"
-      onSelect={() => {
-        window.open('./user-manual/index.html', '_blank');
-      }}
-      aria-label={t('menu.userManual')}
-    >
-      {t('menu.userManual')}
-    </MenuItem>
-  );
-};
-UserManual.displayName = 'UserManual';
-
 export const VersionInfo = () => {
   const { t } = useI18n();
-  // 从 HTML meta 标签获取版本号
-  const version = document.querySelector('meta[name="app-version"]')?.getAttribute('content') || '0.0.0';
+  const version = 'v1.1';
   
   return (
     <MenuItem
@@ -303,31 +284,7 @@ export const VersionInfo = () => {
       onSelect={() => {}}
       aria-label={t('menu.version')}
     >
-      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-        <span style={{ color: '#666' }}>{t('menu.version')}：{version}</span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <span
-            style={{ color: '#1890ff', cursor: 'pointer' }}
-            data-track="toolbar_click_menu_changelog"
-            onClick={(e) => {
-              e.stopPropagation();
-              window.open('./versions.html', '_blank');
-            }}
-          >
-            {t('menu.changelog')}
-          </span>
-          <span
-            style={{ color: '#1890ff', cursor: 'pointer' }}
-            data-track="toolbar_click_menu_more_versions"
-            onClick={(e) => {
-              e.stopPropagation();
-              window.open('https://release.opentu.ai/', '_blank');
-            }}
-          >
-            {t('menu.more')}
-          </span>
-        </span>
-      </span>
+      <span style={{ color: '#666' }}>{t('menu.version')}：{version}</span>
     </MenuItem>
   );
 };

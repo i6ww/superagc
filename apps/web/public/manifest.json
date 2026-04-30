@@ -1,7 +1,7 @@
 {
-  "name": "Opentu - AI应用平台",
-  "short_name": "Opentu",
-  "description": "Opentu（开图）是一个以画布工作区为核心的 AI 应用平台，集成模型、素材、知识与工作流，支持插件扩展、自动保存与多格式导出。",
+  "name": "SuperTu - AI应用平台",
+  "short_name": "SuperTu",
+  "description": "SuperTu（开图）是一个以画布工作区为核心的 AI 应用平台，集成模型、素材、知识与工作流，支持插件扩展、自动保存与多格式导出。",
   "start_url": "./",
   "display": "standalone",
   "orientation": "any",
@@ -30,7 +30,7 @@
     {
       "name": "新建工作区",
       "short_name": "新建",
-      "description": "创建一个新的 Opentu 工作区",
+      "description": "创建一个新的 SuperTu 工作区",
       "url": "./",
       "icons": [
         {

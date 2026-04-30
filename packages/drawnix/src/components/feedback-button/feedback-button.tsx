@@ -14,8 +14,7 @@ import { WeComIcon } from '../icons';
 import { ToolButton } from '../tool-button';
 import './feedback-button.scss';
 
-const QR_CODE_URL = 'https://tuziai.oss-cn-shenzhen.aliyuncs.com/aitu/AiTu.png';
-const SERVICE_QR_CODE_URL = 'https://tuziai.oss-cn-shenzhen.aliyuncs.com/linkme.png';
+const QR_CODE_URL = '/image.png';
 
 export const FeedbackButton: React.FC = () => {
   const board = useBoard();
@@ -26,8 +25,6 @@ export const FeedbackButton: React.FC = () => {
   useEffect(() => {
     const img1 = new Image();
     img1.src = QR_CODE_URL;
-    const img2 = new Image();
-    img2.src = SERVICE_QR_CODE_URL;
   }, []);
 
   return (
