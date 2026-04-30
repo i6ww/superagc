@@ -74,6 +74,24 @@ export class ValidationError extends AssetStorageError {
 class AssetStorageService {
   private store: LocalForage | null = null;
   private migrationDone = false;
+  private initializationPromise: Promise<void> | null = null;
+
+  isInitialized(): boolean {
+    return !!this.store;
+  }
+
+  async ensureReady(): Promise<void> {
+    if (this.store) {
+      return;
+    }
+    if (!this.initializationPromise) {
+      this.initializationPromise = this.initialize().catch((error) => {
+        this.initializationPromise = null;
+        throw error;
+      });
+    }
+    await this.initializationPromise;
+  }
 
   private async calculateBlobChecksum(blob: Blob): Promise<string> {
     const arrayBuffer = await blob.arrayBuffer();

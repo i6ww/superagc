@@ -19,6 +19,7 @@ import {
 } from '../../constants/model-config';
 import type { UploadedVideoImage } from '../../types/video.types';
 import type {
+  AdapterContext,
   AudioModelAdapter,
   AudioGenerationRequest,
   ImageModelAdapter,
@@ -32,6 +33,8 @@ import { registerMJImageAdapter } from './mj-image-adapter';
 import { registerFluxAdapter } from './flux-adapter';
 import { registerSeedreamAdapter } from './seedream-adapter';
 import { registerSeedanceAdapter } from './seedance-adapter';
+import { providerTransport } from '../provider-routing/provider-transport';
+import type { ResolvedProviderContext } from '../provider-routing';
 
 const imageModelIds = [...IMAGE_MODEL_VIP_OPTIONS, ...IMAGE_MODEL_MORE_OPTIONS]
   .map((model) => model.id)
@@ -98,6 +101,104 @@ const extractImageUrl = (
   throw new Error(`API 未返回有效的图片数据: ${message}`);
 };
 
+const shouldUseChatCompletionsForImageModel = (modelId?: string): boolean => {
+  if (!modelId) return false;
+  const lower = modelId.toLowerCase();
+  return lower.startsWith('firefly-') || lower.startsWith('nano-banana-');
+};
+
+const extractImageUrlFromChatCompletions = (
+  response: any
+): { url: string; urls?: string[]; format: string; raw?: unknown } => {
+  const content = response?.choices?.[0]?.message?.content;
+  const text = typeof content === 'string' ? content : '';
+  const markdownMatches = Array.from(text.matchAll(/!\[[^\]]*]\(([^)]+)\)/g))
+    .map((match) => match[1])
+    .filter((value): value is string => typeof value === 'string' && !!value.trim());
+  if (markdownMatches.length > 0) {
+    const firstUrl = normalizeImageDataUrl(markdownMatches[0].trim());
+    return {
+      url: firstUrl,
+      urls:
+        markdownMatches.length > 1
+          ? markdownMatches.map((u) => normalizeImageDataUrl(u.trim()))
+          : undefined,
+      format: getFileExtension(firstUrl) || 'png',
+      raw: response,
+    };
+  }
+
+  const urlMatch = text.match(/https?:\/\/[^\s'")]+/);
+  if (urlMatch?.[0]) {
+    const normalizedUrl = normalizeImageDataUrl(urlMatch[0]);
+    return {
+      url: normalizedUrl,
+      format: getFileExtension(normalizedUrl) || 'png',
+      raw: response,
+    };
+  }
+
+  throw new Error('API 未返回有效的图片链接（chat.completions）');
+};
+
+const toResolvedProviderContext = (
+  context: AdapterContext
+): ResolvedProviderContext => {
+  return (
+    context.provider || {
+      profileId: 'runtime',
+      profileName: 'Runtime',
+      providerType: 'custom',
+      baseUrl: context.baseUrl,
+      apiKey: context.apiKey || '',
+      authType: context.authType || 'bearer',
+      extraHeaders: context.extraHeaders,
+    }
+  );
+};
+
+async function sendChatCompletionsWithV1Fallback(
+  context: AdapterContext,
+  body: string
+): Promise<Response> {
+  const provider = toResolvedProviderContext(context);
+  const baseHasV1 = /\/v1\/?$/i.test(provider.baseUrl.trim());
+  const paths = baseHasV1
+    ? ['/chat/completions']
+    : ['/v1/chat/completions', '/chat/completions'];
+  let lastError: unknown;
+  let lastResponse: Response | null = null;
+
+  for (let i = 0; i < paths.length; i += 1) {
+    const path = paths[i];
+    try {
+      const response = await providerTransport.send(provider, {
+        path,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body,
+        fetcher: context.fetcher,
+      });
+      if (response.ok) {
+        return response;
+      }
+      lastResponse = response;
+      if (response.status !== 404 || i === paths.length - 1) {
+        return response;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastResponse) {
+    return lastResponse;
+  }
+  throw lastError || new Error('Chat completions request failed');
+}
+
 const toUploadedVideoImages = (
   referenceImages?: string[]
 ): UploadedVideoImage[] | undefined => {
@@ -130,7 +231,7 @@ export const geminiImageAdapter: ImageModelAdapter = {
   matchVendors: [ModelVendor.GEMINI],
   supportedModels: imageModelIds,
   defaultModel: DEFAULT_IMAGE_MODEL_ID,
-  async generateImage(_context, request: ImageGenerationRequest) {
+  async generateImage(context, request: ImageGenerationRequest) {
     const model = request.model || DEFAULT_IMAGE_MODEL_ID;
 
     if (isAsyncImageModel(model)) {
@@ -160,6 +261,36 @@ export const geminiImageAdapter: ImageModelAdapter = {
       | 'url'
       | 'b64_json'
       | undefined;
+
+    if (shouldUseChatCompletionsForImageModel(model)) {
+      const response = await sendChatCompletionsWithV1Fallback(
+        context,
+        JSON.stringify({
+          model,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: request.prompt },
+                ...(request.referenceImages || []).map((url) => ({
+                  type: 'image_url',
+                  image_url: { url },
+                })),
+              ],
+            },
+          ],
+          stream: false,
+        })
+      );
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          `Chat completions image generation failed: ${response.status} - ${errorText}`
+        );
+      }
+      const data = await response.json();
+      return extractImageUrlFromChatCompletions(data);
+    }
 
     const result = await defaultGeminiClient.generateImage(request.prompt, {
       size: request.size,

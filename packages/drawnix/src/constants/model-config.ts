@@ -1246,11 +1246,15 @@ export const ALL_MODELS: ModelConfig[] = [
 ];
 
 let runtimeModels: ModelConfig[] = [];
+const ENABLE_STATIC_MODELS = false;
 
 function mergeModels(
   staticModels: ModelConfig[],
   discoveredModels: ModelConfig[]
 ): ModelConfig[] {
+  if (!ENABLE_STATIC_MODELS) {
+    return [...discoveredModels];
+  }
   const merged = [...discoveredModels];
   const seen = new Set(discoveredModels.map((model) => model.id));
   for (const model of staticModels) {
@@ -1298,10 +1302,14 @@ export function getModelsByType(type: ModelType): ModelConfig[] {
  * 获取模型配置
  */
 export function getModelConfig(modelId: string): ModelConfig | undefined {
-  return (
-    runtimeModels.find((model) => model.id === modelId) ||
-    getStaticModelConfig(modelId)
-  );
+  const runtimeModel = runtimeModels.find((model) => model.id === modelId);
+  if (runtimeModel) {
+    return runtimeModel;
+  }
+  if (!ENABLE_STATIC_MODELS) {
+    return undefined;
+  }
+  return getStaticModelConfig(modelId);
 }
 
 /**
@@ -1453,7 +1461,11 @@ export function getDefaultImageModel(): string {
   if (envModel && getModelConfig(envModel)?.type === 'image') {
     return envModel;
   }
-  return DEFAULT_IMAGE_MODEL_ID;
+  const runtimeDefault = getRuntimeModelConfigs('image')[0]?.id;
+  if (runtimeDefault) {
+    return runtimeDefault;
+  }
+  return '';
 }
 
 /**
@@ -1465,7 +1477,11 @@ export const DEFAULT_VIDEO_MODEL_ID = 'veo3';
  * 获取默认视频模型 ID（目前固定为 veo3）
  */
 export function getDefaultVideoModel(): string {
-  return DEFAULT_VIDEO_MODEL_ID;
+  const runtimeDefault = getRuntimeModelConfigs('video')[0]?.id;
+  if (runtimeDefault) {
+    return runtimeDefault;
+  }
+  return '';
 }
 
 /**
@@ -1483,7 +1499,11 @@ export const DEFAULT_TEXT_MODEL_ID = 'deepseek-v3.2';
  * 获取默认文本模型 ID
  */
 export function getDefaultTextModel(): string {
-  return DEFAULT_TEXT_MODEL_ID;
+  const runtimeDefault = getRuntimeModelConfigs('text')[0]?.id;
+  if (runtimeDefault) {
+    return runtimeDefault;
+  }
+  return '';
 }
 
 /**
@@ -1500,7 +1520,11 @@ export const DEFAULT_AUDIO_MODEL_ID = 'suno_music';
  * 获取默认音频模型 ID
  */
 export function getDefaultAudioModel(): string {
-  return DEFAULT_AUDIO_MODEL_ID;
+  const runtimeDefault = getRuntimeModelConfigs('audio')[0]?.id;
+  if (runtimeDefault) {
+    return runtimeDefault;
+  }
+  return '';
 }
 
 // ============================================

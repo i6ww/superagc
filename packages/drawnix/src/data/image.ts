@@ -284,7 +284,7 @@ export const insertImage = async (
   let shouldRevokeObjectUrl = true;
 
   try {
-    await assetStorageService.initialize();
+    await assetStorageService.ensureReady();
     const asset = await assetStorageService.addAsset({
       type: AssetType.IMAGE,
       source: AssetSource.LOCAL,

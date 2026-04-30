@@ -9,11 +9,37 @@ function trimTrailingSlashes(value: string): string {
   return value.replace(/\/+$/, '');
 }
 
+function resolveDevProxyBaseUrl(baseUrl: string): string {
+  if (typeof window === 'undefined') {
+    return baseUrl;
+  }
+  const host = window.location.hostname;
+  const isLocalDev =
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host.endsWith('.local');
+  if (!isLocalDev) {
+    return baseUrl;
+  }
+  // 本地开发时将特定外部网关走 Vite 同源代理，绕过浏览器 CORS
+  try {
+    const parsed = new URL(baseUrl);
+    const hostname = parsed.hostname.toLowerCase();
+    if (hostname === 'www.371181668.xyz' || hostname === '371181668.xyz') {
+      const pathname = parsed.pathname && parsed.pathname !== '/' ? parsed.pathname : '';
+      return `/api-proxy${pathname}`;
+    }
+  } catch {
+    // ignore invalid url, keep original baseUrl
+  }
+  return baseUrl;
+}
+
 function applyBaseUrlStrategy(
   baseUrl: string,
   strategy: ProviderBaseUrlStrategy = 'preserve'
 ): string {
-  const normalizedBaseUrl = trimTrailingSlashes(baseUrl);
+  const normalizedBaseUrl = trimTrailingSlashes(resolveDevProxyBaseUrl(baseUrl));
 
   switch (strategy) {
     case 'trim-v1':

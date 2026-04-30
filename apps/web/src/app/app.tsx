@@ -113,6 +113,27 @@ export function App() {
   // 使用 useDocumentTitle hook 管理页面标题
   useDocumentTitle(currentBoardId);
 
+  const withTimeout = useCallback(
+    async <T,>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> => {
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      try {
+        return await Promise.race([
+          promise,
+          new Promise<T>((_, reject) => {
+            timer = setTimeout(() => {
+              reject(new Error(message));
+            }, timeoutMs);
+          }),
+        ]);
+      } finally {
+        if (timer) {
+          clearTimeout(timer);
+        }
+      }
+    },
+    []
+  );
+
   useEffect(() => {
     const bootController = getBootController();
     if (!bootController) {
@@ -168,7 +189,11 @@ export function App() {
 
       try {
         const workspaceService = WorkspaceService.getInstance();
-        await workspaceService.initialize();
+        await withTimeout(
+          workspaceService.initialize(),
+          25000,
+          '工作台初始化超时（可能是本地缓存异常）'
+        );
 
         // Check and perform migration if needed
         const migrated = await isWorkspaceMigrationCompleted();
@@ -322,7 +347,7 @@ export function App() {
     };
 
     initialize();
-  }, []);
+  }, [withTimeout]);
 
   // Handle board switching
   const handleBoardSwitch = useCallback(

@@ -376,7 +376,7 @@ export function AssetProvider({ children }: AssetProviderProps) {
   useEffect(() => {
     const initService = async () => {
       try {
-        await assetStorageService.initialize();
+        await assetStorageService.ensureReady();
         await audioPlaylistService.initialize();
         // 初始化完成后自动加载资产到 global store，供画布卡片等脱离 Context 的组件使用
         loadAssetsRef.current?.();
@@ -869,6 +869,9 @@ export function AssetProvider({ children }: AssetProviderProps) {
       setError(null);
 
       try {
+        // 防护：某些 UI（如参考图上传）可能在 Provider 初始化完成前触发 addAsset
+        await assetStorageService.ensureReady();
+
         // 生成默认名称
         const assetName =
           name ||

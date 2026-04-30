@@ -106,6 +106,80 @@ function extractUrlsFromUploadedImages(
   return urls.length > 0 ? urls : undefined;
 }
 
+function parseImageResponseFromChatCompletions(
+  data: Record<string, unknown>
+): { url: string; urls?: string[]; format: string } {
+  const choices = (data.choices as Array<Record<string, unknown>> | undefined) || [];
+  const content =
+    typeof choices[0]?.message === 'object' && choices[0]?.message
+      ? (choices[0].message as Record<string, unknown>).content
+      : undefined;
+  const text = typeof content === 'string' ? content : '';
+
+  // Typical Firefly gateway returns markdown like: ![...](https://...png)
+  const markdownMatches = Array.from(text.matchAll(/!\[[^\]]*]\(([^)]+)\)/g))
+    .map((match) => match[1])
+    .filter((value): value is string => typeof value === 'string' && !!value.trim());
+  if (markdownMatches.length > 0) {
+    return { url: markdownMatches[0].trim(), urls: markdownMatches.length > 1 ? markdownMatches.map((u) => u.trim()) : undefined, format: 'png' };
+  }
+
+  // Fallback: find first url-like token
+  const urlMatch = text.match(/https?:\/\/[^\s'")]+/);
+  if (urlMatch?.[0]) {
+    return { url: urlMatch[0], format: 'png' };
+  }
+
+  throw new Error('No image URL found in chat.completions response');
+}
+
+function shouldUseChatCompletionsImageModel(modelName: string): boolean {
+  const lower = modelName.toLowerCase();
+  return lower.startsWith('firefly-') || lower.startsWith('nano-banana-');
+}
+
+async function sendChatCompletionsWithV1Fallback(
+  provider: ReturnType<typeof buildProviderContext>,
+  body: string,
+  signal?: AbortSignal
+): Promise<Response> {
+  const baseHasV1 = /\/v1\/?$/i.test(provider.baseUrl.trim());
+  const paths = baseHasV1
+    ? ['/chat/completions']
+    : ['/v1/chat/completions', '/chat/completions'];
+  let lastError: unknown;
+  let lastResponse: Response | null = null;
+
+  for (let i = 0; i < paths.length; i += 1) {
+    const path = paths[i];
+    try {
+      const response = await providerTransport.send(provider, {
+        path,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body,
+        signal,
+      });
+      if (response.ok) {
+        return response;
+      }
+      lastResponse = response;
+      if (response.status !== 404 || i === paths.length - 1) {
+        return response;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastResponse) {
+    return lastResponse;
+  }
+  throw lastError || new Error('Chat completions request failed');
+}
+
 /**
  * 主线程媒体执行器
  *
@@ -158,6 +232,7 @@ export class FallbackMediaExecutor implements IMediaExecutor {
 
     const startTime = Date.now();
     const modelName = model || config.imageConfig.modelName;
+    const useChatCompletionsImageModel = shouldUseChatCompletionsImageModel(modelName);
 
     // 专用 adapter 路由（mj-imagine 等非 gemini 模型）
     const imageAdapter = resolveAdapterForInvocation(
@@ -197,7 +272,10 @@ export class FallbackMediaExecutor implements IMediaExecutor {
 
     // 开始记录 LLM API 调用
     const logId = startLLMApiLog({
-      endpoint: '/images/generations',
+      endpoint:
+        useChatCompletionsImageModel
+          ? '/chat/completions'
+          : '/images/generations',
       model: modelName,
       taskType: 'image',
       prompt,
@@ -230,31 +308,52 @@ export class FallbackMediaExecutor implements IMediaExecutor {
         );
       }
 
-      // 构建请求体
-      const requestBody = buildImageRequestBody({
-        prompt,
-        model: modelName,
-        size,
-        referenceImages: processedImages,
-        quality,
-        n: Math.min(Math.max(1, count), 10),
-      });
-
       options?.onProgress?.({ progress: 10, phase: 'submitting' });
 
+      const shouldUseChatCompletions =
+        useChatCompletionsImageModel;
+
       // 直接调用 API
-      const response = await providerTransport.send(
-        buildProviderContext(config.imageConfig),
-        {
-          path: '/images/generations',
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestBody),
-          signal: options?.signal,
-        }
-      );
+      const provider = buildProviderContext(config.imageConfig);
+      const response = shouldUseChatCompletions
+        ? await sendChatCompletionsWithV1Fallback(
+            provider,
+            JSON.stringify({
+              model: modelName,
+              messages: [
+                {
+                  role: 'user',
+                  content: [
+                    { type: 'text', text: prompt },
+                    ...(processedImages || []).map((url) => ({
+                      type: 'image_url',
+                      image_url: { url },
+                    })),
+                  ],
+                },
+              ],
+              stream: false,
+            }),
+            options?.signal
+          )
+        : await providerTransport.send(provider, {
+              path: '/images/generations',
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(
+                buildImageRequestBody({
+                  prompt,
+                  model: modelName,
+                  size,
+                  referenceImages: processedImages,
+                  quality,
+                  n: Math.min(Math.max(1, count), 10),
+                })
+              ),
+              signal: options?.signal,
+            });
 
       if (!response.ok) {
         const duration = Date.now() - startTime;
@@ -279,7 +378,9 @@ export class FallbackMediaExecutor implements IMediaExecutor {
       options?.onProgress?.({ progress: 80, phase: 'downloading' });
 
       const data = await response.json();
-      const result = parseImageResponse(data);
+      const result = shouldUseChatCompletions
+        ? parseImageResponseFromChatCompletions(data)
+        : parseImageResponse(data);
       const duration = Date.now() - startTime;
 
       console.debug(

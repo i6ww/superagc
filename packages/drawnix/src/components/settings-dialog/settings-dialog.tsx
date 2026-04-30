@@ -1266,31 +1266,21 @@ export const SettingsDialog = ({
       const nextTextModels = selectedModels.filter(
         (model) => model.type === 'text'
       );
-      const discoveredImageIds = runtimeState.discoveredModels
-        .filter((model) => model.type === 'image')
-        .map((model) => model.id);
-      const discoveredVideoIds = runtimeState.discoveredModels
-        .filter((model) => model.type === 'video')
-        .map((model) => model.id);
-      const discoveredTextIds = runtimeState.discoveredModels
-        .filter((model) => model.type === 'text')
-        .map((model) => model.id);
-
       if (
-        !nextImageModels.some((model) => model.id === imageModelName) &&
-        discoveredImageIds.includes(imageModelName)
+        imageModelName &&
+        !nextImageModels.some((model) => model.id === imageModelName)
       ) {
         setImageModelName(nextImageModels[0]?.id || getDefaultImageModel());
       }
       if (
-        !nextVideoModels.some((model) => model.id === videoModelName) &&
-        discoveredVideoIds.includes(videoModelName)
+        videoModelName &&
+        !nextVideoModels.some((model) => model.id === videoModelName)
       ) {
         setVideoModelName(nextVideoModels[0]?.id || getDefaultVideoModel());
       }
       if (
-        !nextTextModels.some((model) => model.id === textModelName) &&
-        discoveredTextIds.includes(textModelName)
+        textModelName &&
+        !nextTextModels.some((model) => model.id === textModelName)
       ) {
         setTextModelName(nextTextModels[0]?.id || getDefaultTextModel());
       }

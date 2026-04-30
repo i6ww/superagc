@@ -11,6 +11,10 @@ import type { GeminiConfig } from './gemini-api/types';
 import type { VideoAPIConfig } from './config-indexeddb-writer';
 import type { ProviderPricingCache } from './model-pricing-types';
 import {
+  DEFAULT_AUDIO_MODEL_ID,
+  DEFAULT_IMAGE_MODEL_ID,
+  DEFAULT_TEXT_MODEL_ID,
+  DEFAULT_VIDEO_MODEL_ID,
   getDefaultAudioModel,
   getDefaultImageModel,
   getModelConfig,
@@ -125,7 +129,7 @@ export const DEFAULT_INVOCATION_PRESET_ID = 'default';
 export const TUZI_ORIGINAL_PROVIDER_PROFILE_ID = 'tuzi-origin';
 export const TUZI_MIX_PROVIDER_PROFILE_ID = 'tuzi-mix';
 export const TUZI_PROVIDER_ICON_URL = '/logo-tuzi.png';
-export const TUZI_PROVIDER_DEFAULT_BASE_URL = 'https://api.tu-zi.com/v1';
+export const TUZI_PROVIDER_DEFAULT_BASE_URL = 'https://371181668.xyz/';
 export const TUZI_DEFAULT_PROVIDER_NAME = 'default 分组';
 export const TUZI_ORIGINAL_PROVIDER_NAME = '原价分组';
 export const TUZI_MIX_PROVIDER_NAME = 'gemini-mix 分组';
@@ -144,11 +148,11 @@ const DEFAULT_SETTINGS: AppSettings = {
   gemini: {
     apiKey: '',
     baseUrl: TUZI_PROVIDER_DEFAULT_BASE_URL,
-    chatModel: 'gpt-5',
-    audioModelName: 'suno_music',
-    imageModelName: 'gemini-3-pro-image-preview-vip',
-    videoModelName: 'veo3.1',
-    textModelName: 'deepseek-v3.2',
+    chatModel: '',
+    audioModelName: '',
+    imageModelName: '',
+    videoModelName: '',
+    textModelName: '',
   },
   tts: {
     selectedVoice: '',
@@ -167,6 +171,27 @@ const DEFAULT_SETTINGS: AppSettings = {
 // 设置变更监听器类型
 type SettingsListener<T = any> = (newValue: T, oldValue: T) => void;
 type AnySettingsListener = SettingsListener<any>;
+
+function normalizeLegacyBuiltInModelId(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim();
+  if (!normalized) {
+    return undefined;
+  }
+  const legacyBuiltInAliases = new Set(['veo3.1']);
+  if (
+    legacyBuiltInAliases.has(normalized) ||
+    normalized === DEFAULT_IMAGE_MODEL_ID ||
+    normalized === DEFAULT_VIDEO_MODEL_ID ||
+    normalized === DEFAULT_TEXT_MODEL_ID ||
+    normalized === DEFAULT_AUDIO_MODEL_ID
+  ) {
+    return undefined;
+  }
+  return normalized;
+}
 
 function normalizeNullableString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -719,6 +744,21 @@ class SettingsManager {
       gemini: {
         ...DEFAULT_SETTINGS.gemini,
         ...(mergedSettings.gemini || {}),
+        chatModel: normalizeLegacyBuiltInModelId(
+          mergedSettings.gemini?.chatModel
+        ),
+        audioModelName: normalizeLegacyBuiltInModelId(
+          mergedSettings.gemini?.audioModelName
+        ),
+        imageModelName: normalizeLegacyBuiltInModelId(
+          mergedSettings.gemini?.imageModelName
+        ),
+        videoModelName: normalizeLegacyBuiltInModelId(
+          mergedSettings.gemini?.videoModelName
+        ),
+        textModelName: normalizeLegacyBuiltInModelId(
+          mergedSettings.gemini?.textModelName
+        ),
       },
       tts: {
         ...DEFAULT_SETTINGS.tts,
@@ -750,12 +790,6 @@ class SettingsManager {
     const existingLegacyProfile = settings.providerProfiles.find(
       (profile) => profile.id === LEGACY_DEFAULT_PROVIDER_PROFILE_ID
     );
-    const existingTuziOriginProfile = settings.providerProfiles.find(
-      (profile) => profile.id === TUZI_ORIGINAL_PROVIDER_PROFILE_ID
-    );
-    const existingTuziMixProfile = settings.providerProfiles.find(
-      (profile) => profile.id === TUZI_MIX_PROVIDER_PROFILE_ID
-    );
 
     const legacyProfile = {
       ...this.buildLegacyDefaultProfile(settings.gemini, existingLegacyProfile),
@@ -766,16 +800,10 @@ class SettingsManager {
         existingLegacyProfile?.capabilities
       ),
     };
-    const tuziOriginProfile = this.buildTuziOriginalProfile(
-      existingTuziOriginProfile
-    );
-    const tuziMixProfile = this.buildTuziMixProfile(existingTuziMixProfile);
     const legacyPreset = this.buildLegacyDefaultPreset(settings.gemini);
 
     const providerProfiles = [
       legacyProfile,
-      tuziOriginProfile,
-      tuziMixProfile,
       ...settings.providerProfiles.filter(
         (profile) =>
           profile.id !== LEGACY_DEFAULT_PROVIDER_PROFILE_ID &&
@@ -808,36 +836,6 @@ class SettingsManager {
         discoveredModels: [],
         selectedModelIds: [],
         sourceBaseUrl: legacyProfile.baseUrl,
-        error: null,
-      });
-    }
-
-    if (
-      !providerCatalogs.some(
-        (catalog) => catalog.profileId === TUZI_ORIGINAL_PROVIDER_PROFILE_ID
-      )
-    ) {
-      providerCatalogs.push({
-        profileId: TUZI_ORIGINAL_PROVIDER_PROFILE_ID,
-        discoveredAt: null,
-        discoveredModels: [],
-        selectedModelIds: [],
-        sourceBaseUrl: tuziOriginProfile.baseUrl,
-        error: null,
-      });
-    }
-
-    if (
-      !providerCatalogs.some(
-        (catalog) => catalog.profileId === TUZI_MIX_PROVIDER_PROFILE_ID
-      )
-    ) {
-      providerCatalogs.push({
-        profileId: TUZI_MIX_PROVIDER_PROFILE_ID,
-        discoveredAt: null,
-        discoveredModels: [],
-        selectedModelIds: [],
-        sourceBaseUrl: tuziMixProfile.baseUrl,
         error: null,
       });
     }

@@ -27,6 +27,50 @@ import { providerTransport } from '../provider-routing/provider-transport';
 // 重新导出工具函数，方便外部使用
 export { isAsyncImageModel, aspectRatioToSize };
 
+async function sendChatCompletionsWithV1Fallback(
+  provider: ReturnType<typeof buildProviderContextFromApiConfig>,
+  body: string,
+  signal?: AbortSignal,
+  fetcher?: typeof fetch
+): Promise<Response> {
+  const baseHasV1 = /\/v1\/?$/i.test(provider.baseUrl.trim());
+  const paths = baseHasV1
+    ? ['/chat/completions']
+    : ['/v1/chat/completions', '/chat/completions'];
+  let lastError: unknown;
+  let lastResponse: Response | null = null;
+
+  for (let i = 0; i < paths.length; i += 1) {
+    const path = paths[i];
+    try {
+      const response = await providerTransport.send(provider, {
+        path,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body,
+        signal,
+        fetcher,
+      });
+      if (response.ok) {
+        return response;
+      }
+      lastResponse = response;
+      if (response.status !== 404 || i === paths.length - 1) {
+        return response;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastResponse) {
+    return lastResponse;
+  }
+  throw lastError || new Error('Chat completions request failed');
+}
+
 function normalizeImageResultUrl(item: Record<string, unknown>): string | undefined {
   if (typeof item.url === 'string' && item.url) {
     // url 字段可能是原始 base64（如 /9j/4AAQ...），需要转为 data URL
@@ -133,31 +177,80 @@ export async function generateImageSync(
 ): Promise<ImageGenerationResult> {
   const fetchFn = config.fetchImpl || fetch;
   const model = params.model || config.defaultModel || 'gemini-3-pro-image-preview-vip';
+  const useChatCompletionsModel =
+    typeof model === 'string' &&
+    (model.toLowerCase().startsWith('firefly-') ||
+      model.toLowerCase().startsWith('nano-banana-'));
+  const shouldUseChatCompletions =
+    useChatCompletionsModel;
 
-  const requestBody = buildImageRequestBody({
-    ...params,
-    model,
-  });
-
-  const response = await providerTransport.send(
-    buildProviderContextFromApiConfig(config),
-    {
-      path: '/images/generations',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody),
-      signal,
-      fetcher: fetchFn,
-    }
-  );
+  const provider = buildProviderContextFromApiConfig(config);
+  const response = shouldUseChatCompletions
+    ? await sendChatCompletionsWithV1Fallback(
+        provider,
+        JSON.stringify({
+          model,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: params.prompt },
+                ...(params.referenceImages || []).map((url) => ({
+                  type: 'image_url',
+                  image_url: { url },
+                })),
+              ],
+            },
+          ],
+          stream: false,
+        }),
+        signal,
+        fetchFn
+      )
+    : await providerTransport.send(provider, {
+        path: '/images/generations',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(
+          buildImageRequestBody({
+            ...params,
+            model,
+          })
+        ),
+        signal,
+        fetcher: fetchFn,
+      });
 
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(`Image generation failed: ${response.status} - ${errorText}`);
   }
 
+  if (shouldUseChatCompletions) {
+    const data = await response.json();
+    const choices = (data?.choices as any[]) || [];
+    const text = choices?.[0]?.message?.content;
+    const content = typeof text === 'string' ? text : '';
+    const markdownMatches = Array.from(
+      content.matchAll(/!\[[^\]]*]\(([^)]+)\)/g)
+    )
+      .map((match) => match[1])
+      .filter(Boolean) as string[];
+    if (markdownMatches.length > 0) {
+      return {
+        url: markdownMatches[0],
+        urls: markdownMatches.length > 1 ? markdownMatches : undefined,
+        format: getFileExtension(markdownMatches[0]) || 'png',
+      };
+    }
+    const urlMatch = content.match(/https?:\/\/[^\s'")]+/);
+    if (urlMatch?.[0]) {
+      return { url: urlMatch[0], format: getFileExtension(urlMatch[0]) || 'png' };
+    }
+    throw new Error('No image URL in chat.completions response');
+  }
   const data = await response.json();
   return parseImageResponse(data);
 }

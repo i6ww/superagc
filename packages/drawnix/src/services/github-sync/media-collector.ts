@@ -238,7 +238,7 @@ class MediaCollector {
    * 收集素材库的媒体资源（用于手动同步）
    */
   async collectAssetLibraryMedia(): Promise<MediaItem[]> {
-    await assetStorageService.initialize();
+    await assetStorageService.ensureReady();
     const assets = await assetStorageService.getAllAssets();
     
     const items: MediaItem[] = [];

@@ -8,8 +8,6 @@ import {
   DEFAULT_VIDEO_MODEL_ID,
   DEFAULT_TEXT_MODEL_ID,
   getModelsByType,
-  getStaticModelsByType,
-  getStaticModelConfig,
   setRuntimeModelConfigs,
 } from '../constants/model-config';
 import { normalizeApiBase } from '../services/media-api/utils';
@@ -27,6 +25,13 @@ import { applySunoAliasPresentation, isSunoLikeModelId } from './suno-model-alia
 import { sortModelsByDisplayPriority } from './model-sort';
 
 const LEGACY_CACHE_KEY = 'drawnix-runtime-model-discovery';
+const LEGACY_BUILT_IN_MODEL_IDS = new Set([
+  'gemini-3-pro-image-preview-vip',
+  'veo3',
+  'veo3.1',
+  'deepseek-v3.2',
+  'suno_music',
+]);
 
 export interface RemoteModelListItem {
   id: string;
@@ -750,16 +755,36 @@ function adaptRuntimeModel(model: RemoteModelListItem): ModelConfig | null {
   if (!model?.id || typeof model.id !== 'string') {
     return null;
   }
-
-  const staticConfig = getStaticModelConfig(model.id);
-  if (staticConfig) {
-    return {
-      ...staticConfig,
-      tags: staticConfig.tags ? [...staticConfig.tags] : undefined,
-    };
+  if (LEGACY_BUILT_IN_MODEL_IDS.has(model.id.trim())) {
+    return null;
   }
 
   return buildFallbackConfig(model);
+}
+
+function normalizePersistedDiscoveredModels(models: unknown): ModelConfig[] {
+  if (!Array.isArray(models)) {
+    return [];
+  }
+  const normalized: ModelConfig[] = [];
+  const seen = new Set<string>();
+
+  for (const item of models) {
+    if (!item || typeof item !== 'object') {
+      continue;
+    }
+    const modelId = (item as { id?: unknown }).id;
+    if (typeof modelId !== 'string' || !modelId.trim() || seen.has(modelId)) {
+      continue;
+    }
+    if (LEGACY_BUILT_IN_MODEL_IDS.has(modelId.trim())) {
+      continue;
+    }
+    seen.add(modelId);
+    normalized.push(buildFallbackConfig({ id: modelId }));
+  }
+
+  return normalized;
 }
 
 function normalizeSelectedModelIds(
@@ -779,20 +804,6 @@ function buildSelectedModels(
   return discoveredModels.filter((model) =>
     selectedModelIds.includes(model.id)
   );
-}
-
-function mergeModels(
-  staticModels: ModelConfig[],
-  runtimeModels: ModelConfig[]
-): ModelConfig[] {
-  const merged = [...runtimeModels];
-  const seen = new Set(runtimeModels.map((model) => model.id));
-  for (const model of staticModels) {
-    if (!seen.has(model.id)) {
-      merged.push(model);
-    }
-  }
-  return merged;
 }
 
 function ensureRuntimeTag(tags?: string[]): string[] {
@@ -847,37 +858,12 @@ function decorateRuntimeModels(
   return models.map((model) => attachRuntimeSource(profileId, model));
 }
 
-function decorateStaticModels(models: ModelConfig[]): ModelConfig[] {
-  return models.map((model) => ({
-    ...model,
-    selectionKey: model.selectionKey || buildSelectionKey(null, model.id),
-  }));
-}
-
-function createPinnedRuntimeModel(
-  profileId: string,
-  modelId: string,
-  type: ModelType
-): ModelConfig {
-  const profileName = getProfileById(profileId)?.name || '供应商模型';
-  const vendor = inferVendorByKeywords(modelId);
-  return attachRuntimeSource(profileId, {
-    id: modelId,
-    label: modelId,
-    shortLabel: modelId,
-    shortCode: buildShortCode(modelId, type),
-    description: `${profileName} · ${modelId}`,
-    type,
-    vendor,
-  });
-}
-
 function createStateFromCatalog(
   catalog: ProviderCatalog
 ): RuntimeModelDiscoveryState {
   const discoveredModels = decorateRuntimeModels(
     catalog.profileId,
-    Array.isArray(catalog.discoveredModels) ? catalog.discoveredModels : []
+    normalizePersistedDiscoveredModels(catalog.discoveredModels)
   );
   const selectedModelIds = normalizeSelectedModelIds(
     discoveredModels,
@@ -926,7 +912,7 @@ function loadLegacyPersistedState(): RuntimeModelDiscoveryState | null {
 
     const discoveredModels = decorateRuntimeModels(
       LEGACY_DEFAULT_PROVIDER_PROFILE_ID,
-      parsed.discoveredModels
+      normalizePersistedDiscoveredModels(parsed.discoveredModels)
     );
     const selectedModelIds = normalizeSelectedModelIds(
       discoveredModels,
@@ -967,6 +953,7 @@ class RuntimeModelDiscoveryStore {
   constructor() {
     this.catalogStates = this.loadCatalogStatesFromSettings();
     this.migrateLegacyCacheIfNeeded();
+    this.cleanupInvalidCatalogSeeds();
     this.syncRuntimeModelConfigs();
 
     providerCatalogsSettings.addListener(this.handleCatalogSettingsChange);
@@ -975,6 +962,35 @@ class RuntimeModelDiscoveryStore {
       'activePresetId',
       this.handleActivePresetIdChange
     );
+  }
+
+  private cleanupInvalidCatalogSeeds(): void {
+    let changed = false;
+    for (const [profileId, state] of this.catalogStates.entries()) {
+      if (
+        state.discoveredModels.length === 0 &&
+        state.selectedModelIds.length === 0
+      ) {
+        continue;
+      }
+      // 仅保留带有效来源签名的数据；历史内置模型种子通常没有签名/来源地址
+      if (state.signature || state.sourceBaseUrl) {
+        continue;
+      }
+      this.catalogStates.set(profileId, {
+        ...state,
+        status: 'idle',
+        discoveredModels: [],
+        selectedModelIds: [],
+        models: [],
+        error: null,
+      });
+      changed = true;
+    }
+
+    if (changed) {
+      void this.persistCatalogs();
+    }
   }
 
   private loadCatalogStatesFromSettings(): Map<
@@ -1155,10 +1171,7 @@ class RuntimeModelDiscoveryStore {
         ...state.models.filter((model) => model.type === type)
       );
     }
-    return sortModelsByDisplayPriority([
-      ...runtimeModels,
-      ...decorateStaticModels(getStaticModelsByType(type)),
-    ]);
+    return sortModelsByDisplayPriority(runtimeModels);
   }
 
   getPinnedSelectableModel(
@@ -1209,12 +1222,7 @@ class RuntimeModelDiscoveryStore {
         return null;
       }
 
-      return createPinnedRuntimeModel(profileId, modelId, type);
-    }
-
-    const staticMatch = getStaticModelConfig(modelId);
-    if (staticMatch && staticMatch.type === type) {
-      return decorateStaticModels([staticMatch])[0];
+      return null;
     }
 
     for (const state of this.catalogStates.values()) {
@@ -1239,8 +1247,7 @@ class RuntimeModelDiscoveryStore {
     type: ModelType
   ): ModelConfig[] {
     const state = this.getCatalogState(profileId);
-    const runtimeModels = state.models.filter((model) => model.type === type);
-    return mergeModels(getStaticModelsByType(type), runtimeModels);
+    return state.models.filter((model) => model.type === type);
   }
 
   invalidateIfConfigChanged(

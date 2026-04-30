@@ -138,7 +138,7 @@ export const withImagePlugin = (board: PlaitBoard) => {
         (async () => {
           try {
             const title = file.name.replace(/\.[^.]+$/, '');
-            await assetStorageService.initialize();
+            await assetStorageService.ensureReady();
             const asset = await assetStorageService.addAsset({
               type: AssetType.AUDIO,
               source: AssetSource.LOCAL,

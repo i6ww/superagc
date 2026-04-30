@@ -19,7 +19,7 @@ import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Copy, ExternalLink, Plus, Search, X } from 'lucide-react';
 import { MessagePlugin } from 'tdesign-react';
 import {
-  IMAGE_MODELS,
+  getModelsByType,
   getModelConfig,
   type ModelConfig,
   type ModelVendor,
@@ -187,7 +187,7 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
   onSelect,
   onSelectModel,
   language = 'zh',
-  models = IMAGE_MODELS,
+  models,
   placement = 'up',
   header,
   disabled = false,
@@ -199,6 +199,10 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
   providerProfilesOverride,
   showProviderAction = true,
 }) => {
+  const resolvedModels = useMemo(
+    () => models || getModelsByType('image'),
+    [models]
+  );
   const { setAppState } = useDrawnix();
   const { value: isOpen, setValue: setIsOpen } = useControllableState({
     controlledValue: controlledIsOpen,
@@ -231,9 +235,12 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
   const modelOrderMap = useMemo(
     () =>
       new Map(
-        models.map((model, index) => [model.selectionKey || model.id, index])
+        resolvedModels.map((model, index) => [
+          model.selectionKey || model.id,
+          index,
+        ])
       ),
-    [models]
+    [resolvedModels]
   );
 
   const getModelKey = useCallback(
@@ -251,8 +258,8 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
 
   // 三级分组：供应商 → 厂商分类 → 模型
   const providerGroups = useMemo(
-    () => groupModelsByProvider(models, effectiveProviderProfiles),
-    [models, effectiveProviderProfiles]
+    () => groupModelsByProvider(resolvedModels, effectiveProviderProfiles),
+    [resolvedModels, effectiveProviderProfiles]
   );
   const providerNameMap = useMemo(
     () =>
@@ -331,7 +338,7 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
 
   // 获取当前模型配置
   const currentModel =
-    models.find(
+    resolvedModels.find(
       (model) => getModelKey(model) === (selectedSelectionKey || selectedModel)
     ) || getModelConfig(selectedModel);
   const currentProfile = useMemo(
@@ -365,7 +372,7 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
     const query = searchQuery.trim();
     if (!query) return [];
 
-    return models
+    return resolvedModels
       .map((model) => {
         const score = Math.max(
           fuzzyScore(model.id, query),
@@ -385,7 +392,7 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
           fallbackOrderMap: modelOrderMap,
         })
       );
-  }, [getModelProviderName, models, searchQuery, modelOrderMap]);
+  }, [getModelProviderName, resolvedModels, searchQuery, modelOrderMap]);
 
   const filteredModelList = useMemo(
     () => filteredModels.map(({ model }) => model),
@@ -630,20 +637,20 @@ export const ModelDropdown: React.FC<ModelDropdownProps> = ({
 
   const getModelDocsUrl = useCallback(
     (modelId: string): string | undefined => {
-      const model = models.find((m) => m.id === modelId);
+      const model = resolvedModels.find((m) => m.id === modelId);
       return modelPricingService.getModelPrice(model?.sourceProfileId, modelId)?.docsUrl;
     },
-    [models]
+    [resolvedModels]
   );
 
   const getModelDescription = useCallback(
     (modelId: string): string | undefined => {
-      const model = models.find((m) => m.id === modelId);
+      const model = resolvedModels.find((m) => m.id === modelId);
       if (model?.description) return model.description;
       if (!model?.sourceProfileId) return undefined;
       return modelPricingService.getModelPrice(model.sourceProfileId, modelId)?.description;
     },
-    [models]
+    [resolvedModels]
   );
 
   const buildContextMenuItems = useCallback(
