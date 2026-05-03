@@ -33,11 +33,19 @@ RUN corepack enable \
     && corepack prepare pnpm@10.21.0 --activate \
     && pnpm install --frozen-lockfile
 
-# install 阶段会跑 nx postinstall，紧接着再跑 run-many 时，/tmp 或 .nx 中间态可能导致
-# “Failed to process project graph”（参见 Nx issue #27582 等）；安装完成后清一下再构建
+# install 阶段会跑 nx postinstall；清缓存减少异常中间态
 RUN rm -rf /tmp/* /builder/.nx 2>/dev/null || true
 
-RUN pnpm run build
+# 不执行 `nx run-many -t=build`：在部分 Docker 环境 Nx 项目图仍会失败。
+# 以下顺序与 `nx run web:build` 一致：先构建依赖库，再 web（tsc + 主包 + Service Worker）
+RUN node scripts/update-version.js \
+  && pnpm exec vite build --config packages/utils/vite.config.ts \
+  && pnpm exec vite build --config packages/react-text/vite.config.ts \
+  && pnpm exec vite build --config packages/react-board/vite.config.ts \
+  && pnpm exec vite build --config packages/drawnix/vite.config.ts \
+  && (cd apps/web && pnpm exec tsc -p tsconfig.app.json --noEmit) \
+  && (cd apps/web && pnpm exec vite build) \
+  && (cd apps/web && pnpm exec vite build -c vite.sw.config.ts)
 
 FROM lipanski/docker-static-website:2.4.0
 
