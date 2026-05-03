@@ -9,6 +9,19 @@ WORKDIR /builder
 
 COPY . /builder
 
+# 静态部署只需 Vite 工程推断；ESLint / Playwright 插件在部分容器环境里加载配置会拖垮项目图（无 --verbose 时仅显示泛型错误）
+RUN node <<'NODE'
+const fs = require('fs');
+const p = '/builder/nx.json';
+const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+j.plugins = (j.plugins || []).filter(
+  (pl) =>
+    pl.plugin !== '@nx/eslint/plugin' &&
+    pl.plugin !== '@nx/playwright/plugin'
+);
+fs.writeFileSync(p, JSON.stringify(j, null, 2) + '\n');
+NODE
+
 # pnpm 10+ skips dependency lifecycle scripts unless allowlisted (see package.json pnpm.onlyBuiltDependencies)
 # Docker / CI：关闭 daemon，避免图解析异常
 ENV NPM_TOKEN=""
