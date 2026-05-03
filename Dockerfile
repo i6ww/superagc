@@ -4,8 +4,11 @@ WORKDIR /builder
 
 COPY . /builder
 
+# pnpm 10+ skips dependency lifecycle scripts unless allowlisted (breaks Nx / esbuild without this)
+ENV NPM_TOKEN=""
+
 RUN corepack enable \
-    && corepack prepare pnpm@9 --activate \
+    && corepack prepare pnpm@10.21.0 --activate \
     && pnpm install --frozen-lockfile \
     && pnpm run build
 

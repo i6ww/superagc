@@ -173,5 +173,15 @@
     "vite-plugin-dts": "^4.5.3",
     "vitest": "^3.0.8",
     "wait-on": "^9.0.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@parcel/watcher",
+      "@swc/core",
+      "canvas",
+      "es5-ext",
+      "esbuild",
+      "nx"
+    ]
   }
 }
