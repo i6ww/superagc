@@ -28,6 +28,8 @@ ENV NPM_TOKEN=""
 ENV CI=true
 ENV NX_DAEMON=false
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+# drawnix / web 的 Vite 打包内存峰值高；默认 ~1–2GB 堆在容器里易 OOM
+ENV NODE_OPTIONS=--max-old-space-size=8192
 
 RUN corepack enable \
     && corepack prepare pnpm@10.21.0 --activate \
