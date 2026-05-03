@@ -30,6 +30,9 @@ try {
   );
 }
 
+/** Docker/小内存机器：跳过 dts 与降低并行，避免 Vite/Rollup 峰值内存触发 OOM killer（SIGKILL） */
+const dockerLowMemBuild = process.env.AITU_DOCKER_BUILD === '1';
+
 export default defineConfig({
   root: __dirname,
   cacheDir: '../../node_modules/.vite/packages/drawnix',
@@ -37,10 +40,14 @@ export default defineConfig({
   plugins: [
     react(),
     nxViteTsPaths(),
-    dts({
-      entryRoot: 'src',
-      tsconfigPath: path.join(__dirname, 'tsconfig.lib.json'),
-    }),
+    ...(dockerLowMemBuild
+      ? []
+      : [
+          dts({
+            entryRoot: 'src',
+            tsconfigPath: path.join(__dirname, 'tsconfig.lib.json'),
+          }),
+        ]),
   ],
 
   // Inject version number as environment variable
@@ -63,7 +70,7 @@ export default defineConfig({
   build: {
     outDir: '../../dist/drawnix',
     emptyOutDir: true,
-    reportCompressedSize: true,
+    reportCompressedSize: !dockerLowMemBuild,
     commonjsOptions: {
       transformMixedEsModules: true,
     },
@@ -79,6 +86,7 @@ export default defineConfig({
       formats: ['es', 'cjs'],
     },
     rollupOptions: {
+      ...(dockerLowMemBuild ? { maxParallelFileOps: 2 } : {}),
       // External packages that should not be bundled into your library.
       external: [
         'react',
