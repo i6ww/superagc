@@ -5,6 +5,8 @@ import dts from 'vite-plugin-dts';
 import * as path from 'path';
 import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 
+const dockerLowMemBuild = process.env.AITU_DOCKER_BUILD === '1';
+
 export default defineConfig({
   root: __dirname,
   cacheDir: '../../node_modules/.vite/packages/react-text',
@@ -12,10 +14,14 @@ export default defineConfig({
   plugins: [
     react(),
     nxViteTsPaths(),
-    dts({
-      entryRoot: 'src',
-      tsconfigPath: path.join(__dirname, 'tsconfig.lib.json'),
-    }),
+    ...(dockerLowMemBuild
+      ? []
+      : [
+          dts({
+            entryRoot: 'src',
+            tsconfigPath: path.join(__dirname, 'tsconfig.lib.json'),
+          }),
+        ]),
   ],
 
   // Uncomment this if you are using workers.
@@ -28,7 +34,8 @@ export default defineConfig({
   build: {
     outDir: '../../dist/react-text',
     emptyOutDir: true,
-    reportCompressedSize: true,
+    reportCompressedSize: !dockerLowMemBuild,
+    sourcemap: !dockerLowMemBuild,
     commonjsOptions: {
       transformMixedEsModules: true,
     },
@@ -37,11 +44,10 @@ export default defineConfig({
       entry: 'src/index.ts',
       name: 'react-text',
       fileName: 'index',
-      // Change this to the formats you want to support.
-      // Don't forget to update your package.json as well.
-      formats: ['es', 'cjs'],
+      formats: dockerLowMemBuild ? ['es'] : ['es', 'cjs'],
     },
     rollupOptions: {
+      ...(dockerLowMemBuild ? { maxParallelFileOps: 2 } : {}),
       // External packages that should not be bundled into your library.
       external: ['react', 'react-dom', 'react/jsx-runtime', 'slate', 'slate-react', 'slate-history', 'is-hotkey', '@plait/text-plugins', '@plait/common'],
     },

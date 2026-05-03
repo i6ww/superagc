@@ -28,9 +28,10 @@ ENV NPM_TOKEN=""
 ENV CI=true
 ENV NX_DAEMON=false
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-# drawnix / web 的 Vite 打包内存峰值高；默认 ~1–2GB 堆在容器里易 OOM
-ENV NODE_OPTIONS=--max-old-space-size=8192
-# packages/drawnix/vite.config.ts：跳过 vite-plugin-dts、压低并行，减轻宿主机 RAM 压力（避免 SIGKILL）
+# 小内存 VPS：8192 易与系统抢物理内存触发 OOM killer；可用 --build-arg NODE_MAX_OLD_SPACE_SIZE=6144 加大
+ARG NODE_MAX_OLD_SPACE_SIZE=3072
+ENV NODE_OPTIONS=--max-old-space-size=${NODE_MAX_OLD_SPACE_SIZE}
+# 各包 vite.config：跳过 dts、仅 ESM、关 sourcemap、压低并行（见 AITU_DOCKER_BUILD）
 ENV AITU_DOCKER_BUILD=1
 
 RUN corepack enable \

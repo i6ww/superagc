@@ -71,6 +71,7 @@ export default defineConfig({
     outDir: '../../dist/drawnix',
     emptyOutDir: true,
     reportCompressedSize: !dockerLowMemBuild,
+    sourcemap: !dockerLowMemBuild,
     commonjsOptions: {
       transformMixedEsModules: true,
     },
@@ -81,12 +82,11 @@ export default defineConfig({
       },
       name: 'drawnix',
       fileName: (format, entryName) => entryName,
-      // Change this to the formats you want to support.
-      // Don't forget to update your package.json as well.
-      formats: ['es', 'cjs'],
+      // Docker：只打 ESM，少一轮 CJS 打包以降内存；开发/发布再出双格式
+      formats: dockerLowMemBuild ? ['es'] : ['es', 'cjs'],
     },
     rollupOptions: {
-      ...(dockerLowMemBuild ? { maxParallelFileOps: 2 } : {}),
+      ...(dockerLowMemBuild ? { maxParallelFileOps: 1 } : {}),
       // External packages that should not be bundled into your library.
       external: [
         'react',
